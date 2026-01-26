@@ -106,8 +106,3 @@ Example `~/.claude/settings.json`:
 - Actions not available: your `notify-send`/notification daemon may not support `-A` or `--wait`; the script falls back to a plain notification (no jump).
 - No terminal window found: pass `--class`, `--classes`, or use `--no-activate`.
 - tmux server not running: start tmux or run the script from within an existing tmux session.
-
-## Open-source checklist (recommended)
-
-- Add a `LICENSE` file (MIT/Apache-2.0/GPL, etc.) before publishing.
-- Ensure you do not commit local configs (see `.gitignore`).
