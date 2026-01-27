@@ -110,5 +110,6 @@ Notes:
 
 - Actions not available: your `notify-send`/notification daemon may not support `-A` or `--wait`; the script falls back to a plain notification (no jump).
 - No terminal window found: pass `--class`, `--classes`, or use `--no-activate`.
+- Find the right terminal class: run `xprop | rg WM_CLASS` and click your terminal window; use the second string as the class (e.g. `org.wezfurlong.wezterm`).
 - Wayland session: terminal focusing is auto-disabled; use X11 if you need focus behavior.
 - tmux server not running: start tmux or run the script from within an existing tmux session.

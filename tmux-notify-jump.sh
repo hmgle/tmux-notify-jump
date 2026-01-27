@@ -2,8 +2,16 @@
 set -euo pipefail
 
 DEFAULT_TITLE="Task complete"
-DEFAULT_CLASS="${TMUX_NOTIFY_CLASS:-org.wezfurlong.wezterm}"
-DEFAULT_CLASS_LIST="${TMUX_NOTIFY_CLASSES:-org.wezfurlong.wezterm,Alacritty}"
+BUILTIN_DEFAULT_CLASS="org.wezfurlong.wezterm"
+BUILTIN_DEFAULT_CLASS_LIST="org.wezfurlong.wezterm,Alacritty"
+DEFAULT_CLASS="${TMUX_NOTIFY_CLASS:-$BUILTIN_DEFAULT_CLASS}"
+if [ -n "${TMUX_NOTIFY_CLASSES:-}" ]; then
+    DEFAULT_CLASS_LIST="$TMUX_NOTIFY_CLASSES"
+elif [ -n "${TMUX_NOTIFY_CLASS:-}" ]; then
+    DEFAULT_CLASS_LIST="$TMUX_NOTIFY_CLASS"
+else
+    DEFAULT_CLASS_LIST="$BUILTIN_DEFAULT_CLASS_LIST"
+fi
 APP_NAME="tmux"
 URGENCY="normal"
 DEFAULT_TIMEOUT="${TMUX_NOTIFY_TIMEOUT:-10000}"
@@ -105,6 +113,13 @@ else:
     printf '%s' "$text"
 }
 
+trim_ws() {
+    local s="$1"
+    s="${s#"${s%%[![:space:]]*}"}"
+    s="${s%"${s##*[![:space:]]}"}"
+    printf '%s' "$s"
+}
+
 require_tool() {
     local tool="$1"
     command -v "$tool" >/dev/null 2>&1 || die "Missing dependency: $tool"
@@ -201,10 +216,11 @@ send_notification() {
         -A "dismiss=$ACTION_DISMISS_LABEL" \
         -u "$URGENCY" \
         -a "$APP_NAME" \
+        "${timeout_args[@]}" \
+        --wait \
         "$TITLE" \
         "$BODY" \
-        "${timeout_args[@]}" \
-        --wait 2>"$stderr_redirect")
+        2>"$stderr_redirect")
     local status=$?
     local err=""
     if [ -n "$errfile" ]; then
@@ -232,7 +248,7 @@ send_notification() {
     warn "notify-send failed: $err"
     warn "Notification actions unavailable; falling back to plain notification"
     set +e
-    notify-send -u "$URGENCY" -a "$APP_NAME" "$TITLE" "$BODY" "${timeout_args[@]}" 2>/dev/null
+    notify-send -u "$URGENCY" -a "$APP_NAME" "${timeout_args[@]}" "$TITLE" "$BODY" 2>/dev/null
     local fallback_status=$?
     set -e
     if [ $fallback_status -ne 0 ]; then
@@ -264,9 +280,15 @@ activate_terminal() {
     local class_item
     IFS=',' read -r -a class_array <<< "$class_list"
     for class_item in "${class_array[@]}"; do
-        class_item="$(echo "$class_item" | xargs)"
+        class_item="$(trim_ws "$class_item")"
         [ -n "$class_item" ] || continue
-        wid=$(xdotool search --class "$class_item" 2>/dev/null | head -1 || true)
+        local ids=""
+        ids="$(xdotool search --class "$class_item" 2>/dev/null || true)"
+        if IFS= read -r wid <<<"$ids"; then
+            :
+        else
+            wid=""
+        fi
         if [ -n "$wid" ]; then
             break
         fi
@@ -424,11 +446,7 @@ parse_target "$TARGET"
 validate_target_exists
 
 if [ "$DETACH" -eq 1 ]; then
-    if [ "$QUIET" -eq 1 ]; then
-        (handle_action) >/dev/null 2>&1 &
-    else
-        (handle_action) >/dev/null &
-    fi
+    (handle_action) >/dev/null 2>&1 &
     exit 0
 fi
 
