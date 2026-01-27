@@ -110,10 +110,23 @@ require_tool() {
     command -v "$tool" >/dev/null 2>&1 || die "Missing dependency: $tool"
 }
 
+is_wayland_session() {
+    if [ -n "${XDG_SESSION_TYPE:-}" ]; then
+        [ "$XDG_SESSION_TYPE" = "wayland" ]
+        return
+    fi
+    [ -n "${WAYLAND_DISPLAY:-}" ]
+}
+
 require_tools() {
     require_tool tmux
     require_tool notify-send
     if [ "$NO_ACTIVATE" -eq 0 ]; then
+        if is_wayland_session; then
+            warn "Wayland session detected; terminal focusing is disabled"
+            NO_ACTIVATE=1
+            return
+        fi
         if ! command -v xdotool >/dev/null 2>&1; then
             warn "Missing xdotool; terminal focusing is disabled"
             NO_ACTIVATE=1
@@ -393,11 +406,8 @@ fi
 TITLE="$(truncate_text "$MAX_TITLE" "$TITLE")"
 BODY="$(truncate_text "$MAX_BODY" "$BODY")"
 
-require_tools
-parse_target "$TARGET"
-validate_target_exists
-
 if [ "$DRY_RUN" -eq 1 ]; then
+    parse_target "$TARGET"
     log "Target: $SESSION:$WINDOW.$PANE"
     log "Title: $TITLE"
     log "Body: $BODY"
@@ -408,6 +418,10 @@ if [ "$DRY_RUN" -eq 1 ]; then
     log "Max body length: $MAX_BODY"
     exit 0
 fi
+
+require_tools
+parse_target "$TARGET"
+validate_target_exists
 
 if [ "$DETACH" -eq 1 ]; then
     if [ "$QUIET" -eq 1 ]; then

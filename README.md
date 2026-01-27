@@ -75,6 +75,7 @@ Notes:
 
 - Run Codex inside tmux so `TMUX_PANE` is available.
 - Set `--detach` (already enabled by the wrapper) to avoid blocking on `notify-send --wait`.
+- The wrapper sets `--timeout 0` by default (via `CODEX_NOTIFY_TIMEOUT_MS`) so the notification stays until you click an action (daemon-dependent).
 - Requires `jq`.
 
 ## Claude Code integration
@@ -101,8 +102,13 @@ Example `~/.claude/settings.json`:
 }
 ```
 
+Notes:
+
+- The wrapper sets `--timeout 0` by default (via `CLAUDE_NOTIFY_TIMEOUT_MS`) so the notification stays until you click an action (daemon-dependent).
+
 ## Troubleshooting
 
 - Actions not available: your `notify-send`/notification daemon may not support `-A` or `--wait`; the script falls back to a plain notification (no jump).
 - No terminal window found: pass `--class`, `--classes`, or use `--no-activate`.
+- Wayland session: terminal focusing is auto-disabled; use X11 if you need focus behavior.
 - tmux server not running: start tmux or run the script from within an existing tmux session.
