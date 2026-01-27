@@ -35,6 +35,7 @@ MAX_TITLE="$DEFAULT_MAX_TITLE"
 MAX_BODY="$DEFAULT_MAX_BODY"
 DETACH=0
 SENDER_CLIENT_PID=""
+SENDER_CLIENT_TTY=""
 
 print_usage() {
     cat <<EOF
@@ -201,6 +202,90 @@ get_sender_tmux_client_pid() {
     return 1
 }
 
+get_sender_tmux_client_tty() {
+    if [ -z "${TMUX:-}" ]; then
+        return 1
+    fi
+
+    if [ -n "${TMUX_PANE:-}" ]; then
+        local output=""
+        output="$(tmux list-clients -F "#{client_tty} #{client_pane}" 2>/dev/null || true)"
+        local line=""
+        while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            local tty="${line%% *}"
+            local pane="${line#* }"
+            if [ "$pane" = "$TMUX_PANE" ] && [ -n "$tty" ]; then
+                printf '%s' "$tty"
+                return 0
+            fi
+        done <<<"$output"
+    fi
+
+    local tty=""
+    tty="$(tmux display-message -p '#{client_tty}' 2>/dev/null || true)"
+    if [ -n "$tty" ]; then
+        printf '%s' "$tty"
+        return 0
+    fi
+
+    local current_session=""
+    current_session="$(get_current_tmux_session 2>/dev/null || true)"
+
+    local best_tty=""
+    local best_activity=0
+    local output=""
+    output="$(tmux list-clients -F "#{client_activity} #{client_tty} #{client_session}" 2>/dev/null || true)"
+    local line=""
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        local activity="${line%% *}"
+        local rest="${line#* }"
+        local tty="${rest%% *}"
+        local session="${rest#* }"
+
+        if ! is_integer "$activity"; then
+            continue
+        fi
+        if [ -n "$current_session" ] && [ "$session" != "$current_session" ]; then
+            continue
+        fi
+
+        if [ "$activity" -gt "$best_activity" ] && [ -n "$tty" ]; then
+            best_activity="$activity"
+            best_tty="$tty"
+        fi
+    done <<<"$output"
+
+    if [ -n "$best_tty" ]; then
+        printf '%s' "$best_tty"
+        return 0
+    fi
+    return 1
+}
+
+get_tmux_client_pid_by_tty() {
+    local tty="${1:-}"
+    [ -n "$tty" ] || return 1
+    if [ -z "${TMUX:-}" ]; then
+        return 1
+    fi
+
+    local output=""
+    output="$(tmux list-clients -F "#{client_tty} #{client_pid}" 2>/dev/null || true)"
+    local line=""
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        local client_tty="${line%% *}"
+        local pid="${line#* }"
+        if [ "$client_tty" = "$tty" ] && is_integer "$pid"; then
+            printf '%s' "$pid"
+            return 0
+        fi
+    done <<<"$output"
+    return 1
+}
+
 find_window_id_by_pid_tree() {
     local pid="${1:-}"
     if ! is_integer "$pid"; then
@@ -351,6 +436,14 @@ send_notification() {
 }
 
 handle_action() {
+    if [ -z "$SENDER_CLIENT_TTY" ]; then
+        SENDER_CLIENT_TTY="$(get_sender_tmux_client_tty 2>/dev/null || true)"
+    fi
+    if [ -z "$SENDER_CLIENT_PID" ]; then
+        if [ -n "$SENDER_CLIENT_TTY" ]; then
+            SENDER_CLIENT_PID="$(get_tmux_client_pid_by_tty "$SENDER_CLIENT_TTY" 2>/dev/null || true)"
+        fi
+    fi
     if [ -z "$SENDER_CLIENT_PID" ]; then
         SENDER_CLIENT_PID="$(get_sender_tmux_client_pid 2>/dev/null || true)"
     fi
@@ -418,11 +511,18 @@ activate_terminal() {
 }
 
 jump_to_pane() {
-    if ! tmux switch-client -t "$SESSION" 2>/dev/null; then
-        warn "Failed to switch client; trying to select window directly"
+    local switch_args=()
+    if [ -n "$SENDER_CLIENT_TTY" ]; then
+        switch_args=(-c "$SENDER_CLIENT_TTY")
     fi
-    tmux select-window -t "$SESSION:$WINDOW" 2>/dev/null || die "Failed to select window"
-    tmux select-pane -t "$SESSION:$WINDOW.$PANE" 2>/dev/null || die "Failed to select pane"
+
+    if ! tmux switch-client "${switch_args[@]}" -t "$SESSION" ';' \
+        select-window -t "$SESSION:$WINDOW" ';' \
+        select-pane -t "$SESSION:$WINDOW.$PANE" 2>/dev/null; then
+        warn "Failed to switch tmux client; selecting target window and pane only"
+        tmux select-window -t "$SESSION:$WINDOW" 2>/dev/null || die "Failed to select window"
+        tmux select-pane -t "$SESSION:$WINDOW.$PANE" 2>/dev/null || die "Failed to select pane"
+    fi
     log "Jumped to $SESSION:$WINDOW.$PANE"
 }
 
