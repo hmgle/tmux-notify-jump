@@ -208,8 +208,8 @@ get_sender_tmux_client_tty() {
     fi
 
     if [ -n "${TMUX_PANE:-}" ]; then
-        local output=""
-        output="$(tmux list-clients -F "#{client_tty} #{client_pane}" 2>/dev/null || true)"
+        local clients_by_pane=""
+        clients_by_pane="$(tmux list-clients -F "#{client_tty} #{client_pane}" 2>/dev/null || true)"
         local line=""
         while IFS= read -r line; do
             [ -n "$line" ] || continue
@@ -219,7 +219,7 @@ get_sender_tmux_client_tty() {
                 printf '%s' "$tty"
                 return 0
             fi
-        done <<<"$output"
+        done <<<"$clients_by_pane"
     fi
 
     local tty=""
@@ -234,8 +234,8 @@ get_sender_tmux_client_tty() {
 
     local best_tty=""
     local best_activity=0
-    local output=""
-    output="$(tmux list-clients -F "#{client_activity} #{client_tty} #{client_session}" 2>/dev/null || true)"
+    local clients_by_activity=""
+    clients_by_activity="$(tmux list-clients -F "#{client_activity} #{client_tty} #{client_session}" 2>/dev/null || true)"
     local line=""
     while IFS= read -r line; do
         [ -n "$line" ] || continue
@@ -255,7 +255,7 @@ get_sender_tmux_client_tty() {
             best_activity="$activity"
             best_tty="$tty"
         fi
-    done <<<"$output"
+    done <<<"$clients_by_activity"
 
     if [ -n "$best_tty" ]; then
         printf '%s' "$best_tty"
