@@ -44,6 +44,7 @@ Common options:
 - `--timeout <ms>`: notification timeout in milliseconds (default: `10000`; `0` may be sticky depending on daemon)
 - `--detach`: run in background (recommended for hook/callback use)
 - `--dry-run`: print what would happen and exit
+- `--wrap-cols <n>`: wrap body text to `<n>` columns (default: `80`; `0` disables wrapping)
 
 ## Environment variables
 
@@ -51,6 +52,7 @@ Common options:
 - `TMUX_NOTIFY_CLASS` / `TMUX_NOTIFY_CLASSES`: terminal window class(es) used by `xdotool search --class`
 - `TMUX_NOTIFY_TIMEOUT`: default notification timeout in ms
 - `TMUX_NOTIFY_MAX_TITLE` / `TMUX_NOTIFY_MAX_BODY`: truncate limits (`0` = no truncation)
+- `TMUX_NOTIFY_WRAP_COLS`: wrap body text to this many columns (`0` = no wrapping)
 - `TMUX_NOTIFY_ACTION_GOTO_LABEL`: label for the "goto" action (default: `Jump`)
 - `TMUX_NOTIFY_ACTION_DISMISS_LABEL`: label for the "dismiss" action (default: `Dismiss`)
 

@@ -17,6 +17,7 @@ URGENCY="normal"
 DEFAULT_TIMEOUT="${TMUX_NOTIFY_TIMEOUT:-10000}"
 DEFAULT_MAX_TITLE="${TMUX_NOTIFY_MAX_TITLE:-80}"
 DEFAULT_MAX_BODY="${TMUX_NOTIFY_MAX_BODY:-200}"
+DEFAULT_WRAP_COLS="${TMUX_NOTIFY_WRAP_COLS:-80}"
 ACTION_GOTO_LABEL="${TMUX_NOTIFY_ACTION_GOTO_LABEL:-Jump}"
 ACTION_DISMISS_LABEL="${TMUX_NOTIFY_ACTION_DISMISS_LABEL:-Dismiss}"
 FOCUS_WINDOW_ID="${TMUX_NOTIFY_WINDOW_ID:-}"
@@ -33,6 +34,7 @@ QUIET=0
 TIMEOUT="$DEFAULT_TIMEOUT"
 MAX_TITLE="$DEFAULT_MAX_TITLE"
 MAX_BODY="$DEFAULT_MAX_BODY"
+WRAP_COLS="$DEFAULT_WRAP_COLS"
 DETACH=0
 SENDER_CLIENT_PID=""
 SENDER_CLIENT_TTY=""
@@ -53,6 +55,7 @@ Options:
   --timeout <ms>       Notification timeout in ms (default 10000; 0 may mean "sticky" depending on daemon)
   --max-title <n>      Max title length (0 = no truncation)
   --max-body <n>       Max body length (0 = no truncation)
+  --wrap-cols <n>      Wrap body text to <n> columns (default: $DEFAULT_WRAP_COLS; 0 = no wrapping)
   --detach             Detach and return immediately (handles click in background)
   -h, --help           Show help
 
@@ -113,6 +116,88 @@ else:
         printf '%s…' "${text:0:max}"
         return
     fi
+    printf '%s' "$text"
+}
+
+wrap_text() {
+    local cols="$1"
+    local text="$2"
+
+    if [ "$cols" -le 0 ]; then
+        printf '%s' "$text"
+        return
+    fi
+
+    if command -v python3 >/dev/null 2>&1; then
+        local out=""
+        set +e
+        out="$(printf '%s' "$text" | python3 -c 'import sys, unicodedata
+cols = int(sys.argv[1])
+text = sys.stdin.read()
+
+def ch_width(ch: str) -> int:
+    if not ch:
+        return 0
+    if unicodedata.combining(ch):
+        return 0
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+
+def wrap_line(line: str):
+    if cols <= 0:
+        return [line]
+    if line == "":
+        return [""]
+    res = []
+    i = 0
+    n = len(line)
+    while i < n:
+        w = 0
+        last_space = -1
+        j = i
+        while j < n:
+            ch = line[j]
+            if ch.isspace():
+                last_space = j
+            w += ch_width(ch)
+            if w > cols:
+                break
+            j += 1
+
+        if j >= n:
+            res.append(line[i:n].rstrip())
+            break
+
+        if last_space >= i and last_space < j:
+            res.append(line[i:last_space].rstrip())
+            i = last_space
+            while i < n and line[i].isspace():
+                i += 1
+        else:
+            if j == i:
+                j = i + 1
+            res.append(line[i:j].rstrip())
+            i = j
+
+    return res
+
+out_lines = []
+for line in text.split("\\n"):
+    out_lines.extend(wrap_line(line))
+sys.stdout.write("\\n".join(out_lines))
+' "$cols")"
+        local status=$?
+        set -e
+        if [ $status -eq 0 ]; then
+            printf '%s' "$out"
+            return
+        fi
+    fi
+
+    if command -v fold >/dev/null 2>&1; then
+        printf '%s' "$text" | fold -s -w "$cols"
+        return
+    fi
+
     printf '%s' "$text"
 }
 
@@ -583,6 +668,11 @@ parse_args() {
                 [ $# -gt 0 ] || die "--max-body requires an argument"
                 MAX_BODY="$1"
                 ;;
+            --wrap-cols)
+                shift
+                [ $# -gt 0 ] || die "--wrap-cols requires an argument"
+                WRAP_COLS="$1"
+                ;;
             --detach)
                 DETACH=1
                 ;;
@@ -641,9 +731,13 @@ fi
 if ! [[ "$MAX_BODY" =~ ^[0-9]+$ ]]; then
     die "--max-body must be a non-negative integer"
 fi
+if ! [[ "$WRAP_COLS" =~ ^[0-9]+$ ]]; then
+    die "--wrap-cols must be a non-negative integer"
+fi
 
 TITLE="$(truncate_text "$MAX_TITLE" "$TITLE")"
 BODY="$(truncate_text "$MAX_BODY" "$BODY")"
+BODY="$(wrap_text "$WRAP_COLS" "$BODY")"
 
 if [ "$DRY_RUN" -eq 1 ]; then
     parse_target "$TARGET"
@@ -661,6 +755,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
     log "Timeout: ${TIMEOUT:-default}"
     log "Max title length: $MAX_TITLE"
     log "Max body length: $MAX_BODY"
+    log "Wrap columns: $WRAP_COLS"
     exit 0
 fi
 
