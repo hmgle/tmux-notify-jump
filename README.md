@@ -5,6 +5,7 @@ Send a desktop notification on Linux/X11 and jump to a target tmux pane when you
 This repo contains:
 
 - `tmux-notify-jump.sh`: main entry point (send notification + jump on click)
+- `tmux-notify-jump-macos.sh`: macOS entry point (terminal-notifier + osascript)
 - `notify-tmux.sh`: Codex CLI wrapper (reads JSON from `$1`)
 - `notify-claude.sh`: Claude Code wrapper (reads JSON from stdin)
 
@@ -13,8 +14,12 @@ This repo contains:
 ### Runtime
 
 - Linux + X11 (Wayland is not supported by the focusing path)
-- `tmux`
-- `notify-send` (libnotify) with action support (`notify-send -A ... --wait`)
+  - `tmux`
+  - `notify-send` (libnotify) with action support (`notify-send -A ... --wait`)
+- macOS
+  - `tmux`
+  - `terminal-notifier`
+  - `osascript` (built-in)
 
 ### Optional
 
@@ -34,6 +39,10 @@ chmod +x tmux-notify-jump.sh notify-tmux.sh notify-claude.sh
 ./tmux-notify-jump.sh <session>:<window>.<pane> [title] [body]
 ./tmux-notify-jump.sh --target <session:window.pane> [--title <title>] [--body <body>]
 ./tmux-notify-jump.sh --list
+
+./tmux-notify-jump-macos.sh <session>:<window>.<pane> [title] [body]
+./tmux-notify-jump-macos.sh --target <session:window.pane> [--title <title>] [--body <body>]
+./tmux-notify-jump-macos.sh --list
 ```
 
 Common options:
@@ -49,6 +58,7 @@ Common options:
 
 - `TMUX_NOTIFY_WINDOW_ID`: explicit X11 window id to focus (overrides auto-detection)
 - `TMUX_NOTIFY_CLASS` / `TMUX_NOTIFY_CLASSES`: terminal window class(es) used by `xdotool search --class`
+- `TMUX_NOTIFY_BUNDLE_ID` / `TMUX_NOTIFY_BUNDLE_IDS`: macOS terminal bundle id(s) for `osascript` activation
 - `TMUX_NOTIFY_TIMEOUT`: default notification timeout in ms
 - `TMUX_NOTIFY_MAX_TITLE` / `TMUX_NOTIFY_MAX_BODY`: truncate limits (`0` = no truncation)
 - `TMUX_NOTIFY_ACTION_GOTO_LABEL`: label for the "goto" action (default: `Jump`)
@@ -60,6 +70,10 @@ Common options:
 ./tmux-notify-jump.sh "2:1.0" "Build finished" "Click to jump to the pane"
 ./tmux-notify-jump.sh --target "work:0.1" --no-activate
 ./tmux-notify-jump.sh --target "work:0.1" --classes "org.wezfurlong.wezterm,Alacritty"
+
+./tmux-notify-jump-macos.sh "2:1.0" "Build finished" "Click to jump to the pane"
+./tmux-notify-jump-macos.sh --target "work:0.1" --no-activate
+./tmux-notify-jump-macos.sh --target "work:0.1" --bundle-ids "com.github.wez.wezterm,com.googlecode.iterm2"
 ```
 
 ## Codex CLI integration
@@ -78,6 +92,7 @@ Notes:
 - Set `--detach` (already enabled by the wrapper) to avoid blocking on `notify-send --wait`.
 - The wrapper sets `--timeout 0` by default (via `CODEX_NOTIFY_TIMEOUT_MS`) so the notification stays until you click an action (daemon-dependent).
 - Requires `jq`.
+- On macOS, set `TMUX_NOTIFY_JUMP_SH` to `tmux-notify-jump-macos.sh`.
 
 ## Claude Code integration
 
@@ -106,6 +121,7 @@ Example `~/.claude/settings.json`:
 Notes:
 
 - The wrapper sets `--timeout 0` by default (via `CLAUDE_NOTIFY_TIMEOUT_MS`) so the notification stays until you click an action (daemon-dependent).
+- On macOS, set `TMUX_NOTIFY_JUMP_SH` to `tmux-notify-jump-macos.sh`.
 
 ## Troubleshooting
 
