@@ -19,6 +19,7 @@ DEFAULT_MAX_TITLE="${TMUX_NOTIFY_MAX_TITLE:-80}"
 DEFAULT_MAX_BODY="${TMUX_NOTIFY_MAX_BODY:-200}"
 ACTION_GOTO_LABEL="${TMUX_NOTIFY_ACTION_GOTO_LABEL:-Jump}"
 ACTION_DISMISS_LABEL="${TMUX_NOTIFY_ACTION_DISMISS_LABEL:-Dismiss}"
+FOCUS_WINDOW_ID="${TMUX_NOTIFY_WINDOW_ID:-}"
 
 TARGET=""
 TITLE=""
@@ -33,6 +34,7 @@ TIMEOUT="$DEFAULT_TIMEOUT"
 MAX_TITLE="$DEFAULT_MAX_TITLE"
 MAX_BODY="$DEFAULT_MAX_BODY"
 DETACH=0
+SENDER_CLIENT_PID=""
 
 print_usage() {
     cat <<EOF
@@ -125,12 +127,103 @@ require_tool() {
     command -v "$tool" >/dev/null 2>&1 || die "Missing dependency: $tool"
 }
 
+is_integer() {
+    local s="${1:-}"
+    [[ "$s" =~ ^[0-9]+$ ]]
+}
+
 is_wayland_session() {
     if [ -n "${XDG_SESSION_TYPE:-}" ]; then
         [ "$XDG_SESSION_TYPE" = "wayland" ]
         return
     fi
     [ -n "${WAYLAND_DISPLAY:-}" ]
+}
+
+get_current_tmux_session() {
+    if [ -z "${TMUX:-}" ]; then
+        return 1
+    fi
+    local session=""
+    if [ -n "${TMUX_PANE:-}" ]; then
+        session="$(tmux display-message -p -t "$TMUX_PANE" '#S' 2>/dev/null || true)"
+    fi
+    if [ -z "$session" ]; then
+        session="$(tmux display-message -p '#S' 2>/dev/null || true)"
+    fi
+    if [ -n "$session" ]; then
+        printf '%s' "$session"
+        return 0
+    fi
+    return 1
+}
+
+get_sender_tmux_client_pid() {
+    if [ -z "${TMUX:-}" ]; then
+        return 1
+    fi
+
+    local current_session=""
+    current_session="$(get_current_tmux_session 2>/dev/null || true)"
+
+    local best_pid=""
+    local best_activity=0
+    local output=""
+    output="$(tmux list-clients -F "#{client_activity} #{client_pid} #{client_session}" 2>/dev/null || true)"
+    local line=""
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        local activity="${line%% *}"
+        local rest="${line#* }"
+        local pid="${rest%% *}"
+        local session="${rest#* }"
+
+        if ! is_integer "$activity"; then
+            continue
+        fi
+        if ! is_integer "$pid"; then
+            continue
+        fi
+        if [ -n "$current_session" ] && [ "$session" != "$current_session" ]; then
+            continue
+        fi
+
+        if [ "$activity" -gt "$best_activity" ]; then
+            best_activity="$activity"
+            best_pid="$pid"
+        fi
+    done <<<"$output"
+
+    if is_integer "$best_pid"; then
+        printf '%s' "$best_pid"
+        return 0
+    fi
+    return 1
+}
+
+find_window_id_by_pid_tree() {
+    local pid="${1:-}"
+    if ! is_integer "$pid"; then
+        return 1
+    fi
+
+    local current_pid="$pid"
+    local depth=0
+    while is_integer "$current_pid" && [ "$current_pid" -gt 1 ] && [ "$depth" -lt 50 ]; do
+        local ids=""
+        ids="$(xdotool search --onlyvisible --pid "$current_pid" 2>/dev/null || true)"
+        local wid=""
+        if IFS= read -r wid <<<"$ids"; then
+            if is_integer "$wid"; then
+                printf '%s' "$wid"
+                return 0
+            fi
+        fi
+
+        current_pid="$(ps -o ppid= -p "$current_pid" 2>/dev/null | tr -d ' ' || true)"
+        depth=$((depth + 1))
+    done
+    return 1
 }
 
 require_tools() {
@@ -258,6 +351,10 @@ send_notification() {
 }
 
 handle_action() {
+    if [ -z "$SENDER_CLIENT_PID" ]; then
+        SENDER_CLIENT_PID="$(get_sender_tmux_client_pid 2>/dev/null || true)"
+    fi
+
     local action
     action="$(send_notification)"
 
@@ -275,26 +372,46 @@ activate_terminal() {
     if [ "$NO_ACTIVATE" -eq 1 ]; then
         return
     fi
+
     local wid
-    local class_list="${WINDOW_CLASS_LIST:-$WINDOW_CLASS}"
-    local class_item
-    IFS=',' read -r -a class_array <<< "$class_list"
-    for class_item in "${class_array[@]}"; do
-        class_item="$(trim_ws "$class_item")"
-        [ -n "$class_item" ] || continue
-        local ids=""
-        ids="$(xdotool search --class "$class_item" 2>/dev/null || true)"
-        if IFS= read -r wid <<<"$ids"; then
-            :
-        else
-            wid=""
-        fi
-        if [ -n "$wid" ]; then
-            break
-        fi
-    done
+    wid=""
+
+    if is_integer "$FOCUS_WINDOW_ID"; then
+        wid="$FOCUS_WINDOW_ID"
+    fi
+
     if [ -z "$wid" ]; then
-        warn "No terminal window found for class(es): $class_list"
+        if is_integer "$SENDER_CLIENT_PID"; then
+            wid="$(find_window_id_by_pid_tree "$SENDER_CLIENT_PID" 2>/dev/null || true)"
+        fi
+    fi
+
+    if [ -z "$wid" ] && is_integer "${WINDOWID:-}"; then
+        wid="$WINDOWID"
+    fi
+
+    if [ -z "$wid" ]; then
+        local class_list="${WINDOW_CLASS_LIST:-$WINDOW_CLASS}"
+        local class_item
+        IFS=',' read -r -a class_array <<< "$class_list"
+        for class_item in "${class_array[@]}"; do
+            class_item="$(trim_ws "$class_item")"
+            [ -n "$class_item" ] || continue
+            local ids=""
+            ids="$(xdotool search --class "$class_item" 2>/dev/null || true)"
+            if IFS= read -r wid <<<"$ids"; then
+                :
+            else
+                wid=""
+            fi
+            if [ -n "$wid" ]; then
+                break
+            fi
+        done
+    fi
+
+    if [ -z "$wid" ]; then
+        warn "No terminal window found to focus (try TMUX_NOTIFY_WINDOW_ID, --class/--classes, or --no-activate)"
         return
     fi
     xdotool windowactivate "$wid" 2>/dev/null || warn "Failed to activate terminal window"
@@ -434,6 +551,12 @@ if [ "$DRY_RUN" -eq 1 ]; then
     log "Title: $TITLE"
     log "Body: $BODY"
     log "Window classes: ${WINDOW_CLASS_LIST:-$WINDOW_CLASS}"
+    if is_integer "$FOCUS_WINDOW_ID"; then
+        log "Focus window id: $FOCUS_WINDOW_ID"
+    fi
+    if is_integer "$SENDER_CLIENT_PID"; then
+        log "Sender tmux client pid: $SENDER_CLIENT_PID"
+    fi
     log "Focus terminal: $([ "$NO_ACTIVATE" -eq 1 ] && echo "no" || echo "yes")"
     log "Timeout: ${TIMEOUT:-default}"
     log "Max title length: $MAX_TITLE"

@@ -40,13 +40,14 @@ Common options:
 
 - `--list`: list available panes (`*` means active)
 - `--no-activate`: do not focus terminal window
-- `--class <CLASS>` / `--classes <A,B>`: terminal window class(es) to focus (default: `org.wezfurlong.wezterm,Alacritty`)
+- `--class <CLASS>` / `--classes <A,B>`: fallback terminal window class(es) to focus (default: `org.wezfurlong.wezterm,Alacritty`)
 - `--timeout <ms>`: notification timeout in milliseconds (default: `10000`; `0` may be sticky depending on daemon)
 - `--detach`: run in background (recommended for hook/callback use)
 - `--dry-run`: print what would happen and exit
 
 ## Environment variables
 
+- `TMUX_NOTIFY_WINDOW_ID`: explicit X11 window id to focus (overrides auto-detection)
 - `TMUX_NOTIFY_CLASS` / `TMUX_NOTIFY_CLASSES`: terminal window class(es) used by `xdotool search --class`
 - `TMUX_NOTIFY_TIMEOUT`: default notification timeout in ms
 - `TMUX_NOTIFY_MAX_TITLE` / `TMUX_NOTIFY_MAX_BODY`: truncate limits (`0` = no truncation)
@@ -109,7 +110,8 @@ Notes:
 ## Troubleshooting
 
 - Actions not available: your `notify-send`/notification daemon may not support `-A` or `--wait`; the script falls back to a plain notification (no jump).
-- No terminal window found: pass `--class`, `--classes`, or use `--no-activate`.
+- Focus goes to the wrong terminal: the script focuses the terminal hosting the tmux client that triggered the notification (captured when sending); if that fails, set `TMUX_NOTIFY_WINDOW_ID` or pass `--class/--classes` (or use `--no-activate`).
+- No terminal window found: set `TMUX_NOTIFY_WINDOW_ID`, pass `--class/--classes`, or use `--no-activate`.
 - Find the right terminal class: run `xprop | rg WM_CLASS` and click your terminal window; use the second string as the class (e.g. `org.wezfurlong.wezterm`).
 - Wayland session: terminal focusing is auto-disabled; use X11 if you need focus behavior.
 - tmux server not running: start tmux or run the script from within an existing tmux session.
