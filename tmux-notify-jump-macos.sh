@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Notification click callbacks may run with a restricted GUI PATH.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 DEFAULT_TITLE="Task complete"
 APP_NAME="tmux"
 DEFAULT_TIMEOUT="${TMUX_NOTIFY_TIMEOUT:-10000}"
@@ -36,6 +39,14 @@ SENDER_CLIENT_PID=""
 SENDER_CLIENT_TTY=""
 ACTION_CALLBACK=0
 ACTION_LABEL=""
+TMUX_SOCKET=""
+
+# Callback-specific variables (passed via --cb-* args from -execute)
+CB_TARGET=""
+CB_SENDER_TTY=""
+CB_NO_ACTIVATE=""
+CB_TMUX_SOCKET=""
+CB_BUNDLE_IDS=""
 
 print_usage() {
     cat <<EOF
@@ -286,6 +297,22 @@ require_tools() {
     fi
 }
 
+get_tmux_socket_from_env() {
+    if [ -n "${TMUX:-}" ]; then
+        printf '%s' "${TMUX%%,*}"
+        return 0
+    fi
+    return 1
+}
+
+tmux_cmd() {
+    if [ -n "${TMUX_SOCKET:-}" ]; then
+        tmux -S "$TMUX_SOCKET" "$@"
+    else
+        tmux "$@"
+    fi
+}
+
 check_tmux_server() {
     tmux list-sessions >/dev/null 2>&1 || die "tmux server is not running"
 }
@@ -380,22 +407,15 @@ send_notification_execute() {
     self_path="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
     local exec_cmd
     exec_cmd="$(printf '%q' "$self_path") --action-callback"
-
-    export TMUX_NOTIFY_CALLBACK_TARGET="$TARGET"
-    export TMUX_NOTIFY_CALLBACK_TITLE="$TITLE"
-    export TMUX_NOTIFY_CALLBACK_BODY="$BODY"
-    export TMUX_NOTIFY_CALLBACK_SENDER_TTY="$SENDER_CLIENT_TTY"
-    export TMUX_NOTIFY_CALLBACK_SENDER_PID="$SENDER_CLIENT_PID"
-    export TMUX_NOTIFY_CALLBACK_NO_ACTIVATE="$NO_ACTIVATE"
-    export TMUX_NOTIFY_CALLBACK_BUNDLE_IDS="$BUNDLE_ID_LIST"
-    export TMUX_NOTIFY_CALLBACK_ACTION_GOTO_LABEL="$ACTION_GOTO_LABEL"
-    export TMUX_NOTIFY_CALLBACK_ACTION_DISMISS_LABEL="$ACTION_DISMISS_LABEL"
-    export TMUX_NOTIFY_CALLBACK_QUIET="$QUIET"
+    exec_cmd+=" --cb-target $(printf '%q' "$TARGET")"
+    exec_cmd+=" --cb-sender-tty $(printf '%q' "${SENDER_CLIENT_TTY:-}")"
+    exec_cmd+=" --cb-no-activate $(printf '%q' "$NO_ACTIVATE")"
+    exec_cmd+=" --cb-tmux-socket $(printf '%q' "${TMUX_SOCKET:-}")"
+    exec_cmd+=" --cb-bundle-ids $(printf '%q' "$BUNDLE_ID_LIST")"
 
     local args=(
         -title "$TITLE"
         -message "$BODY"
-        -actions "${ACTION_GOTO_LABEL},${ACTION_DISMISS_LABEL}"
         -execute "$exec_cmd"
     )
     if [ -n "$seconds" ]; then
@@ -421,34 +441,24 @@ send_notification() {
 }
 
 handle_action_callback() {
-    TARGET="${TMUX_NOTIFY_CALLBACK_TARGET:-}"
-    TITLE="${TMUX_NOTIFY_CALLBACK_TITLE:-$DEFAULT_TITLE}"
-    BODY="${TMUX_NOTIFY_CALLBACK_BODY:-}"
-    SENDER_CLIENT_TTY="${TMUX_NOTIFY_CALLBACK_SENDER_TTY:-}"
-    SENDER_CLIENT_PID="${TMUX_NOTIFY_CALLBACK_SENDER_PID:-}"
-    NO_ACTIVATE="${TMUX_NOTIFY_CALLBACK_NO_ACTIVATE:-0}"
-    BUNDLE_ID_LIST="${TMUX_NOTIFY_CALLBACK_BUNDLE_IDS:-$BUNDLE_ID_LIST}"
-    ACTION_GOTO_LABEL="${TMUX_NOTIFY_CALLBACK_ACTION_GOTO_LABEL:-$ACTION_GOTO_LABEL}"
-    ACTION_DISMISS_LABEL="${TMUX_NOTIFY_CALLBACK_ACTION_DISMISS_LABEL:-$ACTION_DISMISS_LABEL}"
-    QUIET="${TMUX_NOTIFY_CALLBACK_QUIET:-$QUIET}"
+    TARGET="${CB_TARGET:-}"
+    SENDER_CLIENT_TTY="${CB_SENDER_TTY:-}"
+    NO_ACTIVATE="${CB_NO_ACTIVATE:-0}"
+    TMUX_SOCKET="${CB_TMUX_SOCKET:-}"
+    BUNDLE_ID_LIST="${CB_BUNDLE_IDS:-$BUNDLE_ID_LIST}"
 
     if [ -z "$TARGET" ]; then
         exit 0
     fi
 
     parse_target "$TARGET"
-    if ! tmux list-sessions >/dev/null 2>&1; then
+    if ! tmux_cmd list-sessions >/dev/null 2>&1; then
         exit 0
     fi
 
-    if [ "$ACTION_LABEL" = "$ACTION_GOTO_LABEL" ] || [ "$ACTION_LABEL" = "Clicked" ] || [ "$ACTION_LABEL" = "contentsClicked" ]; then
-        activate_terminal
-        jump_to_pane
-    elif [ "$ACTION_LABEL" = "$ACTION_DISMISS_LABEL" ]; then
-        log "Dismissed"
-    else
-        log "Notification sent"
-    fi
+    # `terminal-notifier -execute` runs only on click; treat any callback as "goto".
+    activate_terminal
+    jump_to_pane
 }
 
 handle_action() {
@@ -462,6 +472,9 @@ handle_action() {
     fi
     if [ -z "$SENDER_CLIENT_PID" ]; then
         SENDER_CLIENT_PID="$(get_sender_tmux_client_pid 2>/dev/null || true)"
+    fi
+    if [ -z "$TMUX_SOCKET" ]; then
+        TMUX_SOCKET="$(get_tmux_socket_from_env 2>/dev/null || true)"
     fi
 
     local action
@@ -502,12 +515,12 @@ jump_to_pane() {
         switch_args=(-c "$SENDER_CLIENT_TTY")
     fi
 
-    if ! tmux switch-client "${switch_args[@]}" -t "$SESSION" ';' \
+    if ! tmux_cmd switch-client "${switch_args[@]}" -t "$SESSION" ';' \
         select-window -t "$SESSION:$WINDOW" ';' \
         select-pane -t "$SESSION:$WINDOW.$PANE" 2>/dev/null; then
         warn "Failed to switch tmux client; selecting target window and pane only"
-        tmux select-window -t "$SESSION:$WINDOW" 2>/dev/null || die "Failed to select window"
-        tmux select-pane -t "$SESSION:$WINDOW.$PANE" 2>/dev/null || die "Failed to select pane"
+        tmux_cmd select-window -t "$SESSION:$WINDOW" 2>/dev/null || die "Failed to select window"
+        tmux_cmd select-pane -t "$SESSION:$WINDOW.$PANE" 2>/dev/null || die "Failed to select pane"
     fi
     log "Jumped to $SESSION:$WINDOW.$PANE"
 }
@@ -582,6 +595,32 @@ parse_args() {
                 ;;
             --detach)
                 DETACH=1
+                ;;
+            # Callback-specific arguments (used internally by -execute)
+            --cb-target)
+                shift
+                [ $# -gt 0 ] || die "--cb-target requires an argument"
+                CB_TARGET="$1"
+                ;;
+            --cb-sender-tty)
+                shift
+                [ $# -gt 0 ] || die "--cb-sender-tty requires an argument"
+                CB_SENDER_TTY="$1"
+                ;;
+            --cb-no-activate)
+                shift
+                [ $# -gt 0 ] || die "--cb-no-activate requires an argument"
+                CB_NO_ACTIVATE="$1"
+                ;;
+            --cb-tmux-socket)
+                shift
+                [ $# -gt 0 ] || die "--cb-tmux-socket requires an argument"
+                CB_TMUX_SOCKET="$1"
+                ;;
+            --cb-bundle-ids)
+                shift
+                [ $# -gt 0 ] || die "--cb-bundle-ids requires an argument"
+                CB_BUNDLE_IDS="$1"
                 ;;
             -h|--help)
                 print_usage

@@ -126,6 +126,7 @@ Notes:
 ## Troubleshooting
 
 - Actions not available: your `notify-send`/notification daemon may not support `-A` or `--wait`; the script falls back to a plain notification (no jump).
+- macOS click does nothing: `terminal-notifier -execute` runs the callback without inheriting your shell environment; ensure `tmux-notify-jump-macos.sh` is up to date (it passes callback args explicitly and prefixes common Homebrew PATHs).
 - Jump stays in the wrong session: make sure the notification was sent from inside tmux (`TMUX_PANE` set); the script captures the originating tmux client when sending so it can switch that same client on click.
 - Focus goes to the wrong terminal: the script focuses the terminal hosting the tmux client that triggered the notification (captured when sending); if that fails, set `TMUX_NOTIFY_WINDOW_ID` or pass `--class/--classes` (or use `--no-activate`).
 - No terminal window found: set `TMUX_NOTIFY_WINDOW_ID`, pass `--class/--classes`, or use `--no-activate`.
