@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tmux-notify-jump-lib.sh
+. "$SCRIPT_DIR/tmux-notify-jump-lib.sh"
+
+load_user_config
+
 DEFAULT_TITLE="Task complete"
 BUILTIN_DEFAULT_CLASS="org.wezfurlong.wezterm"
 BUILTIN_DEFAULT_CLASS_LIST="org.wezfurlong.wezterm,Alacritty"
@@ -82,41 +88,6 @@ log() {
         return
     fi
     echo "$*"
-}
-
-truncate_text() {
-    local max="$1"
-    local text="$2"
-
-    if [ "$max" -le 0 ]; then
-        printf '%s' "$text"
-        return
-    fi
-
-    if command -v python3 >/dev/null 2>&1; then
-        local out=""
-        set +e
-        out="$(printf '%s' "$text" | python3 -c 'import sys
-max_len = int(sys.argv[1])
-text = sys.stdin.read()
-if len(text) > max_len:
-    sys.stdout.write(text[:max_len] + "…")
-else:
-    sys.stdout.write(text)
-' "$max")"
-        local status=$?
-        set -e
-        if [ $status -eq 0 ]; then
-            printf '%s' "$out"
-            return
-        fi
-    fi
-
-    if [ "${#text}" -gt "$max" ]; then
-        printf '%s…' "${text:0:max}"
-        return
-    fi
-    printf '%s' "$text"
 }
 
 wrap_text() {
@@ -201,174 +172,12 @@ sys.stdout.write("\\n".join(out_lines))
     printf '%s' "$text"
 }
 
-trim_ws() {
-    local s="$1"
-    s="${s#"${s%%[![:space:]]*}"}"
-    s="${s%"${s##*[![:space:]]}"}"
-    printf '%s' "$s"
-}
-
-require_tool() {
-    local tool="$1"
-    command -v "$tool" >/dev/null 2>&1 || die "Missing dependency: $tool"
-}
-
-is_integer() {
-    local s="${1:-}"
-    [[ "$s" =~ ^[0-9]+$ ]]
-}
-
 is_wayland_session() {
     if [ -n "${XDG_SESSION_TYPE:-}" ]; then
         [ "$XDG_SESSION_TYPE" = "wayland" ]
         return
     fi
     [ -n "${WAYLAND_DISPLAY:-}" ]
-}
-
-get_current_tmux_session() {
-    if [ -z "${TMUX:-}" ]; then
-        return 1
-    fi
-    local session=""
-    if [ -n "${TMUX_PANE:-}" ]; then
-        session="$(tmux display-message -p -t "$TMUX_PANE" '#S' 2>/dev/null || true)"
-    fi
-    if [ -z "$session" ]; then
-        session="$(tmux display-message -p '#S' 2>/dev/null || true)"
-    fi
-    if [ -n "$session" ]; then
-        printf '%s' "$session"
-        return 0
-    fi
-    return 1
-}
-
-get_sender_tmux_client_pid() {
-    if [ -z "${TMUX:-}" ]; then
-        return 1
-    fi
-
-    local current_session=""
-    current_session="$(get_current_tmux_session 2>/dev/null || true)"
-
-    local best_pid=""
-    local best_activity=0
-    local output=""
-    output="$(tmux list-clients -F "#{client_activity} #{client_pid} #{client_session}" 2>/dev/null || true)"
-    local line=""
-    while IFS= read -r line; do
-        [ -n "$line" ] || continue
-        local activity="${line%% *}"
-        local rest="${line#* }"
-        local pid="${rest%% *}"
-        local session="${rest#* }"
-
-        if ! is_integer "$activity"; then
-            continue
-        fi
-        if ! is_integer "$pid"; then
-            continue
-        fi
-        if [ -n "$current_session" ] && [ "$session" != "$current_session" ]; then
-            continue
-        fi
-
-        if [ "$activity" -gt "$best_activity" ]; then
-            best_activity="$activity"
-            best_pid="$pid"
-        fi
-    done <<<"$output"
-
-    if is_integer "$best_pid"; then
-        printf '%s' "$best_pid"
-        return 0
-    fi
-    return 1
-}
-
-get_sender_tmux_client_tty() {
-    if [ -z "${TMUX:-}" ]; then
-        return 1
-    fi
-
-    if [ -n "${TMUX_PANE:-}" ]; then
-        local clients_by_pane=""
-        clients_by_pane="$(tmux list-clients -F "#{client_tty} #{client_pane}" 2>/dev/null || true)"
-        local line=""
-        while IFS= read -r line; do
-            [ -n "$line" ] || continue
-            local tty="${line%% *}"
-            local pane="${line#* }"
-            if [ "$pane" = "$TMUX_PANE" ] && [ -n "$tty" ]; then
-                printf '%s' "$tty"
-                return 0
-            fi
-        done <<<"$clients_by_pane"
-    fi
-
-    local tty=""
-    tty="$(tmux display-message -p '#{client_tty}' 2>/dev/null || true)"
-    if [ -n "$tty" ]; then
-        printf '%s' "$tty"
-        return 0
-    fi
-
-    local current_session=""
-    current_session="$(get_current_tmux_session 2>/dev/null || true)"
-
-    local best_tty=""
-    local best_activity=0
-    local clients_by_activity=""
-    clients_by_activity="$(tmux list-clients -F "#{client_activity} #{client_tty} #{client_session}" 2>/dev/null || true)"
-    local line=""
-    while IFS= read -r line; do
-        [ -n "$line" ] || continue
-        local activity="${line%% *}"
-        local rest="${line#* }"
-        local tty="${rest%% *}"
-        local session="${rest#* }"
-
-        if ! is_integer "$activity"; then
-            continue
-        fi
-        if [ -n "$current_session" ] && [ "$session" != "$current_session" ]; then
-            continue
-        fi
-
-        if [ "$activity" -gt "$best_activity" ] && [ -n "$tty" ]; then
-            best_activity="$activity"
-            best_tty="$tty"
-        fi
-    done <<<"$clients_by_activity"
-
-    if [ -n "$best_tty" ]; then
-        printf '%s' "$best_tty"
-        return 0
-    fi
-    return 1
-}
-
-get_tmux_client_pid_by_tty() {
-    local tty="${1:-}"
-    [ -n "$tty" ] || return 1
-    if [ -z "${TMUX:-}" ]; then
-        return 1
-    fi
-
-    local output=""
-    output="$(tmux list-clients -F "#{client_tty} #{client_pid}" 2>/dev/null || true)"
-    local line=""
-    while IFS= read -r line; do
-        [ -n "$line" ] || continue
-        local client_tty="${line%% *}"
-        local pid="${line#* }"
-        if [ "$client_tty" = "$tty" ] && is_integer "$pid"; then
-            printf '%s' "$pid"
-            return 0
-        fi
-    done <<<"$output"
-    return 1
 }
 
 find_window_id_by_pid_tree() {
@@ -409,46 +218,6 @@ require_tools() {
             warn "Missing xdotool; terminal focusing is disabled"
             NO_ACTIVATE=1
         fi
-    fi
-}
-
-check_tmux_server() {
-    tmux list-sessions >/dev/null 2>&1 || die "tmux server is not running"
-}
-
-list_panes() {
-    require_tool tmux
-    if ! tmux list-sessions >/dev/null 2>&1; then
-        die "tmux server is not running; cannot list panes"
-    fi
-    tmux list-panes -a -F "  #{?pane_active,*, } #{session_name}:#{window_index}.#{pane_index} - #{pane_title}"
-}
-
-parse_target() {
-    local target="$1"
-    if [[ "$target" != *:*.* ]]; then
-        die "Target must be in the form session:window.pane"
-    fi
-    SESSION="${target%%:*}"
-    local window_pane="${target#*:}"
-    WINDOW="${window_pane%%.*}"
-    PANE="${window_pane#*.}"
-    if [ -z "$SESSION" ] || [ -z "$WINDOW" ] || [ -z "$PANE" ]; then
-        die "Target must be in the form session:window.pane"
-    fi
-}
-
-validate_target_exists() {
-    check_tmux_server
-    if ! tmux has-session -t "$SESSION" >/dev/null 2>&1; then
-        die "Session does not exist: $SESSION"
-    fi
-    local panes
-    if ! panes=$(tmux list-panes -t "$SESSION:$WINDOW" -F "#{pane_index}" 2>/dev/null); then
-        die "Window does not exist: $SESSION:$WINDOW"
-    fi
-    if ! echo "$panes" | grep -qx "$PANE"; then
-        die "Pane does not exist: $SESSION:$WINDOW.$PANE"
     fi
 }
 
@@ -576,7 +345,7 @@ activate_terminal() {
             class_item="$(trim_ws "$class_item")"
             [ -n "$class_item" ] || continue
             local ids=""
-            ids="$(xdotool search --class "$class_item" 2>/dev/null || true)"
+            ids="$(xdotool search --onlyvisible --class "$class_item" 2>/dev/null || true)"
             if IFS= read -r wid <<<"$ids"; then
                 :
             else

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Cross-platform entrypoint:
+# - Linux/X11: notify-send + xdotool
+# - macOS: terminal-notifier + osascript
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tmux-notify-jump-lib.sh
+. "$SCRIPT_DIR/tmux-notify-jump-lib.sh"
+
+load_user_config
+
+if [ -n "${TMUX_NOTIFY_JUMP_SH:-}" ]; then
+    exec "${TMUX_NOTIFY_JUMP_SH}" "$@"
+fi
+
+case "$(uname -s 2>/dev/null || echo "")" in
+    Darwin)
+        exec "$SCRIPT_DIR/tmux-notify-jump-macos.sh" "$@"
+        ;;
+    *)
+        exec "$SCRIPT_DIR/tmux-notify-jump-linux.sh" "$@"
+        ;;
+esac
