@@ -310,6 +310,8 @@ handle_action_callback() {
     BUNDLE_ID_LIST="${CB_BUNDLE_IDS:-$BUNDLE_ID_LIST}"
     TMUX_NOTIFY_TMUX_SOCKET="${TMUX_SOCKET:-}"
 
+    log_debug "action-callback: target=$TARGET sender_tty=$SENDER_CLIENT_TTY no_activate=$NO_ACTIVATE tmux_socket=$TMUX_SOCKET"
+
     if [ -z "$TARGET" ]; then
         exit 0
     fi

@@ -23,7 +23,7 @@ FORWARD_ARGS=()
 has_forward_arg() {
     local needle="$1"
     local item=""
-    for item in "${FORWARD_ARGS[@]}"; do
+    for item in "${FORWARD_ARGS[@]+"${FORWARD_ARGS[@]}"}"; do
         if [ "$item" = "$needle" ]; then
             return 0
         fi
@@ -32,15 +32,13 @@ has_forward_arg() {
 }
 
 forward_ui_is_dialog() {
-    local i=0
-    while [ $i -lt ${#FORWARD_ARGS[@]} ]; do
-        if [ "${FORWARD_ARGS[$i]}" = "--ui" ]; then
-            local j=$((i + 1))
-            if [ $j -lt ${#FORWARD_ARGS[@]} ] && [ "${FORWARD_ARGS[$j]}" = "dialog" ]; then
-                return 0
-            fi
+    local prev=""
+    local item=""
+    for item in "${FORWARD_ARGS[@]+"${FORWARD_ARGS[@]}"}"; do
+        if [ "$prev" = "--ui" ] && [ "$item" = "dialog" ]; then
+            return 0
         fi
-        i=$((i + 1))
+        prev="$item"
     done
     return 1
 }
@@ -119,7 +117,7 @@ if ! has_forward_arg --title; then
 fi
 
 if ! has_forward_arg --body; then
-    body="$target_human"
+    body="${target_human:-$HOOK_PANE_ID}"
     if [ -n "$window_name" ]; then
         body="${body} — $window_name"
     fi
