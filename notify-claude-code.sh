@@ -74,9 +74,12 @@ fi
 
 TARGET=""
 if [ -n "${TMUX_PANE:-}" ]; then
-    TARGET="$(tmux display-message -p -t "$TMUX_PANE" '#S:#I.#P' 2>/dev/null || true)"
+    TARGET="$TMUX_PANE"
 elif [ -n "${TMUX:-}" ]; then
-    TARGET="$(tmux display-message -p '#S:#I.#P' 2>/dev/null || true)"
+    TARGET="$(tmux display-message -p '#{pane_id}' 2>/dev/null || true)"
+    if [ -z "$TARGET" ]; then
+        TARGET="$(tmux display-message -p '#S:#I.#P' 2>/dev/null || true)"
+    fi
 fi
 
 if [ -z "$TARGET" ]; then

@@ -321,6 +321,7 @@ FILES=(
     tmux-notify-jump-lib.sh
     tmux-notify-jump-linux.sh
     tmux-notify-jump-macos.sh
+    tmux-notify-jump-hook.sh
     notify-codex.sh
     notify-claude-code.sh
 )
