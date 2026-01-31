@@ -44,18 +44,24 @@ WRAP_COLS="$DEFAULT_WRAP_COLS"
 DETACH=0
 SENDER_CLIENT_PID=""
 SENDER_CLIENT_TTY=""
+TMUX_SOCKET=""
+PANE_ID=""
 
 print_usage() {
     cat <<EOF
 Usage:
   $0 <session>:<window>.<pane> [title] [body]
   $0 --target <session:window.pane> [--title <title>] [--body <body>]
+  $0 --target <pane_id> [--title <title>] [--body <body>]     (pane id like %1)
 
 Options:
   --list               List available panes
   --no-activate        Do not focus the terminal window
   --class <CLASS>      Use a single terminal window class
   --classes <A,B>      Comma-separated terminal window classes (default: $DEFAULT_CLASS_LIST)
+  --sender-tty <TTY>   Prefer switching this tmux client (e.g. /dev/ttys001)
+  --sender-pid <PID>   Prefer focusing terminal by this pid
+  --tmux-socket <PATH> Use a specific tmux server socket (passed to tmux -S)
   --dry-run            Print what would happen and exit
   --quiet              Suppress non-error output
   --timeout <ms>       Notification timeout in ms (default 10000; 0 may mean "sticky" depending on daemon)
@@ -365,17 +371,18 @@ activate_terminal() {
 }
 
 jump_to_pane() {
+    ensure_target_resolved
     local switch_args=()
     if [ -n "$SENDER_CLIENT_TTY" ]; then
         switch_args=(-c "$SENDER_CLIENT_TTY")
     fi
 
-    if ! tmux switch-client "${switch_args[@]}" -t "$SESSION" ';' \
+    if ! tmux_cmd switch-client "${switch_args[@]}" -t "$SESSION" ';' \
         select-window -t "$SESSION:$WINDOW" ';' \
         select-pane -t "$SESSION:$WINDOW.$PANE" 2>/dev/null; then
         warn "Failed to switch tmux client; selecting target window and pane only"
-        tmux select-window -t "$SESSION:$WINDOW" 2>/dev/null || die "Failed to select window"
-        tmux select-pane -t "$SESSION:$WINDOW.$PANE" 2>/dev/null || die "Failed to select pane"
+        tmux_cmd select-window -t "$SESSION:$WINDOW" 2>/dev/null || die "Failed to select window"
+        tmux_cmd select-pane -t "$SESSION:$WINDOW.$PANE" 2>/dev/null || die "Failed to select pane"
     fi
     log "Jumped to $SESSION:$WINDOW.$PANE"
 }
@@ -409,6 +416,22 @@ parse_args() {
                 [ $# -gt 0 ] || die "--classes requires an argument"
                 WINDOW_CLASS_LIST="$1"
                 WINDOW_CLASS=""
+                ;;
+            --sender-tty)
+                shift
+                [ $# -gt 0 ] || die "--sender-tty requires an argument"
+                SENDER_CLIENT_TTY="$1"
+                ;;
+            --sender-pid)
+                shift
+                [ $# -gt 0 ] || die "--sender-pid requires an argument"
+                SENDER_CLIENT_PID="$1"
+                ;;
+            --tmux-socket)
+                shift
+                [ $# -gt 0 ] || die "--tmux-socket requires an argument"
+                TMUX_SOCKET="$1"
+                TMUX_NOTIFY_TMUX_SOCKET="$1"
                 ;;
             --no-activate)
                 NO_ACTIVATE=1
@@ -510,7 +533,17 @@ BODY="$(wrap_text "$WRAP_COLS" "$BODY")"
 
 if [ "$DRY_RUN" -eq 1 ]; then
     parse_target "$TARGET"
-    log "Target: $SESSION:$WINDOW.$PANE"
+    if [ -n "${PANE_ID:-}" ]; then
+        log "Target: $PANE_ID"
+        if tmux_cmd list-sessions >/dev/null 2>&1; then
+            ensure_target_resolved
+            log "Resolved target: $SESSION:$WINDOW.$PANE"
+        else
+            log "Resolved target: (tmux server not running)"
+        fi
+    else
+        log "Target: $SESSION:$WINDOW.$PANE"
+    fi
     log "Title: $TITLE"
     log "Body: $BODY"
     log "Window classes: ${WINDOW_CLASS_LIST:-$WINDOW_CLASS}"
@@ -519,6 +552,12 @@ if [ "$DRY_RUN" -eq 1 ]; then
     fi
     if is_integer "$SENDER_CLIENT_PID"; then
         log "Sender tmux client pid: $SENDER_CLIENT_PID"
+    fi
+    if [ -n "${SENDER_CLIENT_TTY:-}" ]; then
+        log "Sender tmux client tty: $SENDER_CLIENT_TTY"
+    fi
+    if [ -n "${TMUX_SOCKET:-}" ]; then
+        log "tmux socket: $TMUX_SOCKET"
     fi
     log "Focus terminal: $([ "$NO_ACTIVATE" -eq 1 ] && echo "no" || echo "yes")"
     log "Timeout: ${TIMEOUT:-default}"

@@ -98,22 +98,65 @@ list_panes() {
     tmux_cmd list-panes -a -F "  #{?pane_active,*, } #{session_name}:#{window_index}.#{pane_index} - #{pane_title}"
 }
 
+is_pane_id() {
+    local s="${1:-}"
+    [[ "$s" =~ ^%[0-9]+$ ]]
+}
+
 parse_target() {
     local target="$1"
+
+    SESSION=""
+    WINDOW=""
+    PANE=""
+    PANE_ID=""
+
+    if is_pane_id "$target"; then
+        PANE_ID="$target"
+        return 0
+    fi
+
     if [[ "$target" != *:*.* ]]; then
-        die "Target must be in the form session:window.pane"
+        die "Target must be in the form session:window.pane (or a pane id like %1)"
     fi
     SESSION="${target%%:*}"
     local window_pane="${target#*:}"
     WINDOW="${window_pane%%.*}"
     PANE="${window_pane#*.}"
     if [ -z "$SESSION" ] || [ -z "$WINDOW" ] || [ -z "$PANE" ]; then
-        die "Target must be in the form session:window.pane"
+        die "Target must be in the form session:window.pane (or a pane id like %1)"
+    fi
+}
+
+resolve_target_from_pane_id() {
+    [ -n "${PANE_ID:-}" ] || return 1
+    check_tmux_server
+
+    local pane_id="$PANE_ID"
+    local resolved=""
+    resolved="$(tmux_cmd display-message -p -t "$pane_id" '#S:#I.#P' 2>/dev/null || true)"
+    [ -n "$resolved" ] || die "Pane does not exist: $pane_id"
+
+    parse_target "$resolved"
+    PANE_ID="$pane_id"
+}
+
+ensure_target_resolved() {
+    if [ -n "${PANE_ID:-}" ] && [ -z "${SESSION:-}" ]; then
+        resolve_target_from_pane_id
     fi
 }
 
 validate_target_exists() {
     check_tmux_server
+
+    if [ -n "${PANE_ID:-}" ]; then
+        if ! tmux_cmd list-panes -a -F "#{pane_id}" 2>/dev/null | grep -Fqx -- "$PANE_ID"; then
+            die "Pane does not exist: $PANE_ID"
+        fi
+        return 0
+    fi
+
     if ! tmux_cmd has-session -t "$SESSION" >/dev/null 2>&1; then
         die "Session does not exist: $SESSION"
     fi

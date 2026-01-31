@@ -47,6 +47,7 @@ SENDER_CLIENT_TTY=""
 ACTION_CALLBACK=0
 ACTION_CALLBACK_ARG=""
 TMUX_SOCKET=""
+PANE_ID=""
 
 # Callback-specific variables (passed via --cb-* args from -execute)
 CB_TARGET=""
@@ -60,12 +61,15 @@ print_usage() {
 Usage:
   $0 <session>:<window>.<pane> [title] [body]
   $0 --target <session:window.pane> [--title <title>] [--body <body>]
+  $0 --target <pane_id> [--title <title>] [--body <body>]     (pane id like %1)
 
 Options:
   --list               List available panes
   --no-activate        Do not focus the terminal window
   --bundle-id <ID>     Use a single terminal bundle id
   --bundle-ids <A,B>   Comma-separated bundle ids (default: $BUNDLE_ID_LIST)
+  --sender-tty <TTY>   Prefer switching this tmux client (e.g. /dev/ttys001)
+  --tmux-socket <PATH> Use a specific tmux server socket (passed to tmux -S)
   --dry-run            Print what would happen and exit
   --quiet              Suppress non-error output
   --timeout <ms>       Notification timeout in ms (default 10000)
@@ -306,6 +310,8 @@ handle_action_callback() {
     BUNDLE_ID_LIST="${CB_BUNDLE_IDS:-$BUNDLE_ID_LIST}"
     TMUX_NOTIFY_TMUX_SOCKET="${TMUX_SOCKET:-}"
 
+    log_debug "action-callback: target=$TARGET sender_tty=$SENDER_CLIENT_TTY no_activate=$NO_ACTIVATE tmux_socket=$TMUX_SOCKET"
+
     if [ -z "$TARGET" ]; then
         exit 0
     fi
@@ -369,6 +375,7 @@ activate_terminal() {
 }
 
 jump_to_pane() {
+    ensure_target_resolved
     local switch_args=()
     if [ -n "$SENDER_CLIENT_TTY" ]; then
         switch_args=(-c "$SENDER_CLIENT_TTY")
@@ -423,6 +430,17 @@ parse_args() {
                 [ $# -gt 0 ] || die "--bundle-ids requires an argument"
                 BUNDLE_ID_LIST="$1"
                 BUNDLE_ID=""
+                ;;
+            --sender-tty)
+                shift
+                [ $# -gt 0 ] || die "--sender-tty requires an argument"
+                SENDER_CLIENT_TTY="$1"
+                ;;
+            --tmux-socket)
+                shift
+                [ $# -gt 0 ] || die "--tmux-socket requires an argument"
+                TMUX_SOCKET="$1"
+                TMUX_NOTIFY_TMUX_SOCKET="$1"
                 ;;
             --no-activate)
                 NO_ACTIVATE=1
@@ -555,10 +573,26 @@ BODY="$(truncate_text "$MAX_BODY" "$BODY")"
 
 if [ "$DRY_RUN" -eq 1 ]; then
     parse_target "$TARGET"
-    log "Target: $SESSION:$WINDOW.$PANE"
+    if [ -n "${PANE_ID:-}" ]; then
+        log "Target: $PANE_ID"
+        if tmux_cmd list-sessions >/dev/null 2>&1; then
+            ensure_target_resolved
+            log "Resolved target: $SESSION:$WINDOW.$PANE"
+        else
+            log "Resolved target: (tmux server not running)"
+        fi
+    else
+        log "Target: $SESSION:$WINDOW.$PANE"
+    fi
     log "Title: $TITLE"
     log "Body: $BODY"
     log "Bundle ids: ${BUNDLE_ID_LIST:-$BUNDLE_ID}"
+    if [ -n "${SENDER_CLIENT_TTY:-}" ]; then
+        log "Sender tmux client tty: $SENDER_CLIENT_TTY"
+    fi
+    if [ -n "${TMUX_SOCKET:-}" ]; then
+        log "tmux socket: $TMUX_SOCKET"
+    fi
     log "Focus terminal: $([ "$NO_ACTIVATE" -eq 1 ] && echo "no" || echo "yes")"
     log "Timeout: ${TIMEOUT:-default}"
     log "Max title length: $MAX_TITLE"

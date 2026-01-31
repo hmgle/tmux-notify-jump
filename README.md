@@ -11,6 +11,7 @@ This repo contains:
 - `tmux-notify-jump`: cross-platform entry point (auto-selects Linux/macOS implementation)
 - `tmux-notify-jump-linux.sh`: Linux/X11 implementation (notify-send + xdotool)
 - `tmux-notify-jump-macos.sh`: macOS implementation (terminal-notifier + osascript)
+- `tmux-notify-jump-hook.sh`: helper for tmux hooks (uses `#{hook_pane}` pane id)
 - `notify-codex.sh`: Codex CLI wrapper (reads JSON from `$1`)
 - `notify-claude-code.sh`: Claude Code wrapper (reads JSON from stdin)
 
@@ -59,7 +60,7 @@ Uninstall:
 Or run from the repo (no install):
 
 ```bash
-chmod +x tmux-notify-jump tmux-notify-jump-linux.sh tmux-notify-jump-macos.sh notify-codex.sh notify-claude-code.sh
+chmod +x tmux-notify-jump tmux-notify-jump-linux.sh tmux-notify-jump-macos.sh tmux-notify-jump-hook.sh notify-codex.sh notify-claude-code.sh
 ```
 
 ## Usage
@@ -67,14 +68,17 @@ chmod +x tmux-notify-jump tmux-notify-jump-linux.sh tmux-notify-jump-macos.sh no
 ```bash
 ./tmux-notify-jump <session>:<window>.<pane> [title] [body]
 ./tmux-notify-jump --target <session:window.pane> [--title <title>] [--body <body>]
+./tmux-notify-jump --target <%pane_id> [--title <title>] [--body <body>]   # e.g. %1
 ./tmux-notify-jump --list
 
 ./tmux-notify-jump-linux.sh <session>:<window>.<pane> [title] [body]
 ./tmux-notify-jump-linux.sh --target <session:window.pane> [--title <title>] [--body <body>]
+./tmux-notify-jump-linux.sh --target <%pane_id> [--title <title>] [--body <body>]
 ./tmux-notify-jump-linux.sh --list
 
 ./tmux-notify-jump-macos.sh <session>:<window>.<pane> [title] [body]
 ./tmux-notify-jump-macos.sh --target <session:window.pane> [--title <title>] [--body <body>]
+./tmux-notify-jump-macos.sh --target <%pane_id> [--title <title>] [--body <body>]
 ./tmux-notify-jump-macos.sh --list
 ```
 
@@ -114,6 +118,7 @@ TMUX_NOTIFY_UI=dialog
 
 ```bash
 ./tmux-notify-jump "2:1.0" "Build finished" "Click to jump to the pane"
+./tmux-notify-jump "%1" "Build finished" "Click to jump to this pane"
 ./tmux-notify-jump --target "work:0.1" --no-activate
 ./tmux-notify-jump --target "work:0.1" --classes "org.wezfurlong.wezterm,Alacritty"
 
@@ -122,6 +127,29 @@ TMUX_NOTIFY_UI=dialog
 ./tmux-notify-jump-macos.sh --target "work:0.1" --bundle-ids "com.github.wez.wezterm,com.googlecode.iterm2"
 TMUX_NOTIFY_UI=dialog ./tmux-notify-jump-macos.sh --target "work:0.1" --detach
 ```
+
+## tmux hooks integration
+
+tmux exposes an event/hook system (implemented in tmux’s `notify.c`). You can attach `tmux-notify-jump` to those events so tmux itself triggers desktop notifications.
+
+Recommended: use pane ids (`#{hook_pane}` like `%1`). This is more stable than `session:window.pane` because the pane id uniquely identifies the pane; the script resolves session/window/pane at jump time.
+
+Example `~/.tmux.conf`:
+
+```tmux
+# Notify when a bell/activity happens in any window
+set-hook -g alert-bell     "run-shell -b 'tmux-notify-jump-hook.sh --event alert-bell --pane-id #{hook_pane} --timeout 0'"
+set-hook -g alert-activity "run-shell -b 'tmux-notify-jump-hook.sh --event alert-activity --pane-id #{hook_pane} --timeout 0'"
+
+# Notify when a pane's command exits (useful for long-running commands).
+# Note: jumping only makes sense if the pane still exists (e.g. `set -g remain-on-exit on`).
+set-hook -g pane-exited "run-shell -b 'tmux-notify-jump-hook.sh --event pane-exited --pane-id #{hook_pane}'"
+```
+
+Notes:
+
+- Prefer `run-shell -b` (or pass `--detach`) so tmux isn’t blocked waiting for clicks.
+- If you run multiple tmux servers, pass `--tmux-socket <path>` to pin the correct server.
 
 ## Codex CLI integration
 
