@@ -2,6 +2,10 @@
 
 Send a desktop notification on Linux/X11 or macOS, and jump to a target tmux pane when you click an action button.
 
+## Demo
+
+https://github.com/user-attachments/assets/9717e123-f016-4c22-b112-eff8ce22f804
+
 This repo contains:
 
 - `tmux-notify-jump`: cross-platform entry point (auto-selects Linux/macOS implementation)
@@ -151,13 +155,17 @@ Example `~/.claude/settings.json`:
   "hooks": {
     "Stop": [
       {
-        "hooks": [{ "type": "command", "command": "/path/to/notify-claude-code.sh" }]
+        "hooks": [
+          { "type": "command", "command": "/path/to/notify-claude-code.sh" }
+        ]
       }
     ],
     "Notification": [
       {
         "matcher": "permission_prompt|idle_prompt",
-        "hooks": [{ "type": "command", "command": "/path/to/notify-claude-code.sh" }]
+        "hooks": [
+          { "type": "command", "command": "/path/to/notify-claude-code.sh" }
+        ]
       }
     ]
   }
@@ -182,7 +190,3 @@ Notes:
 - Find the right terminal class: run `xprop | rg WM_CLASS` and click your terminal window; use the second string as the class (e.g. `org.wezfurlong.wezterm`).
 - Wayland session: terminal focusing is auto-disabled; use X11 if you need focus behavior.
 - tmux server not running: start tmux or run the script from within an existing tmux session.
-
-## Development
-
-- Repo-local Claude config is intentionally not tracked; see `.claude/settings.local.json.example` (copy to `.claude/settings.local.json` if needed).
