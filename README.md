@@ -60,7 +60,7 @@ Uninstall:
 Or run from the repo (no install):
 
 ```bash
-chmod +x tmux-notify-jump tmux-notify-jump-linux.sh tmux-notify-jump-macos.sh notify-codex.sh notify-claude-code.sh
+chmod +x tmux-notify-jump tmux-notify-jump-linux.sh tmux-notify-jump-macos.sh tmux-notify-jump-hook.sh notify-codex.sh notify-claude-code.sh
 ```
 
 ## Usage
@@ -138,12 +138,12 @@ Example `~/.tmux.conf`:
 
 ```tmux
 # Notify when a bell/activity happens in any window
-set-hook -g alert-bell     "run-shell -b 'tmux-notify-jump-hook.sh --event alert-bell --pane-id \"#{hook_pane}\" --timeout 0'"
-set-hook -g alert-activity "run-shell -b 'tmux-notify-jump-hook.sh --event alert-activity --pane-id \"#{hook_pane}\" --timeout 0'"
+set-hook -g alert-bell     "run-shell -b 'tmux-notify-jump-hook.sh --event alert-bell --pane-id #{hook_pane} --timeout 0'"
+set-hook -g alert-activity "run-shell -b 'tmux-notify-jump-hook.sh --event alert-activity --pane-id #{hook_pane} --timeout 0'"
 
 # Notify when a pane's command exits (useful for long-running commands).
 # Note: jumping only makes sense if the pane still exists (e.g. `set -g remain-on-exit on`).
-set-hook -g pane-exited "run-shell -b 'tmux-notify-jump-hook.sh --event pane-exited --pane-id \"#{hook_pane}\"'"
+set-hook -g pane-exited "run-shell -b 'tmux-notify-jump-hook.sh --event pane-exited --pane-id #{hook_pane}'"
 ```
 
 Notes:
