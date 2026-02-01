@@ -2,7 +2,12 @@
 set -euo pipefail
 
 # Notification click callbacks may run with a restricted GUI PATH.
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+# Under `set -u`, `$PATH` may be unset, so avoid expanding it directly.
+if [ -n "${PATH:-}" ]; then
+    export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
+else
+    export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=tmux-notify-jump-lib.sh
@@ -309,8 +314,8 @@ supports_wait() {
 }
 
 timeout_seconds() {
-    local ms="$1"
-    if [ -z "$ms" ] || [ "$ms" -le 0 ]; then
+    local ms="${1:-}"
+    if ! is_integer "$ms" || [ "$ms" -le 0 ]; then
         echo ""
         return
     fi

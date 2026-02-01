@@ -7,9 +7,9 @@ set -euo pipefail
 # Claude hooks may run with a restricted environment (common under tmux / hook runners).
 # Under `set -u`, `$PATH` may be unset, so avoid expanding it directly.
 if [ -n "${PATH:-}" ]; then
-    export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+    export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
 else
-    export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,6 +38,11 @@ need() {
 }
 
 need jq
+
+if ! jq -e . >/dev/null 2>&1 <<<"$payload"; then
+    log_debug "invalid JSON payload; ignoring"
+    exit 0
+fi
 
 MAX_TITLE="$(normalize_int "${CLAUDE_NOTIFY_MAX_TITLE:-${TMUX_NOTIFY_MAX_TITLE:-80}}" 80)"
 MAX_BODY="$(normalize_int "${CLAUDE_NOTIFY_MAX_BODY:-${TMUX_NOTIFY_MAX_BODY:-200}}" 200)"

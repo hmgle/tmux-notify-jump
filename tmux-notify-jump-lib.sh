@@ -45,7 +45,7 @@ else:
     fi
 
     if [ "${#text}" -gt "$max" ]; then
-        printf '%s…' "${text:0:max}"
+        printf '%s…' "${text:0:$max}"
         return
     fi
     printf '%s' "$text"
@@ -495,6 +495,111 @@ sha256_hex_stdin() {
     cksum | awk '{print $1}'
 }
 
+dedupe_gc_maybe() {
+    local dir="${1:-}"
+    local now="${2:-0}"
+    local window_ms="${3:-0}"
+    [ -n "$dir" ] || return 0
+    if ! [[ "$now" =~ ^[0-9]+$ ]]; then
+        return 0
+    fi
+    if ! [[ "$window_ms" =~ ^[0-9]+$ ]]; then
+        window_ms="0"
+    fi
+
+    local gc_interval_ms="86400000" # 24h
+    local ttl_ms="604800000" # 7d
+    if [ "$ttl_ms" -lt "$window_ms" ]; then
+        ttl_ms="$window_ms"
+    fi
+
+    local gc_file="$dir/.gc.ts"
+    local last_gc="0"
+    if [ -f "$gc_file" ]; then
+        last_gc="$(cat "$gc_file" 2>/dev/null | tr -d '\n' || true)"
+    fi
+    if [[ "$last_gc" =~ ^[0-9]+$ ]] && [ "$last_gc" -gt 0 ]; then
+        local since=$((now - last_gc))
+        if [ "$since" -ge 0 ] && [ "$since" -lt "$gc_interval_ms" ]; then
+            return 0
+        fi
+    fi
+
+    local gc_lock="$dir/.gc.lock"
+    local acquired="0"
+    if mkdir "$gc_lock" 2>/dev/null; then
+        acquired="1"
+    else
+        # If a previous GC run crashed (e.g. SIGKILL), the lock dir may be left behind.
+        # Treat missing/invalid metadata or stale timestamps as stale and break the lock.
+        local lock_pid=""
+        local lock_ts=""
+        lock_pid="$(cat "$gc_lock/pid" 2>/dev/null | tr -d '\n' || true)"
+        lock_ts="$(cat "$gc_lock/ts" 2>/dev/null | tr -d '\n' || true)"
+        local stale="0"
+        if ! [[ "$lock_ts" =~ ^[0-9]+$ ]]; then
+            stale="1"
+        else
+            local age=$((now - lock_ts))
+            if [ "$age" -lt 0 ] || [ "$age" -gt 3600000 ]; then
+                stale="1"
+            fi
+        fi
+        if [ "$stale" -eq 0 ] && [[ "$lock_pid" =~ ^[0-9]+$ ]]; then
+            if ! kill -0 "$lock_pid" 2>/dev/null; then
+                stale="1"
+            fi
+        fi
+        if [ "$stale" -eq 1 ]; then
+            rm -rf "$gc_lock" 2>/dev/null || true
+            if mkdir "$gc_lock" 2>/dev/null; then
+                acquired="1"
+            fi
+        fi
+    fi
+    [ "$acquired" -eq 1 ] || return 0
+    printf '%s\n' "$$" >"$gc_lock/pid" 2>/dev/null || true
+    printf '%s\n' "$now" >"$gc_lock/ts" 2>/dev/null || true
+
+    # Re-check under lock.
+    last_gc="0"
+    if [ -f "$gc_file" ]; then
+        last_gc="$(cat "$gc_file" 2>/dev/null | tr -d '\n' || true)"
+    fi
+    if [[ "$last_gc" =~ ^[0-9]+$ ]] && [ "$last_gc" -gt 0 ]; then
+        local since=$((now - last_gc))
+        if [ "$since" -ge 0 ] && [ "$since" -lt "$gc_interval_ms" ]; then
+            rm -rf "$gc_lock" 2>/dev/null || true
+            return 0
+        fi
+    fi
+
+    local tmp_gc="$gc_file.$$.$RANDOM"
+    printf '%s\n' "$now" >"$tmp_gc" 2>/dev/null || true
+    mv -f "$tmp_gc" "$gc_file" 2>/dev/null || true
+
+    local f=""
+    for f in "$dir"/*.ts; do
+        [ -e "$f" ] || break
+        local base="${f##*/}"
+        if [ "$base" = ".gc.ts" ]; then
+            continue
+        fi
+        local ts=""
+        ts="$(cat "$f" 2>/dev/null | tr -d '\n' || true)"
+        if ! [[ "$ts" =~ ^[0-9]+$ ]]; then
+            rm -f "$f" 2>/dev/null || true
+            continue
+        fi
+        local delta=$((now - ts))
+        if [ "$delta" -ge "$ttl_ms" ]; then
+            rm -f "$f" 2>/dev/null || true
+        fi
+    done
+
+    rm -rf "$gc_lock" 2>/dev/null || true
+}
+
 dedupe_should_suppress() {
     local window_ms="${1:-0}"
     local key="${2:-}"
@@ -522,6 +627,54 @@ dedupe_should_suppress() {
     [ -n "$hash" ] || return 1
 
     local file="$dir/$hash.ts"
+
+    dedupe_gc_maybe "$dir" "$now" "$window_ms" || true
+
+    # Best-effort per-key lock to avoid races when multiple processes notify at once.
+    local lock="$file.lock"
+    local acquired="0"
+    local attempt=0
+    while [ "$attempt" -lt 3 ]; do
+        if mkdir "$lock" 2>/dev/null; then
+            acquired="1"
+            printf '%s\n' "$$" >"$lock/pid" 2>/dev/null || true
+            break
+        fi
+        local pid=""
+        pid="$(cat "$lock/pid" 2>/dev/null | tr -d '\n' || true)"
+        if [[ "$pid" =~ ^[0-9]+$ ]] && ! kill -0 "$pid" 2>/dev/null; then
+            rm -rf "$lock" 2>/dev/null || true
+            continue
+        fi
+        sleep 0.02 2>/dev/null || true
+        attempt=$((attempt + 1))
+    done
+
+    if [ "$acquired" -ne 1 ] && [ -d "$lock" ] && [ ! -s "$lock/pid" ]; then
+        # If a process died between `mkdir` and writing pid, the lock may be empty forever.
+        rm -rf "$lock" 2>/dev/null || true
+        if mkdir "$lock" 2>/dev/null; then
+            acquired="1"
+            printf '%s\n' "$$" >"$lock/pid" 2>/dev/null || true
+        fi
+    fi
+
+    if [ "$acquired" -ne 1 ]; then
+        # Couldn't lock (permissions or contention). Fall back to a best-effort read-only check.
+        local last="0"
+        if [ -f "$file" ]; then
+            last="$(cat "$file" 2>/dev/null | tr -d '\n' || true)"
+        fi
+        if [[ "$last" =~ ^[0-9]+$ ]] && [ "$last" -gt 0 ]; then
+            local delta=$((now - last))
+            if [ "$delta" -ge 0 ] && [ "$delta" -lt "$window_ms" ]; then
+                return 0
+            fi
+        fi
+        return 1
+    fi
+
+    local suppress="1"
     local last="0"
     if [ -f "$file" ]; then
         last="$(cat "$file" 2>/dev/null | tr -d '\n' || true)"
@@ -529,12 +682,19 @@ dedupe_should_suppress() {
     if [[ "$last" =~ ^[0-9]+$ ]] && [ "$last" -gt 0 ]; then
         local delta=$((now - last))
         if [ "$delta" -ge 0 ] && [ "$delta" -lt "$window_ms" ]; then
-            return 0
+            suppress="0"
         fi
     fi
 
-    local tmp="$file.$$"
-    printf '%s\n' "$now" >"$tmp" 2>/dev/null || true
-    mv -f "$tmp" "$file" 2>/dev/null || true
+    if [ "$suppress" -ne 0 ]; then
+        local tmp="$file.$$.$RANDOM"
+        printf '%s\n' "$now" >"$tmp" 2>/dev/null || true
+        mv -f "$tmp" "$file" 2>/dev/null || true
+    fi
+
+    rm -rf "$lock" 2>/dev/null || true
+    if [ "$suppress" -eq 0 ]; then
+        return 0
+    fi
     return 1
 }

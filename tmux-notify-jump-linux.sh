@@ -250,6 +250,20 @@ send_notification() {
         : >"$errfile" 2>/dev/null || errfile=""
     fi
 
+    local old_trap_exit=""
+    local old_trap_int=""
+    local old_trap_term=""
+    local old_trap_hup=""
+    old_trap_exit="$(trap -p EXIT 2>/dev/null || true)"
+    old_trap_int="$(trap -p INT 2>/dev/null || true)"
+    old_trap_term="$(trap -p TERM 2>/dev/null || true)"
+    old_trap_hup="$(trap -p HUP 2>/dev/null || true)"
+
+    trap '[ -n "${errfile:-}" ] && rm -f "$errfile" 2>/dev/null || true' EXIT
+    trap '[ -n "${errfile:-}" ] && rm -f "$errfile" 2>/dev/null || true; exit 130' INT
+    trap '[ -n "${errfile:-}" ] && rm -f "$errfile" 2>/dev/null || true; exit 143' TERM
+    trap '[ -n "${errfile:-}" ] && rm -f "$errfile" 2>/dev/null || true; exit 129' HUP
+
     set +e
     local stderr_redirect="/dev/null"
     if [ -n "$errfile" ]; then
@@ -272,6 +286,12 @@ send_notification() {
         err="$(cat "$errfile" 2>/dev/null || true)"
         rm -f "$errfile" 2>/dev/null || true
     fi
+
+    if [ -n "$old_trap_exit" ]; then eval "$old_trap_exit"; else trap - EXIT; fi
+    if [ -n "$old_trap_int" ]; then eval "$old_trap_int"; else trap - INT; fi
+    if [ -n "$old_trap_term" ]; then eval "$old_trap_term"; else trap - TERM; fi
+    if [ -n "$old_trap_hup" ]; then eval "$old_trap_hup"; else trap - HUP; fi
+
     set -e
 
     if [ -n "$action" ]; then
