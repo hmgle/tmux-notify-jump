@@ -430,6 +430,7 @@ send_notification_execute() {
     local status=$?
     set -e
     if [ $status -ne 0 ]; then
+        log_debug "terminal-notifier failed (status=$status)"
         warn "Failed to send notification"
     fi
     echo "none"
@@ -461,6 +462,88 @@ APPLESCRIPT
         return
     fi
     echo "dismiss"
+}
+
+spawn_detached_self() {
+    local self_path
+    self_path="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
+    if [ ! -x "$self_path" ]; then
+        log_debug "detach: self path not executable: $self_path"
+        return 1
+    fi
+
+    if command -v python3 >/dev/null 2>&1; then
+        log_debug "detach: spawning detached session via python3 setsid"
+        # Fork + setsid so the child isn't in the hook runner's process group.
+        # Use a pipe to detect early failures (e.g., setsid/exec errors) before reporting success.
+        if python3 - "$self_path" "$@" >/dev/null 2>&1 <<'PY'
+import fcntl
+import os
+import select
+import sys
+import time
+
+self_path = sys.argv[1]
+args = sys.argv[1:]  # argv[0] must be the executable path
+
+read_fd, write_fd = os.pipe()
+
+# Close write end on successful exec; parent will see EOF.
+flags = fcntl.fcntl(write_fd, fcntl.F_GETFD)
+fcntl.fcntl(write_fd, fcntl.F_SETFD, flags | fcntl.FD_CLOEXEC)
+
+pid = os.fork()
+if pid != 0:
+    os.close(write_fd)
+
+    # Wait briefly for the child to either exec (EOF) or report an error.
+    deadline = time.time() + 0.5
+    data = b""
+    while True:
+        timeout = deadline - time.time()
+        if timeout <= 0:
+            break
+        readable, _, _ = select.select([read_fd], [], [], timeout)
+        if not readable:
+            break
+        chunk = os.read(read_fd, 4096)
+        if not chunk:
+            os.close(read_fd)
+            raise SystemExit(0)
+        data += chunk
+        # Any data implies a failure; no need to keep waiting.
+        break
+
+    os.close(read_fd)
+    raise SystemExit(1 if data else 0)
+
+os.close(read_fd)
+
+try:
+    os.setsid()
+    os.environ["TMUX_NOTIFY_ALREADY_DETACHED"] = "1"
+    os.execv(self_path, args)
+except BaseException as e:
+    try:
+        os.write(write_fd, (f"{e}\\n").encode("utf-8", "replace"))
+    finally:
+        os._exit(1)
+PY
+        then
+            return 0
+        fi
+        log_debug "detach: python3 setsid spawn failed"
+        return 1
+    fi
+
+    # Fallback: best-effort background; may still be killed by some hook runners.
+    log_debug "detach: python3 not found; using nohup fallback"
+    if command -v nohup >/dev/null 2>&1; then
+        TMUX_NOTIFY_ALREADY_DETACHED=1 nohup "$self_path" "$@" >/dev/null 2>&1 &
+        return 0
+    fi
+    return 1
 }
 
 send_notification() {
@@ -853,7 +936,45 @@ if [ "$FOCUS_ONLY" -eq 0 ]; then
 fi
 
 if [ "$DETACH" -eq 1 ]; then
-    (handle_action) >/dev/null 2>&1 &
+    # Many hook runners kill the entire process group right after the hook exits.
+    # Spawn a new session so the notification/dialog survives.
+    if ! is_truthy "${TMUX_NOTIFY_ALREADY_DETACHED:-0}"; then
+        child_args=()
+        if [ "$FOCUS_ONLY" -eq 1 ]; then
+            child_args+=(--focus-only)
+        else
+            child_args+=(--target "$TARGET")
+        fi
+        child_args+=(--title "$TITLE" --body "$BODY")
+        child_args+=(--timeout "$TIMEOUT" --max-title "$MAX_TITLE" --max-body "$MAX_BODY" --dedupe-ms "$DEDUPE_MS")
+        child_args+=(--ui "$UI" --detach)
+        if [ "$NO_ACTIVATE" -eq 1 ]; then
+            child_args+=(--no-activate)
+        fi
+        if [ -n "${BUNDLE_ID_LIST:-}" ]; then
+            child_args+=(--bundle-ids "$BUNDLE_ID_LIST")
+        fi
+        if [ -n "${SENDER_CLIENT_TTY:-}" ]; then
+            child_args+=(--sender-tty "$SENDER_CLIENT_TTY")
+        fi
+        if [ -n "${SENDER_PID:-}" ]; then
+            child_args+=(--sender-pid "$SENDER_PID")
+        fi
+        if [ -n "${TMUX_SOCKET:-}" ]; then
+            child_args+=(--tmux-socket "$TMUX_SOCKET")
+        fi
+        if [ "$QUIET" -eq 1 ]; then
+            child_args+=(--quiet)
+        fi
+
+        if spawn_detached_self "${child_args[@]}"; then
+            exit 0
+        fi
+        warn "Failed to detach; running in foreground"
+    fi
+
+    # Already detached: do the real work.
+    handle_action
     exit 0
 fi
 

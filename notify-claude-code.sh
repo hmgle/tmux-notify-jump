@@ -4,6 +4,14 @@ set -euo pipefail
 # Claude Code hook integration for tmux-notify-jump
 # Reads JSON from stdin (unlike Codex which uses $1)
 
+# Claude hooks may run with a restricted environment (common under tmux / hook runners).
+# Under `set -u`, `$PATH` may be unset, so avoid expanding it directly.
+if [ -n "${PATH:-}" ]; then
+    export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+else
+    export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=tmux-notify-jump-lib.sh
 . "$SCRIPT_DIR/tmux-notify-jump-lib.sh"
@@ -120,11 +128,12 @@ if is_integer "${PPID:-}"; then
     args+=(--sender-pid "$PPID")
 fi
 
-if [ "${CLAUDE_NOTIFY_QUIET:-1}" = "1" ]; then
+if [ "${CLAUDE_NOTIFY_QUIET:-1}" = "1" ] && [ "${CLAUDE_NOTIFY_DEBUG:-0}" != "1" ]; then
     args+=(--quiet)
 fi
 
 if [ "${CLAUDE_NOTIFY_DEBUG:-0}" = "1" ]; then
+    log_debug "jump_sh=$JUMP_SH"
     log_debug "event=$EVENT_NAME target=${TARGET:-} focus_only=$([ -z "$TARGET" ] && echo "1" || echo "0") timeout=$TIMEOUT_MS max_title=$MAX_TITLE max_body=$MAX_BODY"
     "$JUMP_SH" "${args[@]}" || log_debug "jump script exited non-zero"
 else
