@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Codex notify hooks may run with a restricted PATH (common under tmux / older login shells).
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=tmux-notify-jump-lib.sh
 . "$SCRIPT_DIR/tmux-notify-jump-lib.sh"
@@ -97,11 +100,12 @@ if is_integer "${PPID:-}"; then
     args+=(--sender-pid "$PPID")
 fi
 
-if [ "${CODEX_NOTIFY_QUIET:-1}" = "1" ]; then
+if [ "${CODEX_NOTIFY_QUIET:-1}" = "1" ] && [ "${CODEX_NOTIFY_DEBUG:-0}" != "1" ]; then
     args+=(--quiet)
 fi
 
 if [ "${CODEX_NOTIFY_DEBUG:-0}" = "1" ]; then
+    log_debug "jump_sh=$JUMP_SH"
     log_debug "target=${TARGET:-} focus_only=$([ -z "$TARGET" ] && echo "1" || echo "0") timeout=$TIMEOUT_MS max_title=$MAX_TITLE max_body=$MAX_BODY"
     "$JUMP_SH" "${args[@]}" || log_debug "jump script exited non-zero"
 else

@@ -80,10 +80,24 @@ normalize_int() {
 
 tmux_cmd() {
     if [ -n "${TMUX_NOTIFY_TMUX_SOCKET:-}" ]; then
+        # If we're already inside tmux and the socket matches the current server,
+        # avoid forcing `-S` so tmux can keep "current client" context.
+        #
+        # This matters for commands like:
+        #   tmux display-message -p '#{pane_id}'
+        # which require a current client unless `-t` is provided.
+        if [ -n "${TMUX:-}" ]; then
+            local current_sock="${TMUX%%,*}"
+            current_sock="$(trim_ws "$current_sock")"
+            if [ -n "$current_sock" ] && [ "$current_sock" = "$TMUX_NOTIFY_TMUX_SOCKET" ]; then
+                tmux "$@"
+                return
+            fi
+        fi
         tmux -S "$TMUX_NOTIFY_TMUX_SOCKET" "$@"
-    else
-        tmux "$@"
+        return
     fi
+    tmux "$@"
 }
 
 is_truthy() {
@@ -113,12 +127,15 @@ resolve_tmux_notify_jump_cmd() {
         printf '%s' "$TMUX_NOTIFY_JUMP_SH"
         return 0
     fi
-    if command -v tmux-notify-jump >/dev/null 2>&1; then
-        printf '%s' "tmux-notify-jump"
-        return 0
-    fi
     if [ -n "$script_dir" ] && [ -x "$script_dir/tmux-notify-jump" ]; then
         printf '%s' "$script_dir/tmux-notify-jump"
+        return 0
+    fi
+    # Prefer co-located install (e.g. ~/.local/bin) over whatever happens to be
+    # first on PATH. This avoids surprises if the user has multiple versions
+    # installed.
+    if command -v tmux-notify-jump >/dev/null 2>&1; then
+        printf '%s' "tmux-notify-jump"
         return 0
     fi
     if [ -n "$script_dir" ]; then

@@ -194,6 +194,7 @@ Notes:
 - The wrapper sets `--timeout 0` by default (via `CODEX_NOTIFY_TIMEOUT_MS`) so the notification stays until you click an action (daemon-dependent).
 - On macOS, set `TMUX_NOTIFY_UI=dialog` to use a modal "Jump/Dismiss" dialog that stays until clicked.
 - Requires `jq` (otherwise the wrapper no-ops; set `CODEX_NOTIFY_DEBUG=1` to see why in logs).
+  - On macOS, tmux-launched processes sometimes inherit a restricted `PATH`; the wrapper prefixes common Homebrew paths (`/opt/homebrew/bin:/usr/local/bin`).
 - The wrapper prefers `tmux-notify-jump` on your `PATH`. To override, set `TMUX_NOTIFY_JUMP_SH` to an executable (e.g. `tmux-notify-jump-macos.sh`).
 - If you installed via `./install.sh`, you can auto-configure with `./install.sh --prefix "$HOME/.local" --configure-codex` (it creates a timestamped `config.toml.bak.*` before editing).
 
@@ -230,6 +231,7 @@ Notes:
 - The wrapper sets `--timeout 0` by default (via `CLAUDE_NOTIFY_TIMEOUT_MS`) so the notification stays until you click an action (daemon-dependent).
 - On macOS, set `TMUX_NOTIFY_UI=dialog` to use a modal "Jump/Dismiss" dialog that stays until clicked.
 - Requires `jq` (otherwise the wrapper no-ops; set `CLAUDE_NOTIFY_DEBUG=1` to see why in logs).
+  - On macOS, tmux-launched processes sometimes inherit a restricted `PATH`; the wrapper prefixes common Homebrew paths (`/opt/homebrew/bin:/usr/local/bin`).
 - If Claude hooks run without tmux env but a tmux server is running, set `CLAUDE_NOTIFY_FALLBACK_TARGET=1` (or `TMUX_NOTIFY_FALLBACK_TARGET=1`) to target the most recently active tmux client pane.
 - If tmux isn’t available/running, the wrapper falls back to `--focus-only` by default (set `CLAUDE_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0` to restore no-op).
 - The wrapper prefers `tmux-notify-jump` on your `PATH`. To override, set `TMUX_NOTIFY_JUMP_SH` to an executable (e.g. `tmux-notify-jump-macos.sh`).
