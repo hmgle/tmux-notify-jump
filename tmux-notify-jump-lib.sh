@@ -86,6 +86,49 @@ tmux_cmd() {
     fi
 }
 
+is_truthy() {
+    local v="${1:-}"
+    case "$v" in
+        1|true|TRUE|yes|YES|on|ON)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+is_executable_cmd() {
+    local cmd="${1:-}"
+    [ -n "$cmd" ] || return 1
+    if [[ "$cmd" == */* ]]; then
+        [ -x "$cmd" ]
+        return
+    fi
+    command -v "$cmd" >/dev/null 2>&1
+}
+
+resolve_tmux_notify_jump_cmd() {
+    local script_dir="${1:-}"
+
+    if [ -n "${TMUX_NOTIFY_JUMP_SH:-}" ]; then
+        printf '%s' "$TMUX_NOTIFY_JUMP_SH"
+        return 0
+    fi
+    if command -v tmux-notify-jump >/dev/null 2>&1; then
+        printf '%s' "tmux-notify-jump"
+        return 0
+    fi
+    if [ -n "$script_dir" ] && [ -x "$script_dir/tmux-notify-jump" ]; then
+        printf '%s' "$script_dir/tmux-notify-jump"
+        return 0
+    fi
+    if [ -n "$script_dir" ]; then
+        printf '%s' "$script_dir/tmux-notify-jump"
+        return 0
+    fi
+    printf '%s' "tmux-notify-jump"
+    return 0
+}
+
 ensure_tmux_notify_socket_from_env() {
     if [ -n "${TMUX_NOTIFY_TMUX_SOCKET:-}" ]; then
         return 0
@@ -98,6 +141,66 @@ ensure_tmux_notify_socket_from_env() {
     [ -n "$sock" ] || return 0
     TMUX_NOTIFY_TMUX_SOCKET="$sock"
     export TMUX_NOTIFY_TMUX_SOCKET
+}
+
+get_best_tmux_client_pane_id() {
+    local output=""
+    output="$(tmux_cmd list-clients -F "#{client_activity} #{client_pane}" 2>/dev/null || true)"
+    local best_activity=0
+    local best_pane=""
+    local line=""
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        local activity="${line%% *}"
+        local pane="${line#* }"
+        if ! is_integer "$activity"; then
+            continue
+        fi
+        if [ -z "$pane" ] || ! is_pane_id "$pane"; then
+            continue
+        fi
+        if [ "$activity" -gt "$best_activity" ]; then
+            best_activity="$activity"
+            best_pane="$pane"
+        fi
+    done <<<"$output"
+
+    if [ -n "$best_pane" ]; then
+        printf '%s' "$best_pane"
+        return 0
+    fi
+    return 1
+}
+
+resolve_tmux_notify_target() {
+    local allow_fallback="${1:-0}"
+
+    if [ -n "${TMUX_PANE:-}" ] && is_pane_id "$TMUX_PANE"; then
+        printf '%s' "$TMUX_PANE"
+        return 0
+    fi
+
+    if [ -n "${TMUX:-}" ]; then
+        local pane=""
+        pane="$(tmux_cmd display-message -p '#{pane_id}' 2>/dev/null || true)"
+        if [ -n "$pane" ] && is_pane_id "$pane"; then
+            printf '%s' "$pane"
+            return 0
+        fi
+        local human=""
+        human="$(tmux_cmd display-message -p '#S:#I.#P' 2>/dev/null || true)"
+        if [ -n "$human" ]; then
+            printf '%s' "$human"
+            return 0
+        fi
+    fi
+
+    if is_truthy "$allow_fallback"; then
+        get_best_tmux_client_pane_id
+        return $?
+    fi
+
+    return 1
 }
 
 check_tmux_server() {
