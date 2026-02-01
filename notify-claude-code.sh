@@ -4,8 +4,13 @@ set -euo pipefail
 # Claude Code hook integration for tmux-notify-jump
 # Reads JSON from stdin (unlike Codex which uses $1)
 
-# Claude hooks may run with a restricted PATH (common under tmux / older login shells).
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+# Claude hooks may run with a restricted environment (common under tmux / hook runners).
+# Under `set -u`, `$PATH` may be unset, so avoid expanding it directly.
+if [ -n "${PATH:-}" ]; then
+    export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+else
+    export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=tmux-notify-jump-lib.sh

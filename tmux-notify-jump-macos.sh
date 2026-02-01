@@ -468,23 +468,67 @@ spawn_detached_self() {
     local self_path
     self_path="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 
+    if [ ! -x "$self_path" ]; then
+        log_debug "detach: self path not executable: $self_path"
+        return 1
+    fi
+
     if command -v python3 >/dev/null 2>&1; then
         log_debug "detach: spawning detached session via python3 setsid"
         # Fork + setsid so the child isn't in the hook runner's process group.
+        # Use a pipe to detect early failures (e.g., setsid/exec errors) before reporting success.
         if python3 - "$self_path" "$@" >/dev/null 2>&1 <<'PY'
+import fcntl
 import os
+import select
 import sys
+import time
 
 self_path = sys.argv[1]
 args = sys.argv[1:]  # argv[0] must be the executable path
 
+read_fd, write_fd = os.pipe()
+
+# Close write end on successful exec; parent will see EOF.
+flags = fcntl.fcntl(write_fd, fcntl.F_GETFD)
+fcntl.fcntl(write_fd, fcntl.F_SETFD, flags | fcntl.FD_CLOEXEC)
+
 pid = os.fork()
 if pid != 0:
-    raise SystemExit(0)
+    os.close(write_fd)
 
-os.setsid()
-os.environ["TMUX_NOTIFY_ALREADY_DETACHED"] = "1"
-os.execv(self_path, args)
+    # Wait briefly for the child to either exec (EOF) or report an error.
+    deadline = time.time() + 0.5
+    data = b""
+    while True:
+        timeout = deadline - time.time()
+        if timeout <= 0:
+            break
+        readable, _, _ = select.select([read_fd], [], [], timeout)
+        if not readable:
+            break
+        chunk = os.read(read_fd, 4096)
+        if not chunk:
+            os.close(read_fd)
+            raise SystemExit(0)
+        data += chunk
+        # Any data implies a failure; no need to keep waiting.
+        break
+
+    os.close(read_fd)
+    raise SystemExit(1 if data else 0)
+
+os.close(read_fd)
+
+try:
+    os.setsid()
+    os.environ["TMUX_NOTIFY_ALREADY_DETACHED"] = "1"
+    os.execv(self_path, args)
+except BaseException as e:
+    try:
+        os.write(write_fd, (f"{e}\\n").encode("utf-8", "replace"))
+    finally:
+        os._exit(1)
 PY
         then
             return 0

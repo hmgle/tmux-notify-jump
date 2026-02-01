@@ -343,6 +343,45 @@ handle_action() {
     fi
 }
 
+spawn_detached_self() {
+    local self_path
+    self_path="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
+    if command -v setsid >/dev/null 2>&1; then
+        TMUX_NOTIFY_ALREADY_DETACHED=1 setsid "$self_path" "$@" >/dev/null 2>&1 &
+        return 0
+    fi
+
+    if command -v python3 >/dev/null 2>&1; then
+        # Fork + setsid so the child isn't in the hook runner's process group.
+        if python3 - "$self_path" "$@" >/dev/null 2>&1 <<'PY'
+import os
+import sys
+
+self_path = sys.argv[1]
+args = sys.argv[1:]
+
+pid = os.fork()
+if pid != 0:
+    raise SystemExit(0)
+
+os.setsid()
+os.environ["TMUX_NOTIFY_ALREADY_DETACHED"] = "1"
+os.execv(self_path, args)
+PY
+        then
+            return 0
+        fi
+    fi
+
+    if command -v nohup >/dev/null 2>&1; then
+        TMUX_NOTIFY_ALREADY_DETACHED=1 nohup "$self_path" "$@" >/dev/null 2>&1 &
+        return 0
+    fi
+
+    return 1
+}
+
 activate_terminal() {
     if [ "$NO_ACTIVATE" -eq 1 ]; then
         return
@@ -616,7 +655,50 @@ if [ "$FOCUS_ONLY" -eq 0 ]; then
 fi
 
 if [ "$DETACH" -eq 1 ]; then
-    (handle_action) >/dev/null 2>&1 &
+    # Many hook runners kill the entire process group right after the hook exits.
+    # `notify-send --wait` must stay alive to handle actions, so detach into a new
+    # session when possible.
+    if ! is_truthy "${TMUX_NOTIFY_ALREADY_DETACHED:-0}"; then
+        child_args=()
+        if [ "$FOCUS_ONLY" -eq 1 ]; then
+            child_args+=(--focus-only)
+        else
+            child_args+=(--target "$TARGET")
+        fi
+        child_args+=(--title "$TITLE" --body "$BODY")
+        child_args+=(--timeout "$TIMEOUT" --max-title "$MAX_TITLE" --max-body "$MAX_BODY")
+        child_args+=(--wrap-cols "$WRAP_COLS" --dedupe-ms "$DEDUPE_MS")
+        if [ "$NO_ACTIVATE" -eq 1 ]; then
+            child_args+=(--no-activate)
+        fi
+        if [ -n "${WINDOW_CLASS_LIST:-$WINDOW_CLASS}" ]; then
+            child_args+=(--classes "${WINDOW_CLASS_LIST:-$WINDOW_CLASS}")
+        fi
+        if [ -n "${SENDER_CLIENT_TTY:-}" ]; then
+            child_args+=(--sender-tty "$SENDER_CLIENT_TTY")
+        fi
+        if is_integer "${SENDER_CLIENT_PID:-}"; then
+            child_args+=(--sender-pid "$SENDER_CLIENT_PID")
+        fi
+        if [ -n "${TMUX_SOCKET:-}" ]; then
+            child_args+=(--tmux-socket "$TMUX_SOCKET")
+        fi
+        if [ "$QUIET" -eq 1 ]; then
+            child_args+=(--quiet)
+        fi
+        child_args+=(--detach)
+
+        if spawn_detached_self "${child_args[@]}"; then
+            exit 0
+        fi
+
+        # Fallback: best-effort background; may still be killed by some hook runners.
+        (handle_action) >/dev/null 2>&1 &
+        exit 0
+    fi
+
+    # Already detached: do the real work.
+    handle_action
     exit 0
 fi
 
