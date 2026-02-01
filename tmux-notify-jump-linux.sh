@@ -35,6 +35,7 @@ BODY=""
 WINDOW_CLASS="$DEFAULT_CLASS"
 WINDOW_CLASS_LIST="$DEFAULT_CLASS_LIST"
 NO_ACTIVATE=0
+FOCUS_ONLY=0
 LIST_ONLY=0
 DRY_RUN=0
 QUIET=0
@@ -58,6 +59,7 @@ Usage:
 
 Options:
   --list               List available panes
+  --focus-only         On click, only focus the terminal window (no tmux required)
   --no-activate        Do not focus the terminal window
   --class <CLASS>      Use a single terminal window class
   --classes <A,B>      Comma-separated terminal window classes (default: $DEFAULT_CLASS_LIST)
@@ -215,8 +217,10 @@ find_window_id_by_pid_tree() {
 }
 
 require_tools() {
-    require_tool tmux
     require_tool notify-send
+    if [ "$FOCUS_ONLY" -eq 0 ]; then
+        require_tool tmux
+    fi
     if [ "$NO_ACTIVATE" -eq 0 ]; then
         if is_wayland_session; then
             warn "Wayland session detected; terminal focusing is disabled"
@@ -304,16 +308,22 @@ handle_action() {
         return
     fi
 
-    if [ -z "$SENDER_CLIENT_TTY" ]; then
-        SENDER_CLIENT_TTY="$(get_sender_tmux_client_tty 2>/dev/null || true)"
-    fi
-    if [ -z "$SENDER_CLIENT_PID" ]; then
-        if [ -n "$SENDER_CLIENT_TTY" ]; then
-            SENDER_CLIENT_PID="$(get_tmux_client_pid_by_tty "$SENDER_CLIENT_TTY" 2>/dev/null || true)"
+    if [ "$FOCUS_ONLY" -eq 0 ]; then
+        if [ -z "$SENDER_CLIENT_TTY" ]; then
+            SENDER_CLIENT_TTY="$(get_sender_tmux_client_tty 2>/dev/null || true)"
         fi
-    fi
-    if [ -z "$SENDER_CLIENT_PID" ]; then
-        SENDER_CLIENT_PID="$(get_sender_tmux_client_pid 2>/dev/null || true)"
+        if [ -z "$SENDER_CLIENT_PID" ]; then
+            if [ -n "$SENDER_CLIENT_TTY" ]; then
+                SENDER_CLIENT_PID="$(get_tmux_client_pid_by_tty "$SENDER_CLIENT_TTY" 2>/dev/null || true)"
+            fi
+        fi
+        if [ -z "$SENDER_CLIENT_PID" ]; then
+            SENDER_CLIENT_PID="$(get_sender_tmux_client_pid 2>/dev/null || true)"
+        fi
+    else
+        if [ -z "$SENDER_CLIENT_PID" ] && is_integer "${PPID:-}"; then
+            SENDER_CLIENT_PID="$PPID"
+        fi
     fi
 
     local action
@@ -321,7 +331,11 @@ handle_action() {
 
     if [ "$action" = "goto" ]; then
         activate_terminal
-        jump_to_pane
+        if [ "$FOCUS_ONLY" -eq 0 ]; then
+            jump_to_pane
+        else
+            log "Focused terminal"
+        fi
     elif [ "$action" = "dismiss" ]; then
         log "Dismissed"
     else
@@ -402,6 +416,9 @@ parse_args() {
                 shift
                 [ $# -gt 0 ] || die "--target requires an argument"
                 TARGET="$1"
+                ;;
+            --focus-only)
+                FOCUS_ONLY=1
                 ;;
             --title)
                 shift
@@ -515,7 +532,7 @@ if [ "$LIST_ONLY" -eq 1 ]; then
     exit 0
 fi
 
-if [ -z "$TARGET" ]; then
+if [ -z "$TARGET" ] && [ "$FOCUS_ONLY" -eq 0 ]; then
     print_usage
     echo ""
     echo "Available tmux panes:"
@@ -524,7 +541,11 @@ if [ -z "$TARGET" ]; then
 fi
 
 TITLE="${TITLE:-$DEFAULT_TITLE}"
-BODY="${BODY:-Click to jump to $TARGET}"
+if [ "$FOCUS_ONLY" -eq 1 ]; then
+    BODY="${BODY:-Click to focus terminal}"
+else
+    BODY="${BODY:-Click to jump to $TARGET}"
+fi
 
 if [ -n "${TIMEOUT:-}" ] && ! [[ "$TIMEOUT" =~ ^[0-9]+$ ]]; then
     die "--timeout must be a non-negative integer (ms)"
@@ -548,17 +569,21 @@ BODY="$(truncate_text "$MAX_BODY" "$BODY")"
 BODY="$(wrap_text "$WRAP_COLS" "$BODY")"
 
 if [ "$DRY_RUN" -eq 1 ]; then
-    parse_target "$TARGET"
-    if [ -n "${PANE_ID:-}" ]; then
-        log "Target: $PANE_ID"
-        if tmux_cmd list-sessions >/dev/null 2>&1; then
-            ensure_target_resolved
-            log "Resolved target: $SESSION:$WINDOW.$PANE"
-        else
-            log "Resolved target: (tmux server not running)"
-        fi
+    if [ "$FOCUS_ONLY" -eq 1 ]; then
+        log "Mode: focus-only"
     else
-        log "Target: $SESSION:$WINDOW.$PANE"
+        parse_target "$TARGET"
+        if [ -n "${PANE_ID:-}" ]; then
+            log "Target: $PANE_ID"
+            if tmux_cmd list-sessions >/dev/null 2>&1; then
+                ensure_target_resolved
+                log "Resolved target: $SESSION:$WINDOW.$PANE"
+            else
+                log "Resolved target: (tmux server not running)"
+            fi
+        else
+            log "Target: $SESSION:$WINDOW.$PANE"
+        fi
     fi
     log "Title: $TITLE"
     log "Body: $BODY"
@@ -585,8 +610,10 @@ if [ "$DRY_RUN" -eq 1 ]; then
 fi
 
 require_tools
-parse_target "$TARGET"
-validate_target_exists
+if [ "$FOCUS_ONLY" -eq 0 ]; then
+    parse_target "$TARGET"
+    validate_target_exists
+fi
 
 if [ "$DETACH" -eq 1 ]; then
     (handle_action) >/dev/null 2>&1 &

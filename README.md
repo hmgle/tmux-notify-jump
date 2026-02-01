@@ -20,10 +20,10 @@ This repo contains:
 ### Runtime
 
 - Linux + X11 (Wayland is not supported by the focusing path)
-  - `tmux`
+  - `tmux` (required for jumping to panes; optional for `--focus-only`)
   - `notify-send` (libnotify) with action support (`notify-send -A ... --wait`)
 - macOS
-  - `tmux`
+  - `tmux` (required for jumping to panes; optional for `--focus-only`)
   - `terminal-notifier`
   - `osascript` (built-in)
 
@@ -69,23 +69,28 @@ chmod +x tmux-notify-jump tmux-notify-jump-linux.sh tmux-notify-jump-macos.sh tm
 ./tmux-notify-jump <session>:<window>.<pane> [title] [body]
 ./tmux-notify-jump --target <session:window.pane> [--title <title>] [--body <body>]
 ./tmux-notify-jump --target <%pane_id> [--title <title>] [--body <body>]   # e.g. %1
+./tmux-notify-jump --focus-only [--title <title>] [--body <body>]
 ./tmux-notify-jump --list
 
 ./tmux-notify-jump-linux.sh <session>:<window>.<pane> [title] [body]
 ./tmux-notify-jump-linux.sh --target <session:window.pane> [--title <title>] [--body <body>]
 ./tmux-notify-jump-linux.sh --target <%pane_id> [--title <title>] [--body <body>]
+./tmux-notify-jump-linux.sh --focus-only [--title <title>] [--body <body>]
 ./tmux-notify-jump-linux.sh --list
 
 ./tmux-notify-jump-macos.sh <session>:<window>.<pane> [title] [body]
 ./tmux-notify-jump-macos.sh --target <session:window.pane> [--title <title>] [--body <body>]
 ./tmux-notify-jump-macos.sh --target <%pane_id> [--title <title>] [--body <body>]
+./tmux-notify-jump-macos.sh --focus-only [--title <title>] [--body <body>]
 ./tmux-notify-jump-macos.sh --list
 ```
 
 Common options:
 
 - `--list`: list available panes (`*` means active)
+- `--focus-only`: on click, only focus the terminal window/app (no tmux required)
 - `--no-activate`: do not focus terminal window
+- `--sender-pid <PID>`: best-effort focus by walking the sender process tree (useful outside tmux)
 - `--class <CLASS>` / `--classes <A,B>`: fallback terminal window class(es) to focus (default: `org.wezfurlong.wezterm,Alacritty`)
 - `--timeout <ms>`: notification timeout in milliseconds (default: `10000`; `0` may be sticky depending on daemon)
 - `--dedupe-ms <ms>`: suppress duplicate notifications within this window (default: `2000`; `0` disables)
@@ -102,6 +107,7 @@ CLI flags override environment variables where applicable.
 - `TMUX_NOTIFY_WINDOW_ID`: explicit X11 window id to focus (overrides auto-detection)
 - `TMUX_NOTIFY_TMUX_SOCKET`: tmux server socket path (passed to `tmux -S`; useful if you run multiple tmux servers)
 - `TMUX_NOTIFY_FALLBACK_TARGET`: if not running inside tmux, fall back to the most recently active tmux client pane as the jump target (`0` disables; default: `0`)
+- `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK`: when hooks run without tmux (missing or no server/target), fall back to `--focus-only` instead of no-op (`0` disables; default: `1`)
 - `TMUX_NOTIFY_CLASS` / `TMUX_NOTIFY_CLASSES`: terminal window class(es) used by `xdotool search --class`
 - `TMUX_NOTIFY_BUNDLE_ID` / `TMUX_NOTIFY_BUNDLE_IDS`: macOS terminal bundle id(s) for `osascript` activation (overrides auto-detection; e.g. kitty is `net.kovidgoyal.kitty`)
 - `TMUX_NOTIFY_UI` (macOS): default for `--ui` (`notification` or `dialog`)
@@ -170,6 +176,7 @@ Notes:
 - `notify` must be top-level (i.e. placed before any `[table]` / `[[array-of-tables]]` sections), otherwise TOML will scope it under the last table.
 - Run Codex inside tmux so `TMUX_PANE` is available.
 - If you can’t run Codex inside tmux, set `CODEX_NOTIFY_FALLBACK_TARGET=1` (or `TMUX_NOTIFY_FALLBACK_TARGET=1`) to target the most recently active tmux pane.
+- If tmux isn’t available/running, the wrapper falls back to `--focus-only` by default (set `CODEX_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0` to restore no-op).
 - Set `--detach` (already enabled by the wrapper) to avoid blocking on `notify-send --wait`.
 - The wrapper sets `--timeout 0` by default (via `CODEX_NOTIFY_TIMEOUT_MS`) so the notification stays until you click an action (daemon-dependent).
 - On macOS, set `TMUX_NOTIFY_UI=dialog` to use a modal "Jump/Dismiss" dialog that stays until clicked.
@@ -211,6 +218,7 @@ Notes:
 - On macOS, set `TMUX_NOTIFY_UI=dialog` to use a modal "Jump/Dismiss" dialog that stays until clicked.
 - Requires `jq` (otherwise the wrapper no-ops; set `CLAUDE_NOTIFY_DEBUG=1` to see why in logs).
 - If Claude hooks run without tmux env, set `CLAUDE_NOTIFY_FALLBACK_TARGET=1` (or `TMUX_NOTIFY_FALLBACK_TARGET=1`) to target the most recently active tmux pane.
+- If tmux isn’t available/running, the wrapper falls back to `--focus-only` by default (set `CLAUDE_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0` to restore no-op).
 - The wrapper prefers `tmux-notify-jump` on your `PATH`. To override, set `TMUX_NOTIFY_JUMP_SH` to an executable (e.g. `tmux-notify-jump-macos.sh`).
 - If you installed via `./install.sh`, you can auto-configure with `./install.sh --prefix "$HOME/.local" --configure-claude` (it creates a timestamped `settings.json.bak.*` before editing; requires `python3`).
 
@@ -225,4 +233,4 @@ Notes:
 - No terminal window found: set `TMUX_NOTIFY_WINDOW_ID`, pass `--class/--classes`, or use `--no-activate`.
 - Find the right terminal class: run `xprop | rg WM_CLASS` and click your terminal window; use the second string as the class (e.g. `org.wezfurlong.wezterm`).
 - Wayland session: terminal focusing is auto-disabled; use X11 if you need focus behavior.
-- tmux server not running: start tmux or run the script from within an existing tmux session.
+- tmux server not running: start tmux or run the script from within an existing tmux session (or use `--focus-only` to just focus the terminal).
