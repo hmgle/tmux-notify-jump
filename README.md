@@ -1,6 +1,11 @@
 # tmux-notify-jump
 
-Send a desktop notification on Linux/X11 or macOS, and jump to a target tmux pane when you click an action button.
+Send a desktop notification on Linux/X11 or macOS.
+
+- If tmux is available, you can jump to a target tmux pane when you click an action button.
+- If tmux is not available, you can still use it as a notification + “focus my terminal” helper (`--focus-only`).
+
+In other words: it’s tmux-aware, but not tmux-only.
 
 ## Demo
 
@@ -20,10 +25,10 @@ This repo contains:
 ### Runtime
 
 - Linux + X11 (Wayland is not supported by the focusing path)
-  - `tmux` (required for jumping to panes; optional for `--focus-only`)
+  - `tmux` (required for `--target`/`--list`; optional for `--focus-only`)
   - `notify-send` (libnotify) with action support (`notify-send -A ... --wait`)
 - macOS
-  - `tmux` (required for jumping to panes; optional for `--focus-only`)
+  - `tmux` (required for `--target`/`--list`; optional for `--focus-only`)
   - `terminal-notifier`
   - `osascript` (built-in)
 
@@ -64,6 +69,11 @@ chmod +x tmux-notify-jump tmux-notify-jump-linux.sh tmux-notify-jump-macos.sh tm
 ```
 
 ## Usage
+
+There are two main modes:
+
+- **Jump mode**: pass `--target` (or a positional target). Requires a running tmux server.
+- **Focus-only mode**: pass `--focus-only`. Does not require tmux; clicking just focuses your terminal window/app.
 
 ```bash
 ./tmux-notify-jump <session>:<window>.<pane> [title] [body]
@@ -131,6 +141,9 @@ TMUX_NOTIFY_UI=dialog
 ./tmux-notify-jump "%1" "Build finished" "Click to jump to this pane"
 ./tmux-notify-jump --target "work:0.1" --no-activate
 ./tmux-notify-jump --target "work:0.1" --classes "org.wezfurlong.wezterm,Alacritty"
+
+# Works without tmux: focuses terminal on click
+./tmux-notify-jump --focus-only --title "Build finished" --body "Click to focus your terminal"
 
 ./tmux-notify-jump-macos.sh "2:1.0" "Build finished" "Click to jump to the pane"
 ./tmux-notify-jump-macos.sh --target "work:0.1" --no-activate
@@ -217,7 +230,7 @@ Notes:
 - The wrapper sets `--timeout 0` by default (via `CLAUDE_NOTIFY_TIMEOUT_MS`) so the notification stays until you click an action (daemon-dependent).
 - On macOS, set `TMUX_NOTIFY_UI=dialog` to use a modal "Jump/Dismiss" dialog that stays until clicked.
 - Requires `jq` (otherwise the wrapper no-ops; set `CLAUDE_NOTIFY_DEBUG=1` to see why in logs).
-- If Claude hooks run without tmux env, set `CLAUDE_NOTIFY_FALLBACK_TARGET=1` (or `TMUX_NOTIFY_FALLBACK_TARGET=1`) to target the most recently active tmux pane.
+- If Claude hooks run without tmux env but a tmux server is running, set `CLAUDE_NOTIFY_FALLBACK_TARGET=1` (or `TMUX_NOTIFY_FALLBACK_TARGET=1`) to target the most recently active tmux client pane.
 - If tmux isn’t available/running, the wrapper falls back to `--focus-only` by default (set `CLAUDE_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0` to restore no-op).
 - The wrapper prefers `tmux-notify-jump` on your `PATH`. To override, set `TMUX_NOTIFY_JUMP_SH` to an executable (e.g. `tmux-notify-jump-macos.sh`).
 - If you installed via `./install.sh`, you can auto-configure with `./install.sh --prefix "$HOME/.local" --configure-claude` (it creates a timestamped `settings.json.bak.*` before editing; requires `python3`).
