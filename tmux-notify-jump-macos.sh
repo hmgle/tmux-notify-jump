@@ -19,6 +19,10 @@ ACTION_DISMISS_LABEL="${TMUX_NOTIFY_ACTION_DISMISS_LABEL:-Dismiss}"
 DEFAULT_UI="${TMUX_NOTIFY_UI:-notification}"
 BUILTIN_DEFAULT_BUNDLE_ID="com.github.wez.wezterm"
 BUILTIN_DEFAULT_BUNDLE_ID_LIST="com.github.wez.wezterm,com.googlecode.iterm2,com.apple.Terminal"
+BUNDLE_ID_EXPLICIT=0
+if [ -n "${TMUX_NOTIFY_BUNDLE_IDS:-}" ] || [ -n "${TMUX_NOTIFY_BUNDLE_ID:-}" ]; then
+    BUNDLE_ID_EXPLICIT=1
+fi
 DEFAULT_BUNDLE_ID="${TMUX_NOTIFY_BUNDLE_ID:-$BUILTIN_DEFAULT_BUNDLE_ID}"
 if [ -n "${TMUX_NOTIFY_BUNDLE_IDS:-}" ]; then
     DEFAULT_BUNDLE_ID_LIST="$TMUX_NOTIFY_BUNDLE_IDS"
@@ -123,6 +127,120 @@ require_tools() {
     if [ "$NO_ACTIVATE" -eq 0 ]; then
         require_tool osascript
     fi
+}
+
+bundle_id_from_process_name() {
+    local name_lc="$1"
+    case "$name_lc" in
+        *kitty*)
+            echo "net.kovidgoyal.kitty"
+            return 0
+            ;;
+        wezterm*|*wezterm*)
+            echo "com.github.wez.wezterm"
+            return 0
+            ;;
+        iterm2*|*iterm2*)
+            echo "com.googlecode.iterm2"
+            return 0
+            ;;
+        terminal)
+            echo "com.apple.Terminal"
+            return 0
+            ;;
+        alacritty*|*alacritty*)
+            echo "org.alacritty"
+            return 0
+            ;;
+        ghostty*|*ghostty*)
+            echo "com.mitchellh.ghostty"
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+detect_terminal_bundle_id_from_pid() {
+    local pid="${1:-}"
+    if ! [[ "$pid" =~ ^[0-9]+$ ]]; then
+        return 1
+    fi
+
+    local steps=0
+    while [ "$pid" -gt 1 ] && [ "$steps" -lt 30 ]; do
+        local comm=""
+        comm="$(ps -p "$pid" -o comm= 2>/dev/null || true)"
+        comm="$(trim_ws "$comm")"
+        if [ -n "$comm" ]; then
+            local base=""
+            base="$(basename "$comm" 2>/dev/null || printf '%s' "$comm")"
+            local base_lc=""
+            base_lc="$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')"
+            local bid=""
+            bid="$(bundle_id_from_process_name "$base_lc" 2>/dev/null || true)"
+            if [ -n "$bid" ]; then
+                printf '%s' "$bid"
+                return 0
+            fi
+        fi
+
+        local ppid=""
+        ppid="$(ps -p "$pid" -o ppid= 2>/dev/null || true)"
+        ppid="$(trim_ws "$ppid")"
+        if ! [[ "$ppid" =~ ^[0-9]+$ ]]; then
+            break
+        fi
+        pid="$ppid"
+        steps=$((steps + 1))
+    done
+    return 1
+}
+
+bundle_id_list_contains() {
+    local list="${1:-}"
+    local needle="${2:-}"
+    [ -n "$list" ] || return 1
+    [ -n "$needle" ] || return 1
+
+    local item=""
+    IFS=',' read -r -a items <<<"$list"
+    for item in "${items[@]}"; do
+        item="$(trim_ws "$item")"
+        [ -n "$item" ] || continue
+        if [ "$item" = "$needle" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+autodetect_sender_terminal_bundle_ids() {
+    if [ "$NO_ACTIVATE" -eq 1 ]; then
+        return
+    fi
+    if [ "$BUNDLE_ID_EXPLICIT" -eq 1 ]; then
+        return
+    fi
+    if [ -z "${SENDER_CLIENT_PID:-}" ]; then
+        return
+    fi
+
+    local detected=""
+    detected="$(detect_terminal_bundle_id_from_pid "$SENDER_CLIENT_PID" 2>/dev/null || true)"
+    [ -n "$detected" ] || return
+
+    local current="${BUNDLE_ID_LIST:-$BUNDLE_ID}"
+    current="$(trim_ws "$current")"
+
+    if [ -z "$current" ]; then
+        BUNDLE_ID_LIST="$detected"
+    elif bundle_id_list_contains "$current" "$detected"; then
+        BUNDLE_ID_LIST="$current"
+    else
+        BUNDLE_ID_LIST="$detected,$current"
+    fi
+    BUNDLE_ID=""
+    log_debug "auto-detected terminal bundle id: $detected (sender pid=$SENDER_CLIENT_PID)"
 }
 
 get_tmux_socket_from_env() {
@@ -341,6 +459,7 @@ handle_action() {
     if [ -z "$TMUX_SOCKET" ]; then
         TMUX_SOCKET="$(get_tmux_socket_from_env 2>/dev/null || true)"
     fi
+    autodetect_sender_terminal_bundle_ids
 
     local action
     action="$(send_notification)"
@@ -424,12 +543,14 @@ parse_args() {
                 [ $# -gt 0 ] || die "--bundle-id requires an argument"
                 BUNDLE_ID="$1"
                 BUNDLE_ID_LIST="$1"
+                BUNDLE_ID_EXPLICIT=1
                 ;;
             --bundle-ids)
                 shift
                 [ $# -gt 0 ] || die "--bundle-ids requires an argument"
                 BUNDLE_ID_LIST="$1"
                 BUNDLE_ID=""
+                BUNDLE_ID_EXPLICIT=1
                 ;;
             --sender-tty)
                 shift

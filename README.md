@@ -100,7 +100,7 @@ CLI flags override environment variables where applicable.
 - `TMUX_NOTIFY_CONFIG`: optional env file to load before running (default: `~/.config/tmux-notify-jump/env`)
 - `TMUX_NOTIFY_WINDOW_ID`: explicit X11 window id to focus (overrides auto-detection)
 - `TMUX_NOTIFY_CLASS` / `TMUX_NOTIFY_CLASSES`: terminal window class(es) used by `xdotool search --class`
-- `TMUX_NOTIFY_BUNDLE_ID` / `TMUX_NOTIFY_BUNDLE_IDS`: macOS terminal bundle id(s) for `osascript` activation
+- `TMUX_NOTIFY_BUNDLE_ID` / `TMUX_NOTIFY_BUNDLE_IDS`: macOS terminal bundle id(s) for `osascript` activation (overrides auto-detection; e.g. kitty is `net.kovidgoyal.kitty`)
 - `TMUX_NOTIFY_UI` (macOS): default for `--ui` (`notification` or `dialog`)
 - `TMUX_NOTIFY_TIMEOUT`: default notification timeout in ms
 - `TMUX_NOTIFY_MAX_TITLE` / `TMUX_NOTIFY_MAX_BODY`: truncate limits (`0` = no truncation)
@@ -213,7 +213,9 @@ Notes:
 - Actions not available: your `notify-send`/notification daemon may not support `-A` or `--wait`; the script falls back to a plain notification (no jump).
 - macOS click does nothing: `terminal-notifier -execute` runs the callback without inheriting your shell environment; ensure `tmux-notify-jump-macos.sh` is up to date (it passes callback args explicitly and prefixes common Homebrew PATHs).
 - Jump stays in the wrong session: make sure the notification was sent from inside tmux (`TMUX_PANE` set); the script captures the originating tmux client when sending so it can switch that same client on click.
-- Focus goes to the wrong terminal: the script focuses the terminal hosting the tmux client that triggered the notification (captured when sending); if that fails, set `TMUX_NOTIFY_WINDOW_ID` or pass `--class/--classes` (or use `--no-activate`).
+- Focus goes to the wrong terminal:
+  - macOS: the script tries to detect the terminal hosting the tmux client that triggered the notification; override with `TMUX_NOTIFY_BUNDLE_ID(S)` / `--bundle-id(s)` (or use `--no-activate`).
+  - Linux/X11: set `TMUX_NOTIFY_WINDOW_ID`, pass `--class/--classes`, or use `--no-activate`.
 - No terminal window found: set `TMUX_NOTIFY_WINDOW_ID`, pass `--class/--classes`, or use `--no-activate`.
 - Find the right terminal class: run `xprop | rg WM_CLASS` and click your terminal window; use the second string as the class (e.g. `org.wezfurlong.wezterm`).
 - Wayland session: terminal focusing is auto-disabled; use X11 if you need focus behavior.
