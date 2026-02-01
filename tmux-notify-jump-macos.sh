@@ -39,6 +39,7 @@ BODY=""
 BUNDLE_ID="$DEFAULT_BUNDLE_ID"
 BUNDLE_ID_LIST="$DEFAULT_BUNDLE_ID_LIST"
 NO_ACTIVATE=0
+FOCUS_ONLY=0
 LIST_ONLY=0
 DRY_RUN=0
 QUIET=0
@@ -48,6 +49,7 @@ MAX_BODY="$DEFAULT_MAX_BODY"
 DEDUPE_MS="$DEFAULT_DEDUPE_MS"
 UI="$DEFAULT_UI"
 DETACH=0
+SENDER_PID=""
 SENDER_CLIENT_PID=""
 SENDER_CLIENT_TTY=""
 ACTION_CALLBACK=0
@@ -58,6 +60,8 @@ PANE_ID=""
 # Callback-specific variables (passed via --cb-* args from -execute)
 CB_TARGET=""
 CB_SENDER_TTY=""
+CB_SENDER_PID=""
+CB_FOCUS_ONLY=""
 CB_NO_ACTIVATE=""
 CB_TMUX_SOCKET=""
 CB_BUNDLE_IDS=""
@@ -68,13 +72,16 @@ Usage:
   $0 <session>:<window>.<pane> [title] [body]
   $0 --target <session:window.pane> [--title <title>] [--body <body>]
   $0 --target <pane_id> [--title <title>] [--body <body>]     (pane id like %1)
+  $0 --focus-only [--title <title>] [--body <body>]
 
 Options:
   --list               List available panes
+  --focus-only         On click, only focus the terminal app/window (no tmux required)
   --no-activate        Do not focus the terminal window
   --bundle-id <ID>     Use a single terminal bundle id
   --bundle-ids <A,B>   Comma-separated bundle ids (default: $BUNDLE_ID_LIST)
   --sender-tty <TTY>   Prefer switching this tmux client (e.g. /dev/ttys001)
+  --sender-pid <PID>   Prefer focusing terminal by this pid tree (default: $PPID)
   --tmux-socket <PATH> Use a specific tmux server socket (passed to tmux -S)
   --dry-run            Print what would happen and exit
   --quiet              Suppress non-error output
@@ -121,7 +128,9 @@ log_debug() {
 }
 
 require_tools() {
-    require_tool tmux
+    if [ "$FOCUS_ONLY" -eq 0 ]; then
+        require_tool tmux
+    fi
     if [ "$UI" = "dialog" ]; then
         require_tool osascript
         return
@@ -160,6 +169,40 @@ bundle_id_from_process_name() {
             return 0
             ;;
     esac
+    return 1
+}
+
+detect_bundle_id_from_pid_tree() {
+    local pid="${1:-}"
+    if ! [[ "$pid" =~ ^[0-9]+$ ]]; then
+        return 1
+    fi
+    if ! command -v lsappinfo >/dev/null 2>&1; then
+        return 1
+    fi
+
+    local steps=0
+    while [ "$pid" -gt 1 ] && [ "$steps" -lt 40 ]; do
+        local info=""
+        info="$(lsappinfo info -only bundleid -pid "$pid" 2>/dev/null || true)"
+        info="$(printf '%s' "$info" | tr '\n' ' ')"
+        local bid=""
+        bid="$(printf '%s' "$info" | sed -nE 's/.*[Bb]undleid=\"([^\"]+)\".*/\\1/p')"
+        bid="$(trim_ws "$bid")"
+        if [ -n "$bid" ]; then
+            printf '%s' "$bid"
+            return 0
+        fi
+
+        local ppid=""
+        ppid="$(ps -p "$pid" -o ppid= 2>/dev/null || true)"
+        ppid="$(trim_ws "$ppid")"
+        if ! [[ "$ppid" =~ ^[0-9]+$ ]]; then
+            break
+        fi
+        pid="$ppid"
+        steps=$((steps + 1))
+    done
     return 1
 }
 
@@ -229,7 +272,10 @@ autodetect_sender_terminal_bundle_ids() {
     fi
 
     local detected=""
-    detected="$(detect_terminal_bundle_id_from_pid "$SENDER_CLIENT_PID" 2>/dev/null || true)"
+    detected="$(detect_bundle_id_from_pid_tree "$SENDER_CLIENT_PID" 2>/dev/null || true)"
+    if [ -z "$detected" ]; then
+        detected="$(detect_terminal_bundle_id_from_pid "$SENDER_CLIENT_PID" 2>/dev/null || true)"
+    fi
     [ -n "$detected" ] || return
 
     local current="${BUNDLE_ID_LIST:-$BUNDLE_ID}"
@@ -360,6 +406,8 @@ send_notification_execute() {
     exec_cmd="$(printf '%q' "$self_path") --action-callback"
     exec_cmd+=" --cb-target $(printf '%q' "$TARGET")"
     exec_cmd+=" --cb-sender-tty $(printf '%q' "${SENDER_CLIENT_TTY:-}")"
+    exec_cmd+=" --cb-sender-pid $(printf '%q' "${SENDER_PID:-}")"
+    exec_cmd+=" --cb-focus-only $(printf '%q' "$FOCUS_ONLY")"
     exec_cmd+=" --cb-no-activate $(printf '%q' "$NO_ACTIVATE")"
     exec_cmd+=" --cb-tmux-socket $(printf '%q' "${TMUX_SOCKET:-}")"
     exec_cmd+=" --cb-bundle-ids $(printf '%q' "$BUNDLE_ID_LIST")"
@@ -426,12 +474,23 @@ send_notification() {
 handle_action_callback() {
     TARGET="${CB_TARGET:-}"
     SENDER_CLIENT_TTY="${CB_SENDER_TTY:-}"
+    SENDER_PID="${CB_SENDER_PID:-}"
+    FOCUS_ONLY="${CB_FOCUS_ONLY:-0}"
     NO_ACTIVATE="${CB_NO_ACTIVATE:-0}"
     TMUX_SOCKET="${CB_TMUX_SOCKET:-}"
     BUNDLE_ID_LIST="${CB_BUNDLE_IDS:-$BUNDLE_ID_LIST}"
     TMUX_NOTIFY_TMUX_SOCKET="${TMUX_SOCKET:-}"
 
-    log_debug "action-callback: target=$TARGET sender_tty=$SENDER_CLIENT_TTY no_activate=$NO_ACTIVATE tmux_socket=$TMUX_SOCKET"
+    log_debug "action-callback: focus_only=$FOCUS_ONLY target=$TARGET sender_tty=$SENDER_CLIENT_TTY sender_pid=$SENDER_PID no_activate=$NO_ACTIVATE tmux_socket=$TMUX_SOCKET"
+
+    if [ "$FOCUS_ONLY" -eq 1 ]; then
+        if [ -n "${SENDER_PID:-}" ] && [[ "$SENDER_PID" =~ ^[0-9]+$ ]]; then
+            SENDER_CLIENT_PID="$SENDER_PID"
+        fi
+        autodetect_sender_terminal_bundle_ids
+        activate_terminal
+        exit 0
+    fi
 
     if [ -z "$TARGET" ]; then
         exit 0
@@ -453,28 +512,47 @@ handle_action() {
         return
     fi
 
-    if [ -z "$SENDER_CLIENT_TTY" ]; then
-        SENDER_CLIENT_TTY="$(get_sender_tmux_client_tty 2>/dev/null || true)"
-    fi
-    if [ -z "$SENDER_CLIENT_PID" ]; then
-        if [ -n "$SENDER_CLIENT_TTY" ]; then
-            SENDER_CLIENT_PID="$(get_tmux_client_pid_by_tty "$SENDER_CLIENT_TTY" 2>/dev/null || true)"
+    if [ "$FOCUS_ONLY" -eq 0 ]; then
+        if [ -z "$SENDER_CLIENT_TTY" ]; then
+            SENDER_CLIENT_TTY="$(get_sender_tmux_client_tty 2>/dev/null || true)"
         fi
+        if [ -z "$SENDER_CLIENT_PID" ]; then
+            if [ -n "$SENDER_CLIENT_TTY" ]; then
+                SENDER_CLIENT_PID="$(get_tmux_client_pid_by_tty "$SENDER_CLIENT_TTY" 2>/dev/null || true)"
+            fi
+        fi
+        if [ -z "$SENDER_CLIENT_PID" ]; then
+            SENDER_CLIENT_PID="$(get_sender_tmux_client_pid 2>/dev/null || true)"
+        fi
+        if [ -z "$TMUX_SOCKET" ]; then
+            TMUX_SOCKET="$(get_tmux_socket_from_env 2>/dev/null || true)"
+        fi
+        SENDER_PID="${SENDER_PID:-$SENDER_CLIENT_PID}"
+        autodetect_sender_terminal_bundle_ids
+    else
+        if [ -z "$SENDER_PID" ]; then
+            if [[ "${PPID:-}" =~ ^[0-9]+$ ]]; then
+                SENDER_PID="$PPID"
+            else
+                SENDER_PID="$$"
+            fi
+        fi
+        if [[ "${SENDER_PID:-}" =~ ^[0-9]+$ ]]; then
+            SENDER_CLIENT_PID="$SENDER_PID"
+        fi
+        autodetect_sender_terminal_bundle_ids
     fi
-    if [ -z "$SENDER_CLIENT_PID" ]; then
-        SENDER_CLIENT_PID="$(get_sender_tmux_client_pid 2>/dev/null || true)"
-    fi
-    if [ -z "$TMUX_SOCKET" ]; then
-        TMUX_SOCKET="$(get_tmux_socket_from_env 2>/dev/null || true)"
-    fi
-    autodetect_sender_terminal_bundle_ids
 
     local action
     action="$(send_notification)"
 
     if [ "$action" = "goto" ]; then
         activate_terminal
-        jump_to_pane
+        if [ "$FOCUS_ONLY" -eq 0 ]; then
+            jump_to_pane
+        else
+            log "Focused terminal"
+        fi
     elif [ "$action" = "dismiss" ]; then
         log "Dismissed"
     else
@@ -536,6 +614,9 @@ parse_args() {
                 [ $# -gt 0 ] || die "--target requires an argument"
                 TARGET="$1"
                 ;;
+            --focus-only)
+                FOCUS_ONLY=1
+                ;;
             --title)
                 shift
                 [ $# -gt 0 ] || die "--title requires an argument"
@@ -564,6 +645,11 @@ parse_args() {
                 shift
                 [ $# -gt 0 ] || die "--sender-tty requires an argument"
                 SENDER_CLIENT_TTY="$1"
+                ;;
+            --sender-pid)
+                shift
+                [ $# -gt 0 ] || die "--sender-pid requires an argument"
+                SENDER_PID="$1"
                 ;;
             --tmux-socket)
                 shift
@@ -622,6 +708,16 @@ parse_args() {
                 [ $# -gt 0 ] || die "--cb-sender-tty requires an argument"
                 CB_SENDER_TTY="$1"
                 ;;
+            --cb-sender-pid)
+                shift
+                [ $# -gt 0 ] || die "--cb-sender-pid requires an argument"
+                CB_SENDER_PID="$1"
+                ;;
+            --cb-focus-only)
+                shift
+                [ $# -gt 0 ] || die "--cb-focus-only requires an argument"
+                CB_FOCUS_ONLY="$1"
+                ;;
             --cb-no-activate)
                 shift
                 [ $# -gt 0 ] || die "--cb-no-activate requires an argument"
@@ -676,7 +772,7 @@ if [ "$LIST_ONLY" -eq 1 ]; then
     exit 0
 fi
 
-if [ -z "$TARGET" ]; then
+if [ -z "$TARGET" ] && [ "$FOCUS_ONLY" -eq 0 ]; then
     print_usage
     echo ""
     echo "Available tmux panes:"
@@ -685,7 +781,11 @@ if [ -z "$TARGET" ]; then
 fi
 
 TITLE="${TITLE:-$DEFAULT_TITLE}"
-BODY="${BODY:-Click to jump to $TARGET}"
+if [ "$FOCUS_ONLY" -eq 1 ]; then
+    BODY="${BODY:-Click to focus terminal}"
+else
+    BODY="${BODY:-Click to jump to $TARGET}"
+fi
 
 if [ -n "${TIMEOUT:-}" ] && ! [[ "$TIMEOUT" =~ ^[0-9]+$ ]]; then
     die "--timeout must be a non-negative integer (ms)"
@@ -709,17 +809,21 @@ TITLE="$(truncate_text "$MAX_TITLE" "$TITLE")"
 BODY="$(truncate_text "$MAX_BODY" "$BODY")"
 
 if [ "$DRY_RUN" -eq 1 ]; then
-    parse_target "$TARGET"
-    if [ -n "${PANE_ID:-}" ]; then
-        log "Target: $PANE_ID"
-        if tmux_cmd list-sessions >/dev/null 2>&1; then
-            ensure_target_resolved
-            log "Resolved target: $SESSION:$WINDOW.$PANE"
-        else
-            log "Resolved target: (tmux server not running)"
-        fi
+    if [ "$FOCUS_ONLY" -eq 1 ]; then
+        log "Mode: focus-only"
     else
-        log "Target: $SESSION:$WINDOW.$PANE"
+        parse_target "$TARGET"
+        if [ -n "${PANE_ID:-}" ]; then
+            log "Target: $PANE_ID"
+            if tmux_cmd list-sessions >/dev/null 2>&1; then
+                ensure_target_resolved
+                log "Resolved target: $SESSION:$WINDOW.$PANE"
+            else
+                log "Resolved target: (tmux server not running)"
+            fi
+        else
+            log "Target: $SESSION:$WINDOW.$PANE"
+        fi
     fi
     log "Title: $TITLE"
     log "Body: $BODY"
@@ -739,8 +843,10 @@ if [ "$DRY_RUN" -eq 1 ]; then
 fi
 
 require_tools
-parse_target "$TARGET"
-validate_target_exists
+if [ "$FOCUS_ONLY" -eq 0 ]; then
+    parse_target "$TARGET"
+    validate_target_exists
+fi
 
 if [ "$DETACH" -eq 1 ]; then
     (handle_action) >/dev/null 2>&1 &

@@ -33,7 +33,6 @@ need() {
 }
 
 need jq
-need tmux
 
 MAX_TITLE="$(normalize_int "${CODEX_NOTIFY_MAX_TITLE:-${TMUX_NOTIFY_MAX_TITLE:-80}}" 80)"
 MAX_BODY="$(normalize_int "${CODEX_NOTIFY_MAX_BODY:-${TMUX_NOTIFY_MAX_BODY:-200}}" 200)"
@@ -56,17 +55,18 @@ MESSAGE="$(jq -r '
       end
 ' <<<"$payload" 2>/dev/null || printf '%s' '')"
 
-if ! tmux_cmd list-sessions >/dev/null 2>&1; then
-    log_debug "tmux server not running"
-    exit 0
-fi
-
+ALLOW_FOCUS_FALLBACK="${CODEX_NOTIFY_FOCUS_ONLY_FALLBACK:-${TMUX_NOTIFY_FOCUS_ONLY_FALLBACK:-1}}"
 ALLOW_FALLBACK="${CODEX_NOTIFY_FALLBACK_TARGET:-${TMUX_NOTIFY_FALLBACK_TARGET:-0}}"
-TARGET="$(resolve_tmux_notify_target "$ALLOW_FALLBACK" 2>/dev/null || true)"
 
-if [ -z "$TARGET" ]; then
-    log_debug "no TMUX_PANE/TMUX context; cannot determine target"
-    exit 0
+TARGET=""
+if command -v tmux >/dev/null 2>&1; then
+    if tmux_cmd list-sessions >/dev/null 2>&1; then
+        TARGET="$(resolve_tmux_notify_target "$ALLOW_FALLBACK" 2>/dev/null || true)"
+    else
+        log_debug "tmux server not running"
+    fi
+else
+    log_debug "tmux not installed"
 fi
 
 JUMP_SH="$(resolve_tmux_notify_jump_cmd "$SCRIPT_DIR")"
@@ -76,7 +76,6 @@ if ! is_executable_cmd "$JUMP_SH"; then
 fi
 
 args=(
-    --target "$TARGET"
     --title "Codex: $TITLE"
     --body "$MESSAGE"
     --detach
@@ -85,12 +84,25 @@ args=(
     --max-body "$MAX_BODY"
 )
 
+if [ -n "$TARGET" ]; then
+    args=(--target "$TARGET" "${args[@]}")
+elif is_truthy "$ALLOW_FOCUS_FALLBACK"; then
+    args=(--focus-only "${args[@]}")
+else
+    log_debug "no tmux target and focus-only fallback disabled"
+    exit 0
+fi
+
+if is_integer "${PPID:-}"; then
+    args+=(--sender-pid "$PPID")
+fi
+
 if [ "${CODEX_NOTIFY_QUIET:-1}" = "1" ]; then
     args+=(--quiet)
 fi
 
 if [ "${CODEX_NOTIFY_DEBUG:-0}" = "1" ]; then
-    log_debug "target=$TARGET timeout=$TIMEOUT_MS max_title=$MAX_TITLE max_body=$MAX_BODY"
+    log_debug "target=${TARGET:-} focus_only=$([ -z "$TARGET" ] && echo "1" || echo "0") timeout=$TIMEOUT_MS max_title=$MAX_TITLE max_body=$MAX_BODY"
     "$JUMP_SH" "${args[@]}" || log_debug "jump script exited non-zero"
 else
     "$JUMP_SH" "${args[@]}" >/dev/null 2>&1 || true
