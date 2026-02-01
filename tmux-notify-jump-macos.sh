@@ -127,7 +127,12 @@ log() {
 
 log_debug() {
     [ "${TMUX_NOTIFY_DEBUG:-0}" = "1" ] || return 0
-    local logfile="${TMUX_NOTIFY_DEBUG_LOG:-$HOME/.config/tmux-notify-jump/debug.log}"
+    local logfile="${TMUX_NOTIFY_DEBUG_LOG:-}"
+    if [ -z "$logfile" ]; then
+        local root=""
+        root="$(cache_root_dir)"
+        logfile="$root/tmux-notify-jump/debug.log"
+    fi
     mkdir -p "$(dirname "$logfile")" 2>/dev/null || true
     printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$logfile" 2>/dev/null || true
 }

@@ -109,6 +109,8 @@ Common options:
 - `--dry-run`: print what would happen and exit
 - `--wrap-cols <n>`: wrap body text to `<n>` columns (default: `80`; `0` disables wrapping)
 
+macOS note: in `--ui notification` mode, if the script is detached (or `terminal-notifier` doesn’t support `-wait`), it falls back to `terminal-notifier -execute`, where any click triggers the jump (no separate “Dismiss” action). Use `--ui dialog` for explicit buttons.
+
 ## Environment variables
 
 CLI flags override environment variables where applicable.
@@ -161,18 +163,19 @@ Example `~/.tmux.conf`:
 
 ```tmux
 # Notify when a bell/activity happens in any window
-set-hook -g alert-bell     "run-shell -b 'tmux-notify-jump-hook.sh --event alert-bell --pane-id #{hook_pane} --timeout 0'"
-set-hook -g alert-activity "run-shell -b 'tmux-notify-jump-hook.sh --event alert-activity --pane-id #{hook_pane} --timeout 0'"
+set-hook -g alert-bell     "run-shell -b 'tmux-notify-jump-hook.sh --event alert-bell --pane-id #{hook_pane} --tmux-socket \"#{socket_path}\" --timeout 0'"
+set-hook -g alert-activity "run-shell -b 'tmux-notify-jump-hook.sh --event alert-activity --pane-id #{hook_pane} --tmux-socket \"#{socket_path}\" --timeout 0'"
 
 # Notify when a pane's command exits (useful for long-running commands).
 # Note: jumping only makes sense if the pane still exists (e.g. `set -g remain-on-exit on`).
-set-hook -g pane-exited "run-shell -b 'tmux-notify-jump-hook.sh --event pane-exited --pane-id #{hook_pane}'"
+set-hook -g pane-exited "run-shell -b 'tmux-notify-jump-hook.sh --event pane-exited --pane-id #{hook_pane} --tmux-socket \"#{socket_path}\"'"
 ```
 
 Notes:
 
 - Prefer `run-shell -b` (or pass `--detach`) so tmux isn’t blocked waiting for clicks.
 - If you run multiple tmux servers, pass `--tmux-socket <path>` (or set `TMUX_NOTIFY_TMUX_SOCKET`) to pin the correct server.
+- If you attach multiple clients to the same tmux server, passing `--sender-tty`/`--sender-pid` helps the script switch/focus the same client that triggered the hook (the helper attempts to auto-detect and pass these when possible).
 
 ## Codex CLI integration
 
