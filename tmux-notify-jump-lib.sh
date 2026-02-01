@@ -86,6 +86,123 @@ tmux_cmd() {
     fi
 }
 
+is_truthy() {
+    local v="${1:-}"
+    case "$v" in
+        1|true|TRUE|yes|YES|on|ON)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+is_executable_cmd() {
+    local cmd="${1:-}"
+    [ -n "$cmd" ] || return 1
+    if [[ "$cmd" == */* ]]; then
+        [ -x "$cmd" ]
+        return
+    fi
+    command -v "$cmd" >/dev/null 2>&1
+}
+
+resolve_tmux_notify_jump_cmd() {
+    local script_dir="${1:-}"
+
+    if [ -n "${TMUX_NOTIFY_JUMP_SH:-}" ]; then
+        printf '%s' "$TMUX_NOTIFY_JUMP_SH"
+        return 0
+    fi
+    if command -v tmux-notify-jump >/dev/null 2>&1; then
+        printf '%s' "tmux-notify-jump"
+        return 0
+    fi
+    if [ -n "$script_dir" ] && [ -x "$script_dir/tmux-notify-jump" ]; then
+        printf '%s' "$script_dir/tmux-notify-jump"
+        return 0
+    fi
+    if [ -n "$script_dir" ]; then
+        printf '%s' "$script_dir/tmux-notify-jump"
+        return 0
+    fi
+    printf '%s' "tmux-notify-jump"
+    return 0
+}
+
+ensure_tmux_notify_socket_from_env() {
+    if [ -n "${TMUX_NOTIFY_TMUX_SOCKET:-}" ]; then
+        return 0
+    fi
+    if [ -z "${TMUX:-}" ]; then
+        return 0
+    fi
+    local sock="${TMUX%%,*}"
+    sock="$(trim_ws "$sock")"
+    [ -n "$sock" ] || return 0
+    TMUX_NOTIFY_TMUX_SOCKET="$sock"
+    export TMUX_NOTIFY_TMUX_SOCKET
+}
+
+get_best_tmux_client_pane_id() {
+    local output=""
+    output="$(tmux_cmd list-clients -F "#{client_activity} #{client_pane}" 2>/dev/null || true)"
+    local best_activity=0
+    local best_pane=""
+    local line=""
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        local activity="${line%% *}"
+        local pane="${line#* }"
+        if ! is_integer "$activity"; then
+            continue
+        fi
+        if [ -z "$pane" ] || ! is_pane_id "$pane"; then
+            continue
+        fi
+        if [ "$activity" -gt "$best_activity" ]; then
+            best_activity="$activity"
+            best_pane="$pane"
+        fi
+    done <<<"$output"
+
+    if [ -n "$best_pane" ]; then
+        printf '%s' "$best_pane"
+        return 0
+    fi
+    return 1
+}
+
+resolve_tmux_notify_target() {
+    local allow_fallback="${1:-0}"
+
+    if [ -n "${TMUX_PANE:-}" ] && is_pane_id "$TMUX_PANE"; then
+        printf '%s' "$TMUX_PANE"
+        return 0
+    fi
+
+    if [ -n "${TMUX:-}" ]; then
+        local pane=""
+        pane="$(tmux_cmd display-message -p '#{pane_id}' 2>/dev/null || true)"
+        if [ -n "$pane" ] && is_pane_id "$pane"; then
+            printf '%s' "$pane"
+            return 0
+        fi
+        local human=""
+        human="$(tmux_cmd display-message -p '#S:#I.#P' 2>/dev/null || true)"
+        if [ -n "$human" ]; then
+            printf '%s' "$human"
+            return 0
+        fi
+    fi
+
+    if is_truthy "$allow_fallback"; then
+        get_best_tmux_client_pane_id
+        return $?
+    fi
+
+    return 1
+}
+
 check_tmux_server() {
     tmux_cmd list-sessions >/dev/null 2>&1 || die "tmux server is not running"
 }
@@ -311,5 +428,96 @@ get_tmux_client_pid_by_tty() {
             return 0
         fi
     done <<<"$output"
+    return 1
+}
+
+cache_root_dir() {
+    local home="${HOME:-}"
+    if [ -n "${XDG_CACHE_HOME:-}" ]; then
+        printf '%s' "$XDG_CACHE_HOME"
+        return 0
+    fi
+    if [ -n "$home" ]; then
+        printf '%s' "$home/.cache"
+        return 0
+    fi
+    printf '%s' "${TMPDIR:-/tmp}"
+}
+
+now_ms() {
+    if command -v python3 >/dev/null 2>&1; then
+        local out=""
+        set +e
+        out="$(python3 -c 'import time; print(int(time.time() * 1000))' 2>/dev/null)"
+        local status=$?
+        set -e
+        out="$(printf '%s' "$out" | tr -d '\n')"
+        if [ $status -eq 0 ] && [[ "$out" =~ ^[0-9]+$ ]]; then
+            printf '%s' "$out"
+            return 0
+        fi
+    fi
+    local s=""
+    s="$(date +%s 2>/dev/null || true)"
+    if [[ "$s" =~ ^[0-9]+$ ]]; then
+        printf '%s' "$((s * 1000))"
+        return 0
+    fi
+    printf '%s' "0"
+}
+
+sha256_hex_stdin() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum | awk '{print $1}'
+        return 0
+    fi
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 | awk '{print $1}'
+        return 0
+    fi
+    cksum | awk '{print $1}'
+}
+
+dedupe_should_suppress() {
+    local window_ms="${1:-0}"
+    local key="${2:-}"
+    [ -n "$key" ] || return 1
+    if ! [[ "$window_ms" =~ ^[0-9]+$ ]]; then
+        return 1
+    fi
+    if [ "$window_ms" -le 0 ]; then
+        return 1
+    fi
+
+    local now
+    now="$(now_ms)"
+    if ! [[ "$now" =~ ^[0-9]+$ ]]; then
+        return 1
+    fi
+
+    local root
+    root="$(cache_root_dir)"
+    local dir="$root/tmux-notify-jump/dedupe"
+    mkdir -p "$dir" 2>/dev/null || true
+
+    local hash
+    hash="$(printf '%s' "$key" | sha256_hex_stdin 2>/dev/null | tr -d '\n' || true)"
+    [ -n "$hash" ] || return 1
+
+    local file="$dir/$hash.ts"
+    local last="0"
+    if [ -f "$file" ]; then
+        last="$(cat "$file" 2>/dev/null | tr -d '\n' || true)"
+    fi
+    if [[ "$last" =~ ^[0-9]+$ ]] && [ "$last" -gt 0 ]; then
+        local delta=$((now - last))
+        if [ "$delta" -ge 0 ] && [ "$delta" -lt "$window_ms" ]; then
+            return 0
+        fi
+    fi
+
+    local tmp="$file.$$"
+    printf '%s\n' "$now" >"$tmp" 2>/dev/null || true
+    mv -f "$tmp" "$file" 2>/dev/null || true
     return 1
 }

@@ -15,6 +15,7 @@ else
 fi
 
 load_user_config
+ensure_tmux_notify_socket_from_env
 
 log_debug() {
     [ "${CODEX_NOTIFY_DEBUG:-0}" = "1" ] || return 0
@@ -55,60 +56,20 @@ MESSAGE="$(jq -r '
       end
 ' <<<"$payload" 2>/dev/null || printf '%s' '')"
 
-if ! tmux list-sessions >/dev/null 2>&1; then
+if ! tmux_cmd list-sessions >/dev/null 2>&1; then
     log_debug "tmux server not running"
     exit 0
 fi
 
-TARGET=""
-if [ -n "${TMUX_PANE:-}" ]; then
-    TARGET="$TMUX_PANE"
-    if [ -n "$TARGET" ] && ! [[ "$TARGET" =~ ^%[0-9]+$ ]]; then
-        TARGET=""
-    fi
-elif [ -n "${TMUX:-}" ]; then
-    TARGET="$(tmux display-message -p '#{pane_id}' 2>/dev/null || true)"
-    if [ -n "$TARGET" ] && ! [[ "$TARGET" =~ ^%[0-9]+$ ]]; then
-        TARGET=""
-    fi
-    if [ -z "$TARGET" ]; then
-        TARGET="$(tmux display-message -p '#S:#I.#P' 2>/dev/null || true)"
-    fi
-fi
+ALLOW_FALLBACK="${CODEX_NOTIFY_FALLBACK_TARGET:-${TMUX_NOTIFY_FALLBACK_TARGET:-0}}"
+TARGET="$(resolve_tmux_notify_target "$ALLOW_FALLBACK" 2>/dev/null || true)"
 
 if [ -z "$TARGET" ]; then
     log_debug "no TMUX_PANE/TMUX context; cannot determine target"
     exit 0
 fi
 
-resolve_jump_cmd() {
-    if [ -n "${TMUX_NOTIFY_JUMP_SH:-}" ]; then
-        printf '%s' "$TMUX_NOTIFY_JUMP_SH"
-        return
-    fi
-    if command -v tmux-notify-jump >/dev/null 2>&1; then
-        printf '%s' "tmux-notify-jump"
-        return
-    fi
-    local script_dir
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    if [ -x "$script_dir/tmux-notify-jump" ]; then
-        printf '%s' "$script_dir/tmux-notify-jump"
-        return
-    fi
-    printf '%s' "$script_dir/tmux-notify-jump"
-}
-
-is_executable_cmd() {
-    local cmd="$1"
-    if [[ "$cmd" == */* ]]; then
-        [ -x "$cmd" ]
-        return
-    fi
-    command -v "$cmd" >/dev/null 2>&1
-}
-
-JUMP_SH="$(resolve_jump_cmd)"
+JUMP_SH="$(resolve_tmux_notify_jump_cmd "$SCRIPT_DIR")"
 if ! is_executable_cmd "$JUMP_SH"; then
     log_debug "jump command not found/executable: $JUMP_SH"
     exit 0
