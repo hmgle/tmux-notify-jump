@@ -88,6 +88,7 @@ Common options:
 - `--no-activate`: do not focus terminal window
 - `--class <CLASS>` / `--classes <A,B>`: fallback terminal window class(es) to focus (default: `org.wezfurlong.wezterm,Alacritty`)
 - `--timeout <ms>`: notification timeout in milliseconds (default: `10000`; `0` may be sticky depending on daemon)
+- `--dedupe-ms <ms>`: suppress duplicate notifications within this window (default: `2000`; `0` disables)
 - macOS: `--ui <notification|dialog>`: UI mode (`dialog` always waits for click; can also set `TMUX_NOTIFY_UI`, but `--ui` wins)
 - `--detach`: run in background (recommended for hook/callback use)
 - `--dry-run`: print what would happen and exit
@@ -99,10 +100,12 @@ CLI flags override environment variables where applicable.
 
 - `TMUX_NOTIFY_CONFIG`: optional env file to load before running (default: `~/.config/tmux-notify-jump/env`)
 - `TMUX_NOTIFY_WINDOW_ID`: explicit X11 window id to focus (overrides auto-detection)
+- `TMUX_NOTIFY_TMUX_SOCKET`: tmux server socket path (passed to `tmux -S`; useful if you run multiple tmux servers)
 - `TMUX_NOTIFY_CLASS` / `TMUX_NOTIFY_CLASSES`: terminal window class(es) used by `xdotool search --class`
 - `TMUX_NOTIFY_BUNDLE_ID` / `TMUX_NOTIFY_BUNDLE_IDS`: macOS terminal bundle id(s) for `osascript` activation (overrides auto-detection; e.g. kitty is `net.kovidgoyal.kitty`)
 - `TMUX_NOTIFY_UI` (macOS): default for `--ui` (`notification` or `dialog`)
 - `TMUX_NOTIFY_TIMEOUT`: default notification timeout in ms
+- `TMUX_NOTIFY_DEDUPE_MS`: suppress duplicate notifications within this window (default: `2000`; `0` disables; cached under `$XDG_CACHE_HOME` or `~/.cache`)
 - `TMUX_NOTIFY_MAX_TITLE` / `TMUX_NOTIFY_MAX_BODY`: truncate limits (`0` = no truncation)
 - `TMUX_NOTIFY_WRAP_COLS`: wrap body text to this many columns (`0` = no wrapping)
 - `TMUX_NOTIFY_ACTION_GOTO_LABEL`: label for the "goto" action (default: `Jump`)
@@ -149,7 +152,7 @@ set-hook -g pane-exited "run-shell -b 'tmux-notify-jump-hook.sh --event pane-exi
 Notes:
 
 - Prefer `run-shell -b` (or pass `--detach`) so tmux isn’t blocked waiting for clicks.
-- If you run multiple tmux servers, pass `--tmux-socket <path>` to pin the correct server.
+- If you run multiple tmux servers, pass `--tmux-socket <path>` (or set `TMUX_NOTIFY_TMUX_SOCKET`) to pin the correct server.
 
 ## Codex CLI integration
 

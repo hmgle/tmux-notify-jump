@@ -12,6 +12,7 @@ payload="$(cat)"
 [ -n "$payload" ] || exit 0
 
 load_user_config
+ensure_tmux_notify_socket_from_env
 
 log_debug() {
     [ "${CLAUDE_NOTIFY_DEBUG:-0}" = "1" ] || return 0
@@ -67,7 +68,7 @@ case "$EVENT_NAME" in
         ;;
 esac
 
-if ! tmux list-sessions >/dev/null 2>&1; then
+if ! tmux_cmd list-sessions >/dev/null 2>&1; then
     log_debug "tmux server not running"
     exit 0
 fi
@@ -79,12 +80,12 @@ if [ -n "${TMUX_PANE:-}" ]; then
         TARGET=""
     fi
 elif [ -n "${TMUX:-}" ]; then
-    TARGET="$(tmux display-message -p '#{pane_id}' 2>/dev/null || true)"
+    TARGET="$(tmux_cmd display-message -p '#{pane_id}' 2>/dev/null || true)"
     if [ -n "$TARGET" ] && ! [[ "$TARGET" =~ ^%[0-9]+$ ]]; then
         TARGET=""
     fi
     if [ -z "$TARGET" ]; then
-        TARGET="$(tmux display-message -p '#S:#I.#P' 2>/dev/null || true)"
+        TARGET="$(tmux_cmd display-message -p '#S:#I.#P' 2>/dev/null || true)"
     fi
 fi
 

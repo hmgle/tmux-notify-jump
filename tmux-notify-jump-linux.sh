@@ -24,6 +24,7 @@ DEFAULT_TIMEOUT="${TMUX_NOTIFY_TIMEOUT:-10000}"
 DEFAULT_MAX_TITLE="${TMUX_NOTIFY_MAX_TITLE:-80}"
 DEFAULT_MAX_BODY="${TMUX_NOTIFY_MAX_BODY:-200}"
 DEFAULT_WRAP_COLS="${TMUX_NOTIFY_WRAP_COLS:-80}"
+DEFAULT_DEDUPE_MS="${TMUX_NOTIFY_DEDUPE_MS:-2000}"
 ACTION_GOTO_LABEL="${TMUX_NOTIFY_ACTION_GOTO_LABEL:-Jump}"
 ACTION_DISMISS_LABEL="${TMUX_NOTIFY_ACTION_DISMISS_LABEL:-Dismiss}"
 FOCUS_WINDOW_ID="${TMUX_NOTIFY_WINDOW_ID:-}"
@@ -41,6 +42,7 @@ TIMEOUT="$DEFAULT_TIMEOUT"
 MAX_TITLE="$DEFAULT_MAX_TITLE"
 MAX_BODY="$DEFAULT_MAX_BODY"
 WRAP_COLS="$DEFAULT_WRAP_COLS"
+DEDUPE_MS="$DEFAULT_DEDUPE_MS"
 DETACH=0
 SENDER_CLIENT_PID=""
 SENDER_CLIENT_TTY=""
@@ -68,6 +70,7 @@ Options:
   --max-title <n>      Max title length (0 = no truncation)
   --max-body <n>       Max body length (0 = no truncation)
   --wrap-cols <n>      Wrap body text to <n> columns (default: $DEFAULT_WRAP_COLS; 0 = no wrapping)
+  --dedupe-ms <ms>     Suppress duplicate notifications within this window (0 = disabled; default: $DEFAULT_DEDUPE_MS)
   --detach             Detach and return immediately (handles click in background)
   -h, --help           Show help
 
@@ -296,6 +299,11 @@ send_notification() {
 }
 
 handle_action() {
+    if dedupe_should_suppress "$DEDUPE_MS" "target=$TARGET"$'\n'"title=$TITLE"$'\n'"body=$BODY"$'\n'; then
+        log "Duplicate notification suppressed"
+        return
+    fi
+
     if [ -z "$SENDER_CLIENT_TTY" ]; then
         SENDER_CLIENT_TTY="$(get_sender_tmux_client_tty 2>/dev/null || true)"
     fi
@@ -465,6 +473,11 @@ parse_args() {
                 [ $# -gt 0 ] || die "--wrap-cols requires an argument"
                 WRAP_COLS="$1"
                 ;;
+            --dedupe-ms)
+                shift
+                [ $# -gt 0 ] || die "--dedupe-ms requires an argument"
+                DEDUPE_MS="$1"
+                ;;
             --detach)
                 DETACH=1
                 ;;
@@ -526,6 +539,9 @@ fi
 if ! [[ "$WRAP_COLS" =~ ^[0-9]+$ ]]; then
     die "--wrap-cols must be a non-negative integer"
 fi
+if ! [[ "$DEDUPE_MS" =~ ^[0-9]+$ ]]; then
+    die "--dedupe-ms must be a non-negative integer (ms)"
+fi
 
 TITLE="$(truncate_text "$MAX_TITLE" "$TITLE")"
 BODY="$(truncate_text "$MAX_BODY" "$BODY")"
@@ -564,6 +580,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
     log "Max title length: $MAX_TITLE"
     log "Max body length: $MAX_BODY"
     log "Wrap columns: $WRAP_COLS"
+    log "Dedupe window (ms): $DEDUPE_MS"
     exit 0
 fi
 
