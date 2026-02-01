@@ -267,14 +267,18 @@ autodetect_sender_terminal_bundle_ids() {
     if [ "$BUNDLE_ID_EXPLICIT" -eq 1 ]; then
         return
     fi
-    if [ -z "${SENDER_CLIENT_PID:-}" ]; then
+    local sender_pid="${SENDER_CLIENT_PID:-}"
+    if [ -n "${SENDER_PID:-}" ] && [[ "$SENDER_PID" =~ ^[0-9]+$ ]]; then
+        sender_pid="$SENDER_PID"
+    fi
+    if [ -z "${sender_pid:-}" ]; then
         return
     fi
 
     local detected=""
-    detected="$(detect_bundle_id_from_pid_tree "$SENDER_CLIENT_PID" 2>/dev/null || true)"
+    detected="$(detect_bundle_id_from_pid_tree "$sender_pid" 2>/dev/null || true)"
     if [ -z "$detected" ]; then
-        detected="$(detect_terminal_bundle_id_from_pid "$SENDER_CLIENT_PID" 2>/dev/null || true)"
+        detected="$(detect_terminal_bundle_id_from_pid "$sender_pid" 2>/dev/null || true)"
     fi
     [ -n "$detected" ] || return
 
@@ -289,7 +293,7 @@ autodetect_sender_terminal_bundle_ids() {
         BUNDLE_ID_LIST="$detected,$current"
     fi
     BUNDLE_ID=""
-    log_debug "auto-detected terminal bundle id: $detected (sender pid=$SENDER_CLIENT_PID)"
+    log_debug "auto-detected terminal bundle id: $detected (sender pid=$sender_pid)"
 }
 
 get_tmux_socket_from_env() {
