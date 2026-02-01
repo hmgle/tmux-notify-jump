@@ -600,6 +600,102 @@ dedupe_gc_maybe() {
     rm -rf "$gc_lock" 2>/dev/null || true
 }
 
+# Check if an event is enabled based on whitelist/blacklist/default
+# Usage: is_event_enabled "event_name" "whitelist" "blacklist" "default_list"
+# whitelist: comma-separated, empty=use default, *=all
+# blacklist: comma-separated events to exclude
+# Returns 0 if enabled, 1 if disabled
+csv_list_contains() {
+    local list="${1:-}"
+    local needle="${2:-}"
+
+    needle="$(trim_ws "$needle")"
+    [ -n "$needle" ] || return 1
+
+    list="${list//$'\n'/,}"
+    list="$(trim_ws "$list")"
+    [ -n "$list" ] || return 1
+
+    local -a parts=()
+    local IFS=','
+    read -r -a parts <<<"$list"
+
+    local part=""
+    for part in "${parts[@]}"; do
+        part="$(trim_ws "$part")"
+        [ -n "$part" ] || continue
+        if [ "$part" = "$needle" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+is_event_enabled() {
+    local event="${1:-}"
+    local whitelist="${2:-}"    # comma-separated, empty=use default, *=all
+    local blacklist="${3:-}"    # comma-separated, *=all
+    local default_list="${4:-}" # default whitelist
+
+    event="$(trim_ws "$event")"
+    [ -n "$event" ] || return 1
+
+    whitelist="${whitelist//$'\n'/,}"
+    blacklist="${blacklist//$'\n'/,}"
+    default_list="${default_list//$'\n'/,}"
+
+    whitelist="$(trim_ws "$whitelist")"
+    blacklist="$(trim_ws "$blacklist")"
+    default_list="$(trim_ws "$default_list")"
+
+    # Determine effective whitelist.
+    local effective_list=""
+    if [ -n "$whitelist" ]; then
+        effective_list="$whitelist"
+    else
+        effective_list="$default_list"
+    fi
+    effective_list="$(trim_ws "$effective_list")"
+
+    # Empty effective list means "disabled".
+    [ -n "$effective_list" ] || return 1
+
+    # Blacklist wins.
+    if [ "$blacklist" = "*" ]; then
+        return 1
+    fi
+    if csv_list_contains "$blacklist" "$event"; then
+        return 1
+    fi
+
+    # Whitelist.
+    if [ "$effective_list" = "*" ]; then
+        return 0
+    fi
+    if csv_list_contains "$effective_list" "$event"; then
+        return 0
+    fi
+    return 1
+}
+
+# Format notification title with optional event type
+# Usage: format_notify_title "prefix" "event" "message" "show_type"
+# show_type: 1=show event type in brackets (default), 0=hide
+format_notify_title() {
+    local prefix="$1"      # "Codex" or "Claude"
+    local event="${2:-}"   # event type
+    local message="$3"     # message content
+    local show_type="${4:-1}"  # show event type (default=1)
+
+    event="$(trim_ws "$event")"
+
+    if is_truthy "$show_type" && [ -n "$event" ]; then
+        printf '%s' "$prefix [$event]: $message"
+    else
+        printf '%s' "$prefix: $message"
+    fi
+}
+
 dedupe_should_suppress() {
     local window_ms="${1:-0}"
     local key="${2:-}"

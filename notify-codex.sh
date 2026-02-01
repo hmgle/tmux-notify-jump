@@ -51,22 +51,47 @@ MAX_TITLE="$(normalize_int "${CODEX_NOTIFY_MAX_TITLE:-${TMUX_NOTIFY_MAX_TITLE:-8
 MAX_BODY="$(normalize_int "${CODEX_NOTIFY_MAX_BODY:-${TMUX_NOTIFY_MAX_BODY:-200}}" 200)"
 TIMEOUT_MS="$(normalize_int "${CODEX_NOTIFY_TIMEOUT_MS:-${TMUX_NOTIFY_TIMEOUT:-0}}" 0)"
 
-EVENT_TYPE="$(jq -r '.type // empty' <<<"$payload" 2>/dev/null || true)"
-[ "$EVENT_TYPE" = "agent-turn-complete" ] || exit 0
+# Event filtering configuration
+CODEX_EVENTS="${CODEX_NOTIFY_EVENTS:-}"          # whitelist (empty=default, *=all)
+CODEX_EXCLUDE="${CODEX_NOTIFY_EXCLUDE_EVENTS:-}" # blacklist
+CODEX_DEFAULT_EVENTS="agent-turn-complete"       # default enabled events
+CODEX_SHOW_TYPE="${CODEX_NOTIFY_SHOW_EVENT_TYPE:-1}"  # show event type in title
 
-TITLE="$(jq -r '."last-assistant-message" // "Turn Complete" | tostring' <<<"$payload" 2>/dev/null || printf '%s' 'Turn Complete')"
-MESSAGE="$(jq -r '
-    (.["input-messages"] // []) as $m
-    | if ($m|type)=="array" then
-        $m
-        | map(if type=="string" then . else (.content // .text // tostring) end)
-        | join(" ")
-      elif ($m|type)=="string" then
-        $m
-      else
-        ($m|tostring)
-      end
-' <<<"$payload" 2>/dev/null || printf '%s' '')"
+EVENT_TYPE="$(jq -r '.type // empty' <<<"$payload" 2>/dev/null || true)"
+EVENT_TYPE="$(trim_ws "$EVENT_TYPE")"
+
+# Check if event is enabled
+if ! is_event_enabled "$EVENT_TYPE" "$CODEX_EVENTS" "$CODEX_EXCLUDE" "$CODEX_DEFAULT_EVENTS"; then
+    log_debug "event not enabled: $EVENT_TYPE"
+    exit 0
+fi
+
+# Extract title and message based on event type
+case "$EVENT_TYPE" in
+    agent-turn-complete)
+        TITLE_MSG="$(jq -r '."last-assistant-message" // "Turn Complete" | tostring' <<<"$payload" 2>/dev/null || printf '%s' 'Turn Complete')"
+        MESSAGE="$(jq -r '
+            (.["input-messages"] // []) as $m
+            | if ($m|type)=="array" then
+                $m
+                | map(if type=="string" then . else (.content // .text // tostring) end)
+                | join(" ")
+              elif ($m|type)=="string" then
+                $m
+              else
+                ($m|tostring)
+              end
+        ' <<<"$payload" 2>/dev/null || printf '%s' '')"
+        ;;
+    *)
+        # Generic handling for unknown events
+        TITLE_MSG="Event: $EVENT_TYPE"
+        MESSAGE="$(jq -r 'tostring' <<<"$payload" 2>/dev/null | head -c 200 || printf '%s' '')"
+        ;;
+esac
+
+# Format title with optional event type
+TITLE="$(format_notify_title "Codex" "$EVENT_TYPE" "$TITLE_MSG" "$CODEX_SHOW_TYPE")"
 
 ALLOW_FOCUS_FALLBACK="${CODEX_NOTIFY_FOCUS_ONLY_FALLBACK:-${TMUX_NOTIFY_FOCUS_ONLY_FALLBACK:-1}}"
 ALLOW_FALLBACK="${CODEX_NOTIFY_FALLBACK_TARGET:-${TMUX_NOTIFY_FALLBACK_TARGET:-0}}"
@@ -89,7 +114,7 @@ if ! is_executable_cmd "$JUMP_SH"; then
 fi
 
 args=(
-    --title "Codex: $TITLE"
+    --title "$TITLE"
     --body "$MESSAGE"
     --detach
     --timeout "$TIMEOUT_MS"

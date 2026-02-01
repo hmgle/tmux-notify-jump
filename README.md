@@ -184,6 +184,12 @@ Use `notify-codex.sh` as your Codex `notify` hook; it triggers on `agent-turn-co
 notify = ["/path/to/notify-codex.sh"]
 ```
 
+Optional event filtering (comma-separated lists; `*` = all):
+
+- `CODEX_NOTIFY_EVENTS`: whitelist (empty = default: `agent-turn-complete`)
+- `CODEX_NOTIFY_EXCLUDE_EVENTS`: blacklist (set to `*` to disable all)
+- `CODEX_NOTIFY_SHOW_EVENT_TYPE`: include `[event]` in title (`1`/`0`; default: `1`)
+
 Notes:
 
 - `notify` must be top-level (i.e. placed before any `[table]` / `[[array-of-tables]]` sections), otherwise TOML will scope it under the last table.
@@ -225,6 +231,14 @@ Example `~/.claude/settings.json`:
   }
 }
 ```
+
+Optional event filtering (comma-separated lists; `*` = all):
+
+- `CLAUDE_NOTIFY_EVENTS`: hook event whitelist (empty = default: `Stop,Notification,PostToolUseFailure`)
+- `CLAUDE_NOTIFY_EXCLUDE_EVENTS`: hook event blacklist (set to `*` to disable all)
+- `CLAUDE_NOTIFY_TYPES`: `Notification.notification_type` whitelist (empty = default: `permission_prompt,idle_prompt`)
+- `CLAUDE_NOTIFY_EXCLUDE_TYPES`: `Notification.notification_type` blacklist (set to `*` to disable all)
+- `CLAUDE_NOTIFY_SHOW_EVENT_TYPE`: include `[event]` in title (`1`/`0`; default: `1`)
 
 Notes:
 
