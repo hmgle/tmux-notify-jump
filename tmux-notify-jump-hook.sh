@@ -49,8 +49,8 @@ Usage:
   $0 --event <name> --pane-id <pane_id> [tmux-notify-jump options...]
 
 Examples (tmux.conf):
-  set-hook -g alert-activity "run-shell -b 'tmux-notify-jump-hook.sh --event alert-activity --pane-id \"#{hook_pane}\"'"
-  set-hook -g alert-bell     "run-shell -b 'tmux-notify-jump-hook.sh --event alert-bell --pane-id \"#{hook_pane}\" --timeout 0'"
+  set-hook -g alert-activity "run-shell -b 'tmux-notify-jump-hook.sh --event alert-activity --pane-id \"#{hook_pane}\" --tmux-socket \"#{socket_path}\"'"
+  set-hook -g alert-bell     "run-shell -b 'tmux-notify-jump-hook.sh --event alert-bell --pane-id \"#{hook_pane}\" --tmux-socket \"#{socket_path}\" --timeout 0'"
 
 Notes:
   - Prefer pane ids (%1) via #{hook_pane}; tmux-notify-jump will resolve to session/window/pane at jump time.
@@ -108,6 +108,18 @@ target_human="$(tmux_cmd display-message -p -t "$HOOK_PANE_ID" '#S:#I.#P' 2>/dev
 window_name="$(tmux_cmd display-message -p -t "$HOOK_PANE_ID" '#W' 2>/dev/null || true)"
 pane_title="$(tmux_cmd display-message -p -t "$HOOK_PANE_ID" '#{pane_title}' 2>/dev/null || true)"
 
+sender_tty=""
+sender_pid=""
+clients_info="$(tmux_cmd list-clients -F "#{client_tty}"$'\t'"#{client_pid}"$'\t'"#{client_pane}" 2>/dev/null || true)"
+while IFS=$'\t' read -r tty pid pane; do
+    [ -n "${pane:-}" ] || continue
+    if [ "$pane" = "$HOOK_PANE_ID" ] && [ -n "${tty:-}" ]; then
+        sender_tty="$tty"
+        sender_pid="$pid"
+        break
+    fi
+done <<<"$clients_info"
+
 if ! has_forward_arg --title; then
     if [ -n "$EVENT" ]; then
         FORWARD_ARGS+=(--title "tmux: $EVENT")
@@ -125,6 +137,13 @@ if ! has_forward_arg --body; then
         body="${body} — $pane_title"
     fi
     FORWARD_ARGS+=(--body "$body")
+fi
+
+if [ -n "$sender_tty" ] && ! has_forward_arg --sender-tty; then
+    FORWARD_ARGS+=(--sender-tty "$sender_tty")
+fi
+if is_integer "${sender_pid:-}" && ! has_forward_arg --sender-pid; then
+    FORWARD_ARGS+=(--sender-pid "$sender_pid")
 fi
 
 if ! has_forward_arg --detach && ! has_forward_arg --dry-run && ! forward_ui_is_dialog; then
