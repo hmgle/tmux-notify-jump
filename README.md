@@ -27,6 +27,7 @@ This repo contains:
 - Linux + X11 (Wayland is not supported by the focusing path)
   - `tmux` (required for `--target`/`--list`; optional for `--focus-only`)
   - `notify-send` (libnotify) with action support (`notify-send -A ... --wait`)
+  - Optional “dialog” UI mode: `zenity` (GNOME/GTK) or `kdialog` (KDE/Qt) or `yad`
 - macOS
   - `tmux` (required for `--target`/`--list`; optional for `--focus-only`)
   - `terminal-notifier`
@@ -104,7 +105,7 @@ Common options:
 - `--class <CLASS>` / `--classes <A,B>`: fallback terminal window class(es) to focus (default: `org.wezfurlong.wezterm,Alacritty`)
 - `--timeout <ms>`: notification timeout in milliseconds (default: `10000`; `0` may be sticky depending on daemon)
 - `--dedupe-ms <ms>`: suppress duplicate notifications within this window (default: `2000`; `0` disables). Uses a small cache under `XDG_CACHE_HOME`/`~/.cache` and prunes old entries automatically.
-- macOS: `--ui <notification|dialog>`: UI mode (`dialog` always waits for click; can also set `TMUX_NOTIFY_UI`, but `--ui` wins)
+- Linux/macOS: `--ui <notification|dialog>`: UI mode (`dialog` always waits for click; can also set `TMUX_NOTIFY_UI`, but `--ui` wins)
 - `--detach`: run in background (recommended for hook/callback use)
 - `--dry-run`: print what would happen and exit
 - `--wrap-cols <n>`: wrap body text to `<n>` columns (default: `80`; `0` disables wrapping)
@@ -122,7 +123,7 @@ CLI flags override environment variables where applicable.
 - `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK`: when hooks run without tmux (missing or no server/target), fall back to `--focus-only` instead of no-op (`0` disables; default: `1`)
 - `TMUX_NOTIFY_CLASS` / `TMUX_NOTIFY_CLASSES`: terminal window class(es) used by `xdotool search --class`
 - `TMUX_NOTIFY_BUNDLE_ID` / `TMUX_NOTIFY_BUNDLE_IDS`: macOS terminal bundle id(s) for `osascript` activation (overrides auto-detection; e.g. kitty is `net.kovidgoyal.kitty`)
-- `TMUX_NOTIFY_UI` (macOS): default for `--ui` (`notification` or `dialog`)
+- `TMUX_NOTIFY_UI`: default for `--ui` (`notification` or `dialog`)
 - `TMUX_NOTIFY_TIMEOUT`: default notification timeout in ms
 - `TMUX_NOTIFY_DEDUPE_MS`: suppress duplicate notifications within this window (default: `2000`; `0` disables; cached under `$XDG_CACHE_HOME` or `~/.cache`)
 - `TMUX_NOTIFY_MAX_TITLE` / `TMUX_NOTIFY_MAX_BODY`: truncate limits (`0` = no truncation)
@@ -146,6 +147,9 @@ TMUX_NOTIFY_UI=dialog
 
 # Works without tmux: focuses terminal on click
 ./tmux-notify-jump --focus-only --title "Build finished" --body "Click to focus your terminal"
+
+# Linux dialog mode (requires zenity/kdialog/yad)
+TMUX_NOTIFY_UI=dialog ./tmux-notify-jump --target "%1" --detach
 
 ./tmux-notify-jump-macos.sh "2:1.0" "Build finished" "Click to jump to the pane"
 ./tmux-notify-jump-macos.sh --target "work:0.1" --no-activate
@@ -201,7 +205,7 @@ Notes:
 - If tmux isn’t available/running, the wrapper falls back to `--focus-only` by default (set `CODEX_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0` to restore no-op).
 - Set `--detach` (already enabled by the wrapper) to avoid blocking on `notify-send --wait`.
 - The wrapper sets `--timeout 0` by default (via `CODEX_NOTIFY_TIMEOUT_MS`) so the notification stays until you click an action (daemon-dependent).
-- On macOS, set `TMUX_NOTIFY_UI=dialog` to use a modal "Jump/Dismiss" dialog that stays until clicked.
+- On macOS (and on Linux if you have `zenity`/`kdialog`/`yad`), set `TMUX_NOTIFY_UI=dialog` to use a modal "Jump/Dismiss" dialog that stays until clicked.
 - Requires `jq` (otherwise the wrapper no-ops; set `CODEX_NOTIFY_DEBUG=1` to see why in logs).
   - On macOS, tmux-launched processes sometimes inherit a restricted `PATH`; the wrapper adds common Homebrew paths (`/opt/homebrew/bin:/usr/local/bin`).
 - The wrapper prefers `tmux-notify-jump` on your `PATH`. To override, set `TMUX_NOTIFY_JUMP_SH` to an executable (e.g. `tmux-notify-jump-macos.sh`).
@@ -246,7 +250,7 @@ Optional event filtering (comma-separated lists; `*` = all):
 Notes:
 
 - The wrapper sets `--timeout 0` by default (via `CLAUDE_NOTIFY_TIMEOUT_MS`) so the notification stays until you click an action (daemon-dependent).
-- On macOS, set `TMUX_NOTIFY_UI=dialog` to use a modal "Jump/Dismiss" dialog that stays until clicked.
+- On macOS (and on Linux if you have `zenity`/`kdialog`/`yad`), set `TMUX_NOTIFY_UI=dialog` to use a modal "Jump/Dismiss" dialog that stays until clicked.
 - Requires `jq` (otherwise the wrapper no-ops; set `CLAUDE_NOTIFY_DEBUG=1` to see why in logs).
   - On macOS, tmux-launched processes sometimes inherit a restricted `PATH`; the wrapper adds common Homebrew paths (`/opt/homebrew/bin:/usr/local/bin`).
 - If Claude hooks run without tmux env but a tmux server is running, set `CLAUDE_NOTIFY_FALLBACK_TARGET=1` (or `TMUX_NOTIFY_FALLBACK_TARGET=1`) to target the most recently active tmux client pane.

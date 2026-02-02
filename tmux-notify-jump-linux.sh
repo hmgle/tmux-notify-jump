@@ -25,6 +25,7 @@ DEFAULT_MAX_TITLE="${TMUX_NOTIFY_MAX_TITLE:-80}"
 DEFAULT_MAX_BODY="${TMUX_NOTIFY_MAX_BODY:-200}"
 DEFAULT_WRAP_COLS="${TMUX_NOTIFY_WRAP_COLS:-80}"
 DEFAULT_DEDUPE_MS="${TMUX_NOTIFY_DEDUPE_MS:-2000}"
+DEFAULT_UI="${TMUX_NOTIFY_UI:-notification}"
 ACTION_GOTO_LABEL="${TMUX_NOTIFY_ACTION_GOTO_LABEL:-Jump}"
 ACTION_DISMISS_LABEL="${TMUX_NOTIFY_ACTION_DISMISS_LABEL:-Dismiss}"
 FOCUS_WINDOW_ID="${TMUX_NOTIFY_WINDOW_ID:-}"
@@ -45,6 +46,7 @@ MAX_BODY="$DEFAULT_MAX_BODY"
 WRAP_COLS="$DEFAULT_WRAP_COLS"
 DEDUPE_MS="$DEFAULT_DEDUPE_MS"
 DETACH=0
+UI="$DEFAULT_UI"
 SENDER_CLIENT_PID=""
 SENDER_CLIENT_TTY=""
 TMUX_SOCKET=""
@@ -69,6 +71,9 @@ Options:
   --dry-run            Print what would happen and exit
   --quiet              Suppress non-error output
   --timeout <ms>       Notification timeout in ms (default 10000; 0 may mean "sticky" depending on daemon)
+  --ui <notification|dialog>
+                      notification: desktop notification via notify-send (default)
+                      dialog: modal prompt with buttons (requires zenity/kdialog/yad)
   --max-title <n>      Max title length (0 = no truncation)
   --max-body <n>       Max body length (0 = no truncation)
   --wrap-cols <n>      Wrap body text to <n> columns (default: $DEFAULT_WRAP_COLS; 0 = no wrapping)
@@ -216,8 +221,67 @@ find_window_id_by_pid_tree() {
     return 1
 }
 
+pick_dialog_backend() {
+    if command -v zenity >/dev/null 2>&1; then
+        printf '%s' "zenity"
+        return 0
+    fi
+    if command -v kdialog >/dev/null 2>&1; then
+        printf '%s' "kdialog"
+        return 0
+    fi
+    if command -v yad >/dev/null 2>&1; then
+        printf '%s' "yad"
+        return 0
+    fi
+    return 1
+}
+
+dialog_stderr_indicates_failure() {
+    local err="${1:-}"
+    if [ -z "$err" ]; then
+        return 1
+    fi
+
+    # Keep this conservative: only treat as "backend failure" (not user dismiss)
+    # when stderr strongly indicates a missing/unusable GUI session (DISPLAY/DBus).
+    local err_lc=""
+    err_lc="${err,,}"
+    case "$err_lc" in
+        *"cannot open display"*|*"could not connect to display"*|*"cannot connect to x server"*|*"no protocol specified"*|*"authorization required"*|*"no x11"*|*"x11 connection rejected"*)
+            return 0
+            ;;
+        *"failed to connect to bus"*|*"unable to connect to dbus"*|*"unable to autolaunch a dbus-daemon"*|*"org.freedesktop.dbus"*|*"qdbusconnection:"*"could not connect"*|*"qdbusconnection:"*"failed to connect"*)
+            return 0
+            ;;
+    esac
+
+    return 1
+}
+
+timeout_ms_to_seconds() {
+    local ms="${1:-}"
+    if [ -z "$ms" ] || ! is_integer "$ms"; then
+        return 1
+    fi
+    if [ "$ms" -le 0 ]; then
+        return 1
+    fi
+    # Round up so we don't cut time short.
+    printf '%s' "$(( (ms + 999) / 1000 ))"
+}
+
 require_tools() {
-    require_tool notify-send
+    if [ "$UI" = "dialog" ]; then
+        if ! pick_dialog_backend >/dev/null 2>&1; then
+            warn "Dialog mode requested but no dialog backend found (zenity/kdialog/yad); falling back to notification"
+            UI="notification"
+        fi
+    fi
+
+    if [ "$UI" = "notification" ]; then
+        require_tool notify-send
+    fi
     if [ "$FOCUS_ONLY" -eq 0 ]; then
         require_tool tmux
     fi
@@ -232,6 +296,108 @@ require_tools() {
             NO_ACTIVATE=1
         fi
     fi
+}
+
+send_dialog() {
+    local backend=""
+    backend="$(pick_dialog_backend 2>/dev/null || true)"
+    if [ -z "$backend" ]; then
+        return 1
+    fi
+
+    local timeout_sec=""
+    timeout_sec="$(timeout_ms_to_seconds "$TIMEOUT" 2>/dev/null || true)"
+
+    set +e
+    case "$backend" in
+        zenity)
+            local args=(--question --title="$TITLE" --text="$BODY" --ok-label="$ACTION_GOTO_LABEL" --cancel-label="$ACTION_DISMISS_LABEL")
+            if [ -n "$timeout_sec" ]; then
+                args+=(--timeout="$timeout_sec")
+            fi
+            local err=""
+            err="$(zenity "${args[@]}" 2>&1 1>/dev/null)"
+            local status=$?
+            set -e
+            if [ $status -eq 0 ]; then
+                echo "goto"
+                return 0
+            fi
+            if [ $status -eq 1 ]; then
+                # Cancel/close/timeout.
+                if dialog_stderr_indicates_failure "$err"; then
+                    err="${err//$'\n'/; }"
+                    warn "zenity failed: ${err:-exit=$status}"
+                    return 1
+                fi
+                echo "dismiss"
+                return 0
+            fi
+            err="${err//$'\n'/; }"
+            warn "zenity failed: ${err:-exit=$status}"
+            return 1
+            ;;
+        kdialog)
+            local args=(--title "$TITLE" --yesno "$BODY" --yes-label "$ACTION_GOTO_LABEL" --no-label "$ACTION_DISMISS_LABEL")
+            if [ -n "$timeout_sec" ]; then
+                if kdialog --help 2>/dev/null | grep -q -- "--timeout"; then
+                    args+=(--timeout "$timeout_sec")
+                else
+                    warn "kdialog does not support --timeout; ignoring timeout in dialog mode"
+                fi
+            fi
+            local err=""
+            err="$(kdialog "${args[@]}" 2>&1 1>/dev/null)"
+            local status=$?
+            set -e
+            if [ $status -eq 0 ]; then
+                echo "goto"
+                return 0
+            fi
+            if [ $status -eq 1 ] || [ $status -eq 255 ]; then
+                if dialog_stderr_indicates_failure "$err"; then
+                    err="${err//$'\n'/; }"
+                    warn "kdialog failed: ${err:-exit=$status}"
+                    return 1
+                fi
+                echo "dismiss"
+                return 0
+            fi
+            err="${err//$'\n'/; }"
+            warn "kdialog failed: ${err:-exit=$status}"
+            return 1
+            ;;
+        yad)
+            local args=(--question --title="$TITLE" --text="$BODY" --button="$ACTION_GOTO_LABEL:0" --button="$ACTION_DISMISS_LABEL:1")
+            if [ -n "$timeout_sec" ]; then
+                args+=(--timeout="$timeout_sec")
+            fi
+            local err=""
+            err="$(yad "${args[@]}" 2>&1 1>/dev/null)"
+            local status=$?
+            set -e
+            if [ $status -eq 0 ]; then
+                echo "goto"
+                return 0
+            fi
+            if [ $status -eq 1 ] || [ $status -eq 252 ] || [ $status -eq 255 ]; then
+                if dialog_stderr_indicates_failure "$err"; then
+                    err="${err//$'\n'/; }"
+                    warn "yad failed: ${err:-exit=$status}"
+                    return 1
+                fi
+                echo "dismiss"
+                return 0
+            fi
+            err="${err//$'\n'/; }"
+            warn "yad failed: ${err:-exit=$status}"
+            return 1
+            ;;
+        *)
+            set -e
+            return 1
+            ;;
+    esac
 }
 
 send_notification() {
@@ -347,7 +513,23 @@ handle_action() {
     fi
 
     local action
-    action="$(send_notification)"
+    if [ "$UI" = "dialog" ]; then
+        local dialog_status=0
+        set +e
+        action="$(send_dialog)"
+        dialog_status=$?
+        set -e
+        if [ $dialog_status -ne 0 ] || [ -z "$action" ]; then
+            if command -v notify-send >/dev/null 2>&1; then
+                action="$(send_notification)"
+            else
+                warn "Dialog failed but notify-send is unavailable; cannot fall back to notification"
+                action="none"
+            fi
+        fi
+    else
+        action="$(send_notification)"
+    fi
 
     if [ "$action" = "goto" ]; then
         activate_terminal
@@ -534,6 +716,11 @@ parse_args() {
                 [ $# -gt 0 ] || die "--timeout requires an argument"
                 TIMEOUT="$1"
                 ;;
+            --ui)
+                shift
+                [ $# -gt 0 ] || die "--ui requires an argument"
+                UI="$1"
+                ;;
             --max-title)
                 shift
                 [ $# -gt 0 ] || die "--max-title requires an argument"
@@ -610,6 +797,10 @@ if [ -n "${TIMEOUT:-}" ] && ! [[ "$TIMEOUT" =~ ^[0-9]+$ ]]; then
     die "--timeout must be a non-negative integer (ms)"
 fi
 
+if [ "$UI" != "notification" ] && [ "$UI" != "dialog" ]; then
+    die "--ui must be one of: notification, dialog"
+fi
+
 if ! [[ "$MAX_TITLE" =~ ^[0-9]+$ ]]; then
     die "--max-title must be a non-negative integer"
 fi
@@ -646,6 +837,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
     fi
     log "Title: $TITLE"
     log "Body: $BODY"
+    log "UI: $UI"
     log "Window classes: ${WINDOW_CLASS_LIST:-$WINDOW_CLASS}"
     if is_integer "$FOCUS_WINDOW_ID"; then
         log "Focus window id: $FOCUS_WINDOW_ID"
@@ -706,6 +898,7 @@ if [ "$DETACH" -eq 1 ]; then
         if [ "$QUIET" -eq 1 ]; then
             child_args+=(--quiet)
         fi
+        child_args+=(--ui "$UI")
         child_args+=(--detach)
 
         if spawn_detached_self "${child_args[@]}"; then
