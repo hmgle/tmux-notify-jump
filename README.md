@@ -247,6 +247,19 @@ Optional event filtering (comma-separated lists; `*` = all):
 - `CLAUDE_NOTIFY_EXCLUDE_TYPES`: `Notification.notification_type` blacklist (set to `*` to disable all)
 - `CLAUDE_NOTIFY_SHOW_EVENT_TYPE`: include `[event]` in title (`1`/`0`; default: `1`)
 
+Optional UI routing (values: `notification` or `dialog`):
+
+- `CLAUDE_NOTIFY_UI_BY_TYPE`: per-`Notification.notification_type` UI override (e.g. `idle_prompt:notification,permission_prompt:dialog`)
+- `CLAUDE_NOTIFY_UI_BY_EVENT`: per-`hook_event_name` UI override (e.g. `Stop:dialog,PostToolUseFailure:notification`)
+- `CLAUDE_NOTIFY_UI`: wrapper default UI override (falls back to `TMUX_NOTIFY_UI` if unset)
+
+UI override precedence: `CLAUDE_NOTIFY_UI_BY_TYPE` → `CLAUDE_NOTIFY_UI_BY_EVENT` → `CLAUDE_NOTIFY_UI` → `TMUX_NOTIFY_UI`/default.
+
+Optional timeout routing (values: non-negative integer milliseconds):
+
+- `CLAUDE_NOTIFY_TIMEOUT_MS_BY_TYPE`: per-`Notification.notification_type` timeout override (e.g. `idle_prompt:10000,permission_prompt:0`)
+- `CLAUDE_NOTIFY_TIMEOUT_MS_BY_EVENT`: per-`hook_event_name` timeout override (e.g. `Stop:10000,PostToolUseFailure:0`)
+
 Notes:
 
 - The wrapper sets `--timeout 0` by default (via `CLAUDE_NOTIFY_TIMEOUT_MS`) so the notification stays until you click an action (daemon-dependent).
