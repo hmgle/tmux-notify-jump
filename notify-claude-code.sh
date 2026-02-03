@@ -29,6 +29,49 @@ log_debug() {
     printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$logfile" 2>/dev/null || true
 }
 
+is_valid_ui() {
+    local ui="${1:-}"
+    [ "$ui" = "notification" ] || [ "$ui" = "dialog" ]
+}
+
+lookup_kv_map() {
+    # Lookup key in a comma-separated key:value map string.
+    #
+    # Example:
+    #   lookup_kv_map "idle_prompt" "idle_prompt:notification,permission_prompt:dialog"
+    #
+    # Prints value to stdout if found, otherwise prints nothing.
+    local key="${1:-}"
+    local map="${2:-}"
+    [ -n "$key" ] || return 1
+    [ -n "$map" ] || return 1
+
+    local entry=""
+    local k=""
+    local v=""
+    local IFS=","
+    for entry in $map; do
+        entry="$(trim_ws "$entry")"
+        [ -n "$entry" ] || continue
+        case "$entry" in
+            *:*)
+                k="${entry%%:*}"
+                v="${entry#*:}"
+                ;;
+            *)
+                continue
+                ;;
+        esac
+        k="$(trim_ws "$k")"
+        v="$(trim_ws "$v")"
+        if [ "$k" = "$key" ]; then
+            printf '%s' "$v"
+            return 0
+        fi
+    done
+    return 1
+}
+
 need() {
     if command -v "$1" >/dev/null 2>&1; then
         return 0
@@ -46,7 +89,7 @@ fi
 
 MAX_TITLE="$(normalize_int "${CLAUDE_NOTIFY_MAX_TITLE:-${TMUX_NOTIFY_MAX_TITLE:-80}}" 80)"
 MAX_BODY="$(normalize_int "${CLAUDE_NOTIFY_MAX_BODY:-${TMUX_NOTIFY_MAX_BODY:-200}}" 200)"
-TIMEOUT_MS="$(normalize_int "${CLAUDE_NOTIFY_TIMEOUT_MS:-${TMUX_NOTIFY_TIMEOUT:-0}}" 0)"
+TIMEOUT_MS_BASE="$(normalize_int "${CLAUDE_NOTIFY_TIMEOUT_MS:-${TMUX_NOTIFY_TIMEOUT:-0}}" 0)"
 
 # Event filtering configuration
 CLAUDE_EVENTS="${CLAUDE_NOTIFY_EVENTS:-}"          # whitelist (empty=default, *=all)
@@ -62,6 +105,9 @@ CLAUDE_DEFAULT_TYPES="permission_prompt,idle_prompt"  # default notification typ
 # Parse event type
 EVENT_NAME="$(jq -r '.hook_event_name // empty' <<<"$payload" 2>/dev/null || true)"
 EVENT_NAME="$(trim_ws "$EVENT_NAME")"
+
+# Used for UI routing (set in Notification handler, kept empty otherwise).
+NOTIF_TYPE=""
 
 # Check if event is enabled
 if ! is_event_enabled "$EVENT_NAME" "$CLAUDE_EVENTS" "$CLAUDE_EXCLUDE" "$CLAUDE_DEFAULT_EVENTS"; then
@@ -148,6 +194,36 @@ TITLE="$(format_notify_title "Claude" "$EVENT_LABEL" "$TITLE_MSG" "$CLAUDE_SHOW_
 ALLOW_FOCUS_FALLBACK="${CLAUDE_NOTIFY_FOCUS_ONLY_FALLBACK:-${TMUX_NOTIFY_FOCUS_ONLY_FALLBACK:-1}}"
 ALLOW_FALLBACK="${CLAUDE_NOTIFY_FALLBACK_TARGET:-${TMUX_NOTIFY_FALLBACK_TARGET:-0}}"
 
+# Timeout routing (optional):
+# - For Notification events, allow per-notification_type timeout override
+# - Allow per-hook_event_name timeout override
+TIMEOUT_MS="$TIMEOUT_MS_BASE"
+TIMEOUT_MS_SOURCE="default"
+
+if [ "$EVENT_NAME" = "Notification" ] && [ -n "$NOTIF_TYPE" ] && [ -n "${CLAUDE_NOTIFY_TIMEOUT_MS_BY_TYPE:-}" ]; then
+    TIMEOUT_MS_CANDIDATE="$(lookup_kv_map "$NOTIF_TYPE" "${CLAUDE_NOTIFY_TIMEOUT_MS_BY_TYPE:-}" 2>/dev/null || true)"
+    if [ -n "$TIMEOUT_MS_CANDIDATE" ]; then
+        if is_integer "$TIMEOUT_MS_CANDIDATE"; then
+            TIMEOUT_MS="$TIMEOUT_MS_CANDIDATE"
+            TIMEOUT_MS_SOURCE="type:$NOTIF_TYPE"
+        else
+            log_debug "invalid timeout for type '$NOTIF_TYPE': '$TIMEOUT_MS_CANDIDATE' (expected non-negative integer ms)"
+        fi
+    fi
+fi
+
+if [ "$TIMEOUT_MS_SOURCE" = "default" ] && [ -n "$EVENT_NAME" ] && [ -n "${CLAUDE_NOTIFY_TIMEOUT_MS_BY_EVENT:-}" ]; then
+    TIMEOUT_MS_CANDIDATE="$(lookup_kv_map "$EVENT_NAME" "${CLAUDE_NOTIFY_TIMEOUT_MS_BY_EVENT:-}" 2>/dev/null || true)"
+    if [ -n "$TIMEOUT_MS_CANDIDATE" ]; then
+        if is_integer "$TIMEOUT_MS_CANDIDATE"; then
+            TIMEOUT_MS="$TIMEOUT_MS_CANDIDATE"
+            TIMEOUT_MS_SOURCE="event:$EVENT_NAME"
+        else
+            log_debug "invalid timeout for event '$EVENT_NAME': '$TIMEOUT_MS_CANDIDATE' (expected non-negative integer ms)"
+        fi
+    fi
+fi
+
 TARGET=""
 if command -v tmux >/dev/null 2>&1; then
     if tmux_cmd list-sessions >/dev/null 2>&1; then
@@ -174,6 +250,46 @@ args=(
     --max-body "$MAX_BODY"
 )
 
+# UI routing (optional):
+# - For Notification events, allow per-notification_type UI override
+# - Allow per-hook_event_name UI override
+# - Allow wrapper default UI override
+UI_OVERRIDE=""
+UI_OVERRIDE_SOURCE="none"
+
+if [ "$EVENT_NAME" = "Notification" ] && [ -n "$NOTIF_TYPE" ] && [ -n "${CLAUDE_NOTIFY_UI_BY_TYPE:-}" ]; then
+    UI_OVERRIDE="$(lookup_kv_map "$NOTIF_TYPE" "${CLAUDE_NOTIFY_UI_BY_TYPE:-}" 2>/dev/null || true)"
+    if [ -n "$UI_OVERRIDE" ]; then
+        if is_valid_ui "$UI_OVERRIDE"; then
+            UI_OVERRIDE_SOURCE="type:$NOTIF_TYPE"
+        else
+            log_debug "invalid ui for type '$NOTIF_TYPE': '$UI_OVERRIDE' (expected notification|dialog)"
+            UI_OVERRIDE=""
+        fi
+    fi
+fi
+
+if [ -z "$UI_OVERRIDE" ] && [ -n "$EVENT_NAME" ] && [ -n "${CLAUDE_NOTIFY_UI_BY_EVENT:-}" ]; then
+    UI_OVERRIDE="$(lookup_kv_map "$EVENT_NAME" "${CLAUDE_NOTIFY_UI_BY_EVENT:-}" 2>/dev/null || true)"
+    if [ -n "$UI_OVERRIDE" ]; then
+        if is_valid_ui "$UI_OVERRIDE"; then
+            UI_OVERRIDE_SOURCE="event:$EVENT_NAME"
+        else
+            log_debug "invalid ui for event '$EVENT_NAME': '$UI_OVERRIDE' (expected notification|dialog)"
+            UI_OVERRIDE=""
+        fi
+    fi
+fi
+
+if [ -z "$UI_OVERRIDE" ] && [ -n "${CLAUDE_NOTIFY_UI:-}" ]; then
+    if is_valid_ui "${CLAUDE_NOTIFY_UI:-}"; then
+        UI_OVERRIDE="${CLAUDE_NOTIFY_UI:-}"
+        UI_OVERRIDE_SOURCE="default"
+    else
+        log_debug "invalid CLAUDE_NOTIFY_UI: '${CLAUDE_NOTIFY_UI:-}' (expected notification|dialog)"
+    fi
+fi
+
 if [ -n "$TARGET" ]; then
     args=(--target "$TARGET" "${args[@]}")
 elif is_truthy "$ALLOW_FOCUS_FALLBACK"; then
@@ -194,6 +310,10 @@ else
     exit 0
 fi
 
+if [ -n "$UI_OVERRIDE" ]; then
+    args+=(--ui "$UI_OVERRIDE")
+fi
+
 if is_integer "${PPID:-}"; then
     args+=(--sender-pid "$PPID")
 fi
@@ -205,6 +325,8 @@ fi
 if [ "${CLAUDE_NOTIFY_DEBUG:-0}" = "1" ]; then
     log_debug "jump_sh=$JUMP_SH"
     log_debug "event=$EVENT_NAME label=$EVENT_LABEL target=${TARGET:-} focus_only=$([ -z "$TARGET" ] && echo "1" || echo "0") timeout=$TIMEOUT_MS max_title=$MAX_TITLE max_body=$MAX_BODY"
+    log_debug "timeout_source=$TIMEOUT_MS_SOURCE"
+    log_debug "ui_override=${UI_OVERRIDE:-} ui_source=$UI_OVERRIDE_SOURCE"
     "$JUMP_SH" "${args[@]}" || log_debug "jump script exited non-zero"
 else
     "$JUMP_SH" "${args[@]}" >/dev/null 2>&1 || true
