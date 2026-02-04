@@ -86,7 +86,7 @@ Options:
   --bundle-id <ID>     Use a single terminal bundle id
   --bundle-ids <A,B>   Comma-separated bundle ids (default: $BUNDLE_ID_LIST)
   --sender-tty <TTY>   Prefer switching this tmux client (e.g. /dev/ttys001)
-  --sender-pid <PID>   Prefer focusing terminal by this pid tree (default: $PPID)
+  --sender-pid <PID>   Prefer focusing terminal by this pid tree (default: \$PPID)
   --tmux-socket <PATH> Use a specific tmux server socket (passed to tmux -S)
   --dry-run            Print what would happen and exit
   --quiet              Suppress non-error output
@@ -104,37 +104,6 @@ Examples:
   $0 "2:1.0" "Build finished" "Click to jump to the pane"
   $0 --target "work:0.1" --title "Task complete"
 EOF
-}
-
-die() {
-    echo "Error: $*" >&2
-    exit 1
-}
-
-warn() {
-    if [ "$QUIET" -eq 1 ]; then
-        return
-    fi
-    echo "Warning: $*" >&2
-}
-
-log() {
-    if [ "$QUIET" -eq 1 ]; then
-        return
-    fi
-    echo "$*"
-}
-
-log_debug() {
-    [ "${TMUX_NOTIFY_DEBUG:-0}" = "1" ] || return 0
-    local logfile="${TMUX_NOTIFY_DEBUG_LOG:-}"
-    if [ -z "$logfile" ]; then
-        local root=""
-        root="$(cache_root_dir)"
-        logfile="$root/tmux-notify-jump/debug.log"
-    fi
-    mkdir -p "$(dirname "$logfile")" 2>/dev/null || true
-    printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$logfile" 2>/dev/null || true
 }
 
 require_tools() {
@@ -695,6 +664,7 @@ jump_to_pane() {
 
 parse_args() {
     while [ $# -gt 0 ]; do
+        # First try macOS-specific options
         case "$1" in
             --action-callback)
                 ACTION_CALLBACK=1
@@ -706,30 +676,14 @@ parse_args() {
                 fi
                 continue
                 ;;
-            --target)
-                shift
-                [ $# -gt 0 ] || die "--target requires an argument"
-                TARGET="$1"
-                ;;
-            --focus-only)
-                FOCUS_ONLY=1
-                ;;
-            --title)
-                shift
-                [ $# -gt 0 ] || die "--title requires an argument"
-                TITLE="$1"
-                ;;
-            --body)
-                shift
-                [ $# -gt 0 ] || die "--body requires an argument"
-                BODY="$1"
-                ;;
             --bundle-id)
                 shift
                 [ $# -gt 0 ] || die "--bundle-id requires an argument"
                 BUNDLE_ID="$1"
                 BUNDLE_ID_LIST="$1"
                 BUNDLE_ID_EXPLICIT=1
+                shift
+                continue
                 ;;
             --bundle-ids)
                 shift
@@ -737,120 +691,88 @@ parse_args() {
                 BUNDLE_ID_LIST="$1"
                 BUNDLE_ID=""
                 BUNDLE_ID_EXPLICIT=1
-                ;;
-            --sender-tty)
                 shift
-                [ $# -gt 0 ] || die "--sender-tty requires an argument"
-                SENDER_CLIENT_TTY="$1"
+                continue
                 ;;
             --sender-pid)
                 shift
                 [ $# -gt 0 ] || die "--sender-pid requires an argument"
                 SENDER_PID="$1"
-                ;;
-            --tmux-socket)
                 shift
-                [ $# -gt 0 ] || die "--tmux-socket requires an argument"
-                TMUX_SOCKET="$1"
-                TMUX_NOTIFY_TMUX_SOCKET="$1"
-                ;;
-            --no-activate)
-                NO_ACTIVATE=1
-                ;;
-            --list)
-                LIST_ONLY=1
-                ;;
-            --dry-run)
-                DRY_RUN=1
-                ;;
-            --quiet)
-                QUIET=1
-                ;;
-            --timeout)
-                shift
-                [ $# -gt 0 ] || die "--timeout requires an argument"
-                TIMEOUT="$1"
-                ;;
-            --ui)
-                shift
-                [ $# -gt 0 ] || die "--ui requires an argument"
-                UI="$1"
-                ;;
-            --max-title)
-                shift
-                [ $# -gt 0 ] || die "--max-title requires an argument"
-                MAX_TITLE="$1"
-                ;;
-            --max-body)
-                shift
-                [ $# -gt 0 ] || die "--max-body requires an argument"
-                MAX_BODY="$1"
-                ;;
-            --dedupe-ms)
-                shift
-                [ $# -gt 0 ] || die "--dedupe-ms requires an argument"
-                DEDUPE_MS="$1"
-                ;;
-            --detach)
-                DETACH=1
+                continue
                 ;;
             # Callback-specific arguments (used internally by -execute)
             --cb-target)
                 shift
                 [ $# -gt 0 ] || die "--cb-target requires an argument"
                 CB_TARGET="$1"
+                shift
+                continue
                 ;;
             --cb-sender-tty)
                 shift
                 [ $# -gt 0 ] || die "--cb-sender-tty requires an argument"
                 CB_SENDER_TTY="$1"
+                shift
+                continue
                 ;;
             --cb-sender-pid)
                 shift
                 [ $# -gt 0 ] || die "--cb-sender-pid requires an argument"
                 CB_SENDER_PID="$1"
+                shift
+                continue
                 ;;
             --cb-focus-only)
                 shift
                 [ $# -gt 0 ] || die "--cb-focus-only requires an argument"
                 CB_FOCUS_ONLY="$1"
+                shift
+                continue
                 ;;
             --cb-no-activate)
                 shift
                 [ $# -gt 0 ] || die "--cb-no-activate requires an argument"
                 CB_NO_ACTIVATE="$1"
+                shift
+                continue
                 ;;
             --cb-tmux-socket)
                 shift
                 [ $# -gt 0 ] || die "--cb-tmux-socket requires an argument"
                 CB_TMUX_SOCKET="$1"
+                shift
+                continue
                 ;;
             --cb-bundle-ids)
                 shift
                 [ $# -gt 0 ] || die "--cb-bundle-ids requires an argument"
                 CB_BUNDLE_IDS="$1"
-                ;;
-            -h|--help)
-                print_usage
-                exit 0
-                ;;
-            --)
                 shift
-                break
+                continue
                 ;;
             -*)
+                # Try common options (sets _PARSE_CONSUMED)
+                if parse_common_opt "$@"; then
+                    case "$_PARSE_CONSUMED" in
+                        help)
+                            print_usage
+                            exit 0
+                            ;;
+                        end)
+                            shift
+                            break
+                            ;;
+                        *)
+                            shift "$_PARSE_CONSUMED"
+                            continue
+                            ;;
+                    esac
+                fi
                 die "Unknown option: $1"
                 ;;
             *)
-                if [ -z "$TARGET" ]; then
-                    TARGET="$1"
-                elif [ -z "$TITLE" ]; then
-                    TITLE="$1"
-                elif [ -z "$BODY" ]; then
-                    BODY="$1"
-                else
-                    die "Too many arguments: $1"
-                fi
+                handle_positional_arg "$1"
                 ;;
         esac
         shift
@@ -858,6 +780,9 @@ parse_args() {
 }
 
 parse_args "$@"
+
+# Sync _QUIET for shared logging functions
+_QUIET="$QUIET"
 
 if [ "$ACTION_CALLBACK" -eq 1 ]; then
     handle_action_callback
@@ -892,36 +817,15 @@ if [ "$UI" != "notification" ] && [ "$UI" != "dialog" ]; then
     die "--ui must be one of: notification, dialog"
 fi
 
-if ! [[ "$MAX_TITLE" =~ ^[0-9]+$ ]]; then
-    die "--max-title must be a non-negative integer"
-fi
-if ! [[ "$MAX_BODY" =~ ^[0-9]+$ ]]; then
-    die "--max-body must be a non-negative integer"
-fi
-if ! [[ "$DEDUPE_MS" =~ ^[0-9]+$ ]]; then
-    die "--dedupe-ms must be a non-negative integer (ms)"
-fi
+validate_nonneg_int "$MAX_TITLE" "--max-title"
+validate_nonneg_int "$MAX_BODY" "--max-body"
+validate_nonneg_int "$DEDUPE_MS" "--dedupe-ms"
 
 TITLE="$(truncate_text "$MAX_TITLE" "$TITLE")"
 BODY="$(truncate_text "$MAX_BODY" "$BODY")"
 
 if [ "$DRY_RUN" -eq 1 ]; then
-    if [ "$FOCUS_ONLY" -eq 1 ]; then
-        log "Mode: focus-only"
-    else
-        parse_target "$TARGET"
-        if [ -n "${PANE_ID:-}" ]; then
-            log "Target: $PANE_ID"
-            if tmux_cmd list-sessions >/dev/null 2>&1; then
-                ensure_target_resolved
-                log "Resolved target: $SESSION:$WINDOW.$PANE"
-            else
-                log "Resolved target: (tmux server not running)"
-            fi
-        else
-            log "Target: $SESSION:$WINDOW.$PANE"
-        fi
-    fi
+    print_dry_run_target
     log "Title: $TITLE"
     log "Body: $BODY"
     log "Bundle ids: ${BUNDLE_ID_LIST:-$BUNDLE_ID}"

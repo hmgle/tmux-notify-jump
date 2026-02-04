@@ -87,25 +87,6 @@ Examples:
 EOF
 }
 
-die() {
-    echo "Error: $*" >&2
-    exit 1
-}
-
-warn() {
-    if [ "$QUIET" -eq 1 ]; then
-        return
-    fi
-    echo "Warning: $*" >&2
-}
-
-log() {
-    if [ "$QUIET" -eq 1 ]; then
-        return
-    fi
-    echo "$*"
-}
-
 wrap_text() {
     local cols="$1"
     local text="$2"
@@ -652,119 +633,60 @@ jump_to_pane() {
 
 parse_args() {
     while [ $# -gt 0 ]; do
+        # First try Linux-specific options
         case "$1" in
-            --target)
-                shift
-                [ $# -gt 0 ] || die "--target requires an argument"
-                TARGET="$1"
-                ;;
-            --focus-only)
-                FOCUS_ONLY=1
-                ;;
-            --title)
-                shift
-                [ $# -gt 0 ] || die "--title requires an argument"
-                TITLE="$1"
-                ;;
-            --body)
-                shift
-                [ $# -gt 0 ] || die "--body requires an argument"
-                BODY="$1"
-                ;;
             --class)
                 shift
                 [ $# -gt 0 ] || die "--class requires an argument"
                 WINDOW_CLASS="$1"
                 WINDOW_CLASS_LIST="$1"
+                shift
+                continue
                 ;;
             --classes)
                 shift
                 [ $# -gt 0 ] || die "--classes requires an argument"
                 WINDOW_CLASS_LIST="$1"
                 WINDOW_CLASS=""
-                ;;
-            --sender-tty)
                 shift
-                [ $# -gt 0 ] || die "--sender-tty requires an argument"
-                SENDER_CLIENT_TTY="$1"
+                continue
                 ;;
             --sender-pid)
                 shift
                 [ $# -gt 0 ] || die "--sender-pid requires an argument"
                 SENDER_CLIENT_PID="$1"
-                ;;
-            --tmux-socket)
                 shift
-                [ $# -gt 0 ] || die "--tmux-socket requires an argument"
-                TMUX_SOCKET="$1"
-                TMUX_NOTIFY_TMUX_SOCKET="$1"
-                ;;
-            --no-activate)
-                NO_ACTIVATE=1
-                ;;
-            --list)
-                LIST_ONLY=1
-                ;;
-            --dry-run)
-                DRY_RUN=1
-                ;;
-            --quiet)
-                QUIET=1
-                ;;
-            --timeout)
-                shift
-                [ $# -gt 0 ] || die "--timeout requires an argument"
-                TIMEOUT="$1"
-                ;;
-            --ui)
-                shift
-                [ $# -gt 0 ] || die "--ui requires an argument"
-                UI="$1"
-                ;;
-            --max-title)
-                shift
-                [ $# -gt 0 ] || die "--max-title requires an argument"
-                MAX_TITLE="$1"
-                ;;
-            --max-body)
-                shift
-                [ $# -gt 0 ] || die "--max-body requires an argument"
-                MAX_BODY="$1"
+                continue
                 ;;
             --wrap-cols)
                 shift
                 [ $# -gt 0 ] || die "--wrap-cols requires an argument"
                 WRAP_COLS="$1"
-                ;;
-            --dedupe-ms)
                 shift
-                [ $# -gt 0 ] || die "--dedupe-ms requires an argument"
-                DEDUPE_MS="$1"
-                ;;
-            --detach)
-                DETACH=1
-                ;;
-            -h|--help)
-                print_usage
-                exit 0
-                ;;
-            --)
-                shift
-                break
+                continue
                 ;;
             -*)
+                # Try common options (sets _PARSE_CONSUMED)
+                if parse_common_opt "$@"; then
+                    case "$_PARSE_CONSUMED" in
+                        help)
+                            print_usage
+                            exit 0
+                            ;;
+                        end)
+                            shift
+                            break
+                            ;;
+                        *)
+                            shift "$_PARSE_CONSUMED"
+                            continue
+                            ;;
+                    esac
+                fi
                 die "Unknown option: $1"
                 ;;
             *)
-                if [ -z "$TARGET" ]; then
-                    TARGET="$1"
-                elif [ -z "$TITLE" ]; then
-                    TITLE="$1"
-                elif [ -z "$BODY" ]; then
-                    BODY="$1"
-                else
-                    die "Too many arguments: $1"
-                fi
+                handle_positional_arg "$1"
                 ;;
         esac
         shift
@@ -772,6 +694,9 @@ parse_args() {
 }
 
 parse_args "$@"
+
+# Sync _QUIET for shared logging functions
+_QUIET="$QUIET"
 
 if [ "$LIST_ONLY" -eq 1 ]; then
     list_panes
@@ -801,40 +726,17 @@ if [ "$UI" != "notification" ] && [ "$UI" != "dialog" ]; then
     die "--ui must be one of: notification, dialog"
 fi
 
-if ! [[ "$MAX_TITLE" =~ ^[0-9]+$ ]]; then
-    die "--max-title must be a non-negative integer"
-fi
-if ! [[ "$MAX_BODY" =~ ^[0-9]+$ ]]; then
-    die "--max-body must be a non-negative integer"
-fi
-if ! [[ "$WRAP_COLS" =~ ^[0-9]+$ ]]; then
-    die "--wrap-cols must be a non-negative integer"
-fi
-if ! [[ "$DEDUPE_MS" =~ ^[0-9]+$ ]]; then
-    die "--dedupe-ms must be a non-negative integer (ms)"
-fi
+validate_nonneg_int "$MAX_TITLE" "--max-title"
+validate_nonneg_int "$MAX_BODY" "--max-body"
+validate_nonneg_int "$WRAP_COLS" "--wrap-cols"
+validate_nonneg_int "$DEDUPE_MS" "--dedupe-ms"
 
 TITLE="$(truncate_text "$MAX_TITLE" "$TITLE")"
 BODY="$(truncate_text "$MAX_BODY" "$BODY")"
 BODY="$(wrap_text "$WRAP_COLS" "$BODY")"
 
 if [ "$DRY_RUN" -eq 1 ]; then
-    if [ "$FOCUS_ONLY" -eq 1 ]; then
-        log "Mode: focus-only"
-    else
-        parse_target "$TARGET"
-        if [ -n "${PANE_ID:-}" ]; then
-            log "Target: $PANE_ID"
-            if tmux_cmd list-sessions >/dev/null 2>&1; then
-                ensure_target_resolved
-                log "Resolved target: $SESSION:$WINDOW.$PANE"
-            else
-                log "Resolved target: (tmux server not running)"
-            fi
-        else
-            log "Target: $SESSION:$WINDOW.$PANE"
-        fi
-    fi
+    print_dry_run_target
     log "Title: $TITLE"
     log "Body: $BODY"
     log "UI: $UI"
