@@ -271,6 +271,11 @@ Notes:
 - The wrapper prefers `tmux-notify-jump` on your `PATH`. To override, set `TMUX_NOTIFY_JUMP_SH` to an executable (e.g. `tmux-notify-jump-macos.sh`).
 - If you installed via `./install.sh`, you can auto-configure with `./install.sh --prefix "$HOME/.local" --configure-claude` (it creates a timestamped `settings.json.bak.*` before editing; requires `python3`).
 
+## Tests
+
+- Install `bats-core` (macOS: `brew install bats-core`).
+- Run: `./tests/run_all.sh` (or `make -C tests test`).
+
 ## Troubleshooting
 
 - Actions not available: your `notify-send`/notification daemon may not support `-A` or `--wait`; the script falls back to a plain notification (no jump).
