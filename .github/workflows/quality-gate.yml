@@ -3,8 +3,6 @@ name: Quality Gate
 on:
   workflow_run:
     workflows:
-      - Syntax
-      - Lint
       - Test
     types:
       - completed
@@ -12,6 +10,10 @@ on:
 permissions:
   actions: read
   contents: read
+
+concurrency:
+  group: quality-gate-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
 
 jobs:
   gate:
@@ -26,48 +28,70 @@ jobs:
             const repo = context.repo.repo;
             const sha = context.payload.workflow_run.head_sha;
 
-            const runsResp = await github.rest.actions.listWorkflowRunsForRepo({
-              owner,
-              repo,
-              head_sha: sha,
-              per_page: 100,
-            });
+            const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+            const maxAttempts = 60;
+            const intervalMs = 10000;
 
-            const latestByName = {};
-            for (const run of runsResp.data.workflow_runs) {
-              if (!required.includes(run.name)) {
-                continue;
-              }
-              const existing = latestByName[run.name];
-              if (!existing || new Date(run.created_at) > new Date(existing.created_at)) {
-                latestByName[run.name] = run;
-              }
-            }
+            let missing = [];
+            let pending = [];
+            let failed = [];
 
-            const missing = [];
-            const pending = [];
-            const failed = [];
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+              const runsResp = await github.rest.actions.listWorkflowRunsForRepo({
+                owner,
+                repo,
+                head_sha: sha,
+                per_page: 100,
+              });
 
-            for (const name of required) {
-              const run = latestByName[name];
-              if (!run) {
-                missing.push(name);
-                continue;
+              const latestByName = {};
+              for (const run of runsResp.data.workflow_runs) {
+                if (!required.includes(run.name)) {
+                  continue;
+                }
+                const existing = latestByName[run.name];
+                if (!existing || new Date(run.created_at) > new Date(existing.created_at)) {
+                  latestByName[run.name] = run;
+                }
               }
 
-              if (run.status !== "completed") {
-                pending.push(`${name} (${run.status})`);
-                continue;
+              missing = [];
+              pending = [];
+              failed = [];
+
+              for (const name of required) {
+                const run = latestByName[name];
+                if (!run) {
+                  missing.push(name);
+                  continue;
+                }
+
+                if (run.status !== "completed") {
+                  pending.push(`${name} (${run.status})`);
+                  continue;
+                }
+
+                if (run.conclusion !== "success") {
+                  failed.push(`${name} (${run.conclusion})`);
+                }
               }
 
-              if (run.conclusion !== "success") {
-                failed.push(`${name} (${run.conclusion})`);
+              core.info(
+                `Attempt ${attempt}/${maxAttempts} for ${sha}: missing=[${missing.join(", ")}], pending=[${pending.join(", ")}], failed=[${failed.join(", ")}]`
+              );
+
+              if (missing.length === 0 && pending.length === 0) {
+                break;
+              }
+
+              if (attempt < maxAttempts) {
+                await sleep(intervalMs);
               }
             }
 
             if (missing.length > 0 || pending.length > 0) {
               core.setFailed(
-                `Waiting for required workflows. Missing: [${missing.join(", ")}], Pending: [${pending.join(", ")}]`
+                `Timed out waiting for required workflows. Missing: [${missing.join(", ")}], Pending: [${pending.join(", ")}]`
               );
               return;
             }
@@ -78,4 +102,3 @@ jobs:
             }
 
             core.info(`Quality gate passed for ${sha}`);
-
