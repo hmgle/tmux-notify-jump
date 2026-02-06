@@ -1,5 +1,10 @@
 # tmux-notify-jump
 
+[![Syntax](https://github.com/hmgle/tmux-notify-jump/actions/workflows/syntax.yml/badge.svg)](https://github.com/hmgle/tmux-notify-jump/actions/workflows/syntax.yml)
+[![Lint](https://github.com/hmgle/tmux-notify-jump/actions/workflows/lint.yml/badge.svg)](https://github.com/hmgle/tmux-notify-jump/actions/workflows/lint.yml)
+[![Test](https://github.com/hmgle/tmux-notify-jump/actions/workflows/test.yml/badge.svg)](https://github.com/hmgle/tmux-notify-jump/actions/workflows/test.yml)
+[![Quality Gate](https://github.com/hmgle/tmux-notify-jump/actions/workflows/quality-gate.yml/badge.svg)](https://github.com/hmgle/tmux-notify-jump/actions/workflows/quality-gate.yml)
+
 Send a desktop notification on Linux/X11 or macOS.
 
 - If tmux is available, you can jump to a target tmux pane when you click an action button.
@@ -275,6 +280,15 @@ Notes:
 
 - Install `bats-core` (macOS: `brew install bats-core`).
 - Run: `./tests/run_all.sh` (or `make -C tests test`).
+- The suite includes shared-lib unit tests plus entry-script smoke tests (`tests/entry_smoke.bats`) for Linux/macOS dry-run and common validation paths.
+
+## Quality checks
+
+- Install `shellcheck` (macOS: `brew install shellcheck`; Linux: `apt install shellcheck`).
+- Run `make syntax` for shell syntax checks.
+- Run `make lint` for shellcheck.
+- Run `make test` for the bats suite.
+- Run `make check` to execute syntax + lint + tests in one command.
 
 ## Troubleshooting
 

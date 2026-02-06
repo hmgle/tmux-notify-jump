@@ -295,16 +295,19 @@ parse_common_opt() {
             return 0
             ;;
         --list)
+            # shellcheck disable=SC2034 # consumed by caller scripts
             LIST_ONLY=1
             _PARSE_CONSUMED=1
             return 0
             ;;
         --dry-run)
+            # shellcheck disable=SC2034 # consumed by caller scripts
             DRY_RUN=1
             _PARSE_CONSUMED=1
             return 0
             ;;
         --quiet)
+            # shellcheck disable=SC2034 # consumed by caller scripts
             QUIET=1
             # Keep shared logging suppressed even if someone logs during parsing.
             _QUIET=1
@@ -342,6 +345,7 @@ parse_common_opt() {
             return 0
             ;;
         --detach)
+            # shellcheck disable=SC2034 # consumed by caller scripts
             DETACH=1
             _PARSE_CONSUMED=1
             return 0
@@ -1014,7 +1018,7 @@ read_timestamp_file() {
     local file="$1"
     local ts=""
     if [ -f "$file" ]; then
-        ts="$(cat "$file" 2>/dev/null | tr -d '\n' || true)"
+        ts="$(tr -d '\n' <"$file" 2>/dev/null || true)"
     fi
     if [[ "$ts" =~ ^[0-9]+$ ]]; then
         printf '%s' "$ts"
@@ -1027,8 +1031,20 @@ write_timestamp_file() {
     local file="$1"
     local ts="$2"
     local tmp="$file.$$.$RANDOM"
-    printf '%s\n' "$ts" >"$tmp" 2>/dev/null || true
-    mv -f "$tmp" "$file" 2>/dev/null || true
+
+    if ! printf '%s\n' "$ts" >"$tmp" 2>/dev/null; then
+        log_debug "write_timestamp_file: failed to write temp file: $tmp"
+        rm -f "$tmp" 2>/dev/null || true
+        return 1
+    fi
+
+    if ! mv -f "$tmp" "$file" 2>/dev/null; then
+        log_debug "write_timestamp_file: failed to move temp file into place: $file"
+        rm -f "$tmp" 2>/dev/null || true
+        return 1
+    fi
+
+    return 0
 }
 
 # Check if timestamp is within the given window
@@ -1063,7 +1079,7 @@ acquire_lock() {
 
     # Check if lock is stale (owner process dead or empty pid file)
     local pid=""
-    pid="$(cat "$lock/pid" 2>/dev/null | tr -d '\n' || true)"
+    pid="$(tr -d '\n' <"$lock/pid" 2>/dev/null || true)"
 
     # Empty pid file - process died between mkdir and write
     if [ -d "$lock" ] && [ ! -s "$lock/pid" ]; then
@@ -1150,8 +1166,8 @@ gc_lock_is_stale() {
 
     local lock_pid=""
     local lock_ts=""
-    lock_pid="$(cat "$lock_dir/pid" 2>/dev/null | tr -d '\n' || true)"
-    lock_ts="$(cat "$lock_dir/ts" 2>/dev/null | tr -d '\n' || true)"
+    lock_pid="$(tr -d '\n' <"$lock_dir/pid" 2>/dev/null || true)"
+    lock_ts="$(tr -d '\n' <"$lock_dir/ts" 2>/dev/null || true)"
 
     # Invalid timestamp format
     if ! [[ "$lock_ts" =~ ^[0-9]+$ ]]; then
@@ -1390,7 +1406,10 @@ dedupe_should_suppress() {
     local root
     root="$(cache_root_dir)"
     local dir="$root/tmux-notify-jump/dedupe"
-    mkdir -p "$dir" 2>/dev/null || true
+    if ! mkdir -p "$dir" 2>/dev/null; then
+        log_debug "dedupe_should_suppress: failed to create cache dir: $dir"
+        return 1
+    fi
 
     local hash
     hash="$(printf '%s' "$key" | sha256_hex_stdin 2>/dev/null | tr -d '\n' || true)"

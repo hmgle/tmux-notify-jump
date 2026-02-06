@@ -718,18 +718,8 @@ else
     BODY="${BODY:-Click to jump to $TARGET}"
 fi
 
-if [ -n "${TIMEOUT:-}" ] && ! [[ "$TIMEOUT" =~ ^[0-9]+$ ]]; then
-    die "--timeout must be a non-negative integer (ms)"
-fi
-
-if [ "$UI" != "notification" ] && [ "$UI" != "dialog" ]; then
-    die "--ui must be one of: notification, dialog"
-fi
-
-validate_nonneg_int "$MAX_TITLE" "--max-title"
-validate_nonneg_int "$MAX_BODY" "--max-body"
+validate_common_options
 validate_nonneg_int "$WRAP_COLS" "--wrap-cols"
-validate_nonneg_int "$DEDUPE_MS" "--dedupe-ms"
 
 TITLE="$(truncate_text "$MAX_TITLE" "$TITLE")"
 BODY="$(truncate_text "$MAX_BODY" "$BODY")"
@@ -737,8 +727,7 @@ BODY="$(wrap_text "$WRAP_COLS" "$BODY")"
 
 if [ "$DRY_RUN" -eq 1 ]; then
     print_dry_run_target
-    log "Title: $TITLE"
-    log "Body: $BODY"
+    print_dry_run_common
     log "UI: $UI"
     log "Window classes: ${WINDOW_CLASS_LIST:-$WINDOW_CLASS}"
     if is_integer "$FOCUS_WINDOW_ID"; then
@@ -747,18 +736,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
     if is_integer "$SENDER_CLIENT_PID"; then
         log "Sender tmux client pid: $SENDER_CLIENT_PID"
     fi
-    if [ -n "${SENDER_CLIENT_TTY:-}" ]; then
-        log "Sender tmux client tty: $SENDER_CLIENT_TTY"
-    fi
-    if [ -n "${TMUX_SOCKET:-}" ]; then
-        log "tmux socket: $TMUX_SOCKET"
-    fi
-    log "Focus terminal: $([ "$NO_ACTIVATE" -eq 1 ] && echo "no" || echo "yes")"
-    log "Timeout: ${TIMEOUT:-default}"
-    log "Max title length: $MAX_TITLE"
-    log "Max body length: $MAX_BODY"
     log "Wrap columns: $WRAP_COLS"
-    log "Dedupe window (ms): $DEDUPE_MS"
     exit 0
 fi
 
