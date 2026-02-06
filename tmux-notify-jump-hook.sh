@@ -11,11 +11,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 load_user_config
 
-die() {
-    echo "Error: $*" >&2
-    exit 1
-}
-
 EVENT=""
 HOOK_PANE_ID=""
 FORWARD_ARGS=()

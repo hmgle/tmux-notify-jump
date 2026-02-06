@@ -320,8 +320,21 @@ send_notification_wait() {
 
     local output=""
     set +e
-    output="$(terminal-notifier "${args[@]}" 2>/dev/null || true)"
+    output="$(terminal-notifier "${args[@]}" 2>/dev/null)"
+    local status=$?
     set -e
+
+    if [ "$status" -ne 0 ]; then
+        if [ -z "$output" ]; then
+            # True startup/exec failure (no callback payload at all).
+            log_debug "terminal-notifier -wait failed (status=$status)"
+            warn "Failed to send notification"
+            return 1
+        fi
+        # Non-zero with payload can still mean the notification was shown
+        # (e.g. timeout/close); keep parsing instead of re-sending.
+        log_debug "terminal-notifier -wait exited non-zero with payload (status=$status); parsing output"
+    fi
 
     if command -v python3 >/dev/null 2>&1; then
         local parsed=""
@@ -531,7 +544,18 @@ send_notification() {
         return
     fi
     if [ "$DETACH" -eq 0 ] && supports_wait; then
-        send_notification_wait
+        local action=""
+        local wait_status=0
+        set +e
+        action="$(send_notification_wait)"
+        wait_status=$?
+        set -e
+        if [ "$wait_status" -eq 0 ] && [ -n "$action" ]; then
+            echo "$action"
+            return
+        fi
+        log_debug "wait-mode notification unavailable; falling back to -execute"
+        send_notification_execute
         return
     fi
     send_notification_execute
@@ -809,37 +833,16 @@ else
     BODY="${BODY:-Click to jump to $TARGET}"
 fi
 
-if [ -n "${TIMEOUT:-}" ] && ! [[ "$TIMEOUT" =~ ^[0-9]+$ ]]; then
-    die "--timeout must be a non-negative integer (ms)"
-fi
-
-if [ "$UI" != "notification" ] && [ "$UI" != "dialog" ]; then
-    die "--ui must be one of: notification, dialog"
-fi
-
-validate_nonneg_int "$MAX_TITLE" "--max-title"
-validate_nonneg_int "$MAX_BODY" "--max-body"
-validate_nonneg_int "$DEDUPE_MS" "--dedupe-ms"
+validate_common_options
 
 TITLE="$(truncate_text "$MAX_TITLE" "$TITLE")"
 BODY="$(truncate_text "$MAX_BODY" "$BODY")"
 
 if [ "$DRY_RUN" -eq 1 ]; then
     print_dry_run_target
-    log "Title: $TITLE"
-    log "Body: $BODY"
+    print_dry_run_common
+    log "UI: $UI"
     log "Bundle ids: ${BUNDLE_ID_LIST:-$BUNDLE_ID}"
-    if [ -n "${SENDER_CLIENT_TTY:-}" ]; then
-        log "Sender tmux client tty: $SENDER_CLIENT_TTY"
-    fi
-    if [ -n "${TMUX_SOCKET:-}" ]; then
-        log "tmux socket: $TMUX_SOCKET"
-    fi
-    log "Focus terminal: $([ "$NO_ACTIVATE" -eq 1 ] && echo "no" || echo "yes")"
-    log "Timeout: ${TIMEOUT:-default}"
-    log "Max title length: $MAX_TITLE"
-    log "Max body length: $MAX_BODY"
-    log "Dedupe window (ms): $DEDUPE_MS"
     exit 0
 fi
 
