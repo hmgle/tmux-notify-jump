@@ -124,7 +124,7 @@ case "$EVENT_TYPE" in
         ;;
     session.error)
         TITLE_MSG="Session Error"
-        MESSAGE="$(jq -r '.message // empty' <<<"$payload" 2>/dev/null || true)"
+        MESSAGE="$(jq -r '.properties.error // .message // empty' <<<"$payload" 2>/dev/null || true)"
         MESSAGE="${MESSAGE:-An error occurred}"
         ;;
     session.created)
@@ -134,8 +134,15 @@ case "$EVENT_TYPE" in
         ;;
     session.deleted)
         TITLE_MSG="Session Ended"
+        REASON="$(jq -r '.properties.reason // empty' <<<"$payload" 2>/dev/null || true)"
         SESSION_ID="$(jq -r '.properties.sessionID // empty' <<<"$payload" 2>/dev/null || true)"
-        MESSAGE="${SESSION_ID:-Session terminated}"
+        if [ -n "$REASON" ]; then
+            MESSAGE="$REASON"
+        elif [ -n "$SESSION_ID" ]; then
+            MESSAGE="$SESSION_ID"
+        else
+            MESSAGE="Session terminated"
+        fi
         ;;
     permission.replied)
         TITLE_MSG="Permission Replied"

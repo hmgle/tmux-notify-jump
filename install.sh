@@ -282,9 +282,17 @@ configure_opencode() {
     if [ -f "$plugin_dst" ] || [ -L "$plugin_dst" ]; then
         local existing_target=""
         if [ -L "$plugin_dst" ]; then
-            existing_target="$(readlink -f "$plugin_dst" 2>/dev/null || true)"
+            # readlink -f is GNU-only; fall back to portable resolution
+            existing_target="$(readlink -f "$plugin_dst" 2>/dev/null \
+                || python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$plugin_dst" 2>/dev/null \
+                || true)"
         fi
-        if [ "$existing_target" = "$(readlink -f "$plugin_src" 2>/dev/null || true)" ]; then
+        local canonical_src=""
+        canonical_src="$(readlink -f "$plugin_src" 2>/dev/null \
+            || python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$plugin_src" 2>/dev/null \
+            || true)"
+        if [ -n "$existing_target" ] && [ -n "$canonical_src" ] \
+            && [ "$existing_target" = "$canonical_src" ]; then
             echo "OpenCode plugin already installed: $plugin_dst"
             return 0
         fi
@@ -296,6 +304,7 @@ configure_opencode() {
             ln -sf "$plugin_src" "$plugin_dst"
             ;;
         copy)
+            rm -f "$plugin_dst"
             cp -f "$plugin_src" "$plugin_dst"
             ;;
     esac
