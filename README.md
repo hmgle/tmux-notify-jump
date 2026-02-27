@@ -24,6 +24,8 @@ This repo contains:
 - `tmux-notify-jump-hook.sh`: helper for tmux hooks (uses `#{hook_pane}` pane id)
 - `notify-codex.sh`: Codex CLI wrapper (reads JSON from `$1`)
 - `notify-claude-code.sh`: Claude Code wrapper (reads JSON from stdin)
+- `notify-opencode.sh`: OpenCode wrapper (reads JSON from stdin)
+- `opencode-plugin/tmux-notify-jump.ts`: OpenCode plugin (bridges events to `notify-opencode.sh`)
 
 ## Requirements
 
@@ -43,9 +45,9 @@ This repo contains:
 - `xdotool` for focusing the terminal window before jumping (the script auto-disables focusing if missing)
 - `python3` for safer Unicode truncation
 
-### Wrappers (Codex/Claude hooks)
+### Wrappers (Codex/Claude/OpenCode hooks)
 
-- `jq` (required by `notify-codex.sh` and `notify-claude-code.sh`; if missing, the wrappers no-op)
+- `jq` (required by `notify-codex.sh`, `notify-claude-code.sh`, and `notify-opencode.sh`; if missing, the wrappers no-op)
 
 ## Install
 
@@ -60,6 +62,7 @@ Optional: configure hooks (makes backups; won’t overwrite existing `notify=` /
 ```bash
 ./install.sh --prefix "$HOME/.local" --symlink --configure-codex
 ./install.sh --prefix "$HOME/.local" --symlink --configure-claude
+./install.sh --prefix "$HOME/.local" --symlink --configure-opencode
 ```
 
 Uninstall:
@@ -71,7 +74,7 @@ Uninstall:
 Or run from the repo (no install):
 
 ```bash
-chmod +x tmux-notify-jump tmux-notify-jump-linux.sh tmux-notify-jump-macos.sh tmux-notify-jump-hook.sh notify-codex.sh notify-claude-code.sh
+chmod +x tmux-notify-jump tmux-notify-jump-linux.sh tmux-notify-jump-macos.sh tmux-notify-jump-hook.sh notify-codex.sh notify-claude-code.sh notify-opencode.sh
 ```
 
 ## Usage
@@ -136,7 +139,7 @@ CLI flags override environment variables where applicable.
 - `TMUX_NOTIFY_ACTION_GOTO_LABEL`: label for the "goto" action (default: `Jump`)
 - `TMUX_NOTIFY_ACTION_DISMISS_LABEL`: label for the "dismiss" action (default: `Dismiss`)
 
-To switch modes without changing your Codex/Claude hook config, create `~/.config/tmux-notify-jump/env`:
+To switch modes without changing your Codex/Claude/OpenCode hook config, create `~/.config/tmux-notify-jump/env`:
 
 ```bash
 TMUX_NOTIFY_UI=dialog
@@ -275,6 +278,51 @@ Notes:
 - If tmux isn’t available/running, the wrapper falls back to `--focus-only` by default (set `CLAUDE_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0` to restore no-op).
 - The wrapper prefers `tmux-notify-jump` on your `PATH`. To override, set `TMUX_NOTIFY_JUMP_SH` to an executable (e.g. `tmux-notify-jump-macos.sh`).
 - If you installed via `./install.sh`, you can auto-configure with `./install.sh --prefix "$HOME/.local" --configure-claude` (it creates a timestamped `settings.json.bak.*` before editing; requires `python3`).
+
+## OpenCode integration
+
+Use the `opencode-plugin/tmux-notify-jump.ts` plugin to bridge OpenCode events to `notify-opencode.sh`, which calls `tmux-notify-jump` (or `TMUX_NOTIFY_JUMP_SH` if set).
+
+Install the plugin:
+
+```bash
+./install.sh --prefix "$HOME/.local" --symlink --configure-opencode
+```
+
+Or manually:
+
+```bash
+cp opencode-plugin/tmux-notify-jump.ts ~/.config/opencode/plugins/
+```
+
+Default events: `session.idle`, `permission.asked`. Additional events (`session.error`, `session.created`, `session.deleted`, `permission.replied`, `tool.execute.after`) can be enabled via filtering.
+
+Optional event filtering (comma-separated lists; `*` = all):
+
+- `OPENCODE_NOTIFY_EVENTS`: whitelist (empty = default: `session.idle,permission.asked`)
+- `OPENCODE_NOTIFY_EXCLUDE_EVENTS`: blacklist (set to `*` to disable all)
+- `OPENCODE_NOTIFY_SHOW_EVENT_TYPE`: include `[event]` in title (`1`/`0`; default: `1`)
+
+Optional UI/timeout routing (per-event type):
+
+- `OPENCODE_NOTIFY_UI_BY_EVENT`: per-event UI override (e.g. `session.idle:notification,permission.asked:dialog`)
+- `OPENCODE_NOTIFY_TIMEOUT_MS_BY_EVENT`: per-event timeout override (e.g. `session.idle:10000,permission.asked:0`)
+- `OPENCODE_NOTIFY_UI`: wrapper default UI override (falls back to `TMUX_NOTIFY_UI` if unset)
+
+UI override precedence: `OPENCODE_NOTIFY_UI_BY_EVENT` → `OPENCODE_NOTIFY_UI` → `TMUX_NOTIFY_UI`/default.
+
+Notes:
+
+- The TypeScript plugin pipes JSON via stdin to `notify-opencode.sh` (same pattern as Claude Code).
+- The wrapper sets `--timeout 0` by default (via `OPENCODE_NOTIFY_TIMEOUT_MS`) so the notification stays until you click an action (daemon-dependent).
+- On macOS (and on Linux if you have `zenity`/`kdialog`/`yad`), set `TMUX_NOTIFY_UI=dialog` to use a modal "Jump/Dismiss" dialog that stays until clicked.
+- Requires `jq` (otherwise the wrapper no-ops; set `OPENCODE_NOTIFY_DEBUG=1` to see why in logs).
+  - On macOS, tmux-launched processes sometimes inherit a restricted `PATH`; the wrapper adds common Homebrew paths (`/opt/homebrew/bin:/usr/local/bin`).
+- Run OpenCode inside tmux so `TMUX_PANE` is available.
+- If OpenCode runs without tmux env but a tmux server is running, set `OPENCODE_NOTIFY_FALLBACK_TARGET=1` (or `TMUX_NOTIFY_FALLBACK_TARGET=1`) to target the most recently active tmux client pane.
+- If tmux isn't available/running, the wrapper falls back to `--focus-only` by default (set `OPENCODE_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0` to restore no-op).
+- The wrapper prefers `tmux-notify-jump` on your `PATH`. To override, set `TMUX_NOTIFY_JUMP_SH` to an executable.
+- Override the shell wrapper path in the plugin with `OPENCODE_NOTIFY_CMD` (default: `notify-opencode.sh` on PATH).
 
 ## Tests
 

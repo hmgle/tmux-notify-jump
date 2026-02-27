@@ -8,6 +8,7 @@ SCRIPTS := \
 	tmux-notify-jump-hook.sh \
 	notify-codex.sh \
 	notify-claude-code.sh \
+	notify-opencode.sh \
 	install.sh
 
 help:

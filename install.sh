@@ -7,8 +7,10 @@ BINDIR="${BINDIR:-}"
 UNINSTALL=0
 CONFIGURE_CODEX=0
 CONFIGURE_CLAUDE=0
+CONFIGURE_OPENCODE=0
 CODEX_CONFIG_PATH="${CODEX_CONFIG_PATH:-}"
 CLAUDE_CONFIG_PATH="${CLAUDE_CONFIG_PATH:-}"
+OPENCODE_PLUGIN_PATH="${OPENCODE_PLUGIN_PATH:-}"
 
 usage() {
     cat <<EOF
@@ -21,8 +23,10 @@ Options:
   --copy            Install via copies
   --configure-codex Configure Codex notify hook (opt-in)
   --configure-claude Configure Claude hooks (opt-in)
+  --configure-opencode Configure OpenCode plugin (opt-in)
   --codex-config <path>  Codex config.toml path (default: ~/.codex/config.toml)
   --claude-config <path> Claude settings.json path (default: ~/.claude/settings.json)
+  --opencode-plugin-path <path> OpenCode plugins dir (default: ~/.config/opencode/plugins)
   --uninstall       Remove installed files
   -h, --help        Show help
 
@@ -31,6 +35,7 @@ Examples:
   $0 --bindir "\$HOME/bin" --copy
   $0 --prefix "\$HOME/.local" --symlink --configure-codex
   $0 --prefix "\$HOME/.local" --symlink --configure-claude
+  $0 --prefix "\$HOME/.local" --symlink --configure-opencode
 EOF
 }
 
@@ -262,6 +267,43 @@ print(f"Configured Claude hooks in: {path}")
 PY
 }
 
+configure_opencode() {
+    local plugin_dir="${OPENCODE_PLUGIN_PATH:-$HOME/.config/opencode/plugins}"
+    local plugin_src="$REPO_DIR/opencode-plugin/tmux-notify-jump.ts"
+    local plugin_dst="$plugin_dir/tmux-notify-jump.ts"
+
+    if [ ! -f "$plugin_src" ]; then
+        echo "Warning: plugin source not found: $plugin_src"
+        return 0
+    fi
+
+    mkdir -p "$plugin_dir"
+
+    if [ -f "$plugin_dst" ] || [ -L "$plugin_dst" ]; then
+        local existing_target=""
+        if [ -L "$plugin_dst" ]; then
+            existing_target="$(readlink -f "$plugin_dst" 2>/dev/null || true)"
+        fi
+        if [ "$existing_target" = "$(readlink -f "$plugin_src" 2>/dev/null || true)" ]; then
+            echo "OpenCode plugin already installed: $plugin_dst"
+            return 0
+        fi
+        backup_file "$plugin_dst"
+    fi
+
+    case "$MODE" in
+        symlink)
+            ln -sf "$plugin_src" "$plugin_dst"
+            ;;
+        copy)
+            cp -f "$plugin_src" "$plugin_dst"
+            ;;
+    esac
+
+    echo "Installed OpenCode plugin: $plugin_dst"
+    echo "Ensure notify-opencode.sh is on your PATH"
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --prefix)
@@ -286,6 +328,9 @@ while [ $# -gt 0 ]; do
         --configure-claude)
             CONFIGURE_CLAUDE=1
             ;;
+        --configure-opencode)
+            CONFIGURE_OPENCODE=1
+            ;;
         --codex-config)
             shift
             [ $# -gt 0 ] || die "--codex-config requires a path"
@@ -295,6 +340,11 @@ while [ $# -gt 0 ]; do
             shift
             [ $# -gt 0 ] || die "--claude-config requires a path"
             CLAUDE_CONFIG_PATH="$1"
+            ;;
+        --opencode-plugin-path)
+            shift
+            [ $# -gt 0 ] || die "--opencode-plugin-path requires a path"
+            OPENCODE_PLUGIN_PATH="$1"
             ;;
         --uninstall)
             UNINSTALL=1
@@ -324,6 +374,7 @@ FILES=(
     tmux-notify-jump-hook.sh
     notify-codex.sh
     notify-claude-code.sh
+    notify-opencode.sh
 )
 
 if [ "$UNINSTALL" -eq 1 ]; then
@@ -370,4 +421,8 @@ fi
 
 if [ "$CONFIGURE_CLAUDE" -eq 1 ]; then
     configure_claude "$BINDIR/notify-claude-code.sh"
+fi
+
+if [ "$CONFIGURE_OPENCODE" -eq 1 ]; then
+    configure_opencode
 fi
