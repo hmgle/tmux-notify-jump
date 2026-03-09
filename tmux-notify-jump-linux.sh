@@ -276,9 +276,8 @@ activate_window_with_awesome_client() {
     fi
 
     set +e
-    TMUX_NOTIFY_AWESOME_WINDOW_ID="$wid" awesome-client >/dev/null 2>&1 <<'EOF'
-local target = tonumber(os.getenv("TMUX_NOTIFY_AWESOME_WINDOW_ID") or "")
-assert(target, "missing window id")
+    awesome-client >/dev/null 2>&1 <<EOF
+local target = ${wid}
 
 for _, c in ipairs(client.get()) do
     if tonumber(c.window) == target then
