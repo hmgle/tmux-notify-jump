@@ -196,10 +196,49 @@ find_window_id_by_pid_tree() {
             fi
         fi
 
+        ids="$(xdotool search --pid "$current_pid" 2>/dev/null || true)"
+        if IFS= read -r wid <<<"$ids"; then
+            if is_integer "$wid"; then
+                printf '%s' "$wid"
+                return 0
+            fi
+        fi
+
         current_pid="$(ps -o ppid= -p "$current_pid" 2>/dev/null | tr -d ' ' || true)"
         depth=$((depth + 1))
     done
     return 1
+}
+
+activate_window_with_awesome_client() {
+    local wid="${1:-}"
+    if ! is_integer "$wid"; then
+        return 1
+    fi
+    if ! command -v awesome-client >/dev/null 2>&1; then
+        return 1
+    fi
+
+    set +e
+    TMUX_NOTIFY_AWESOME_WINDOW_ID="$wid" awesome-client >/dev/null 2>&1 <<'EOF'
+local target = tonumber(os.getenv("TMUX_NOTIFY_AWESOME_WINDOW_ID") or "")
+assert(target, "missing window id")
+
+for _, c in ipairs(client.get()) do
+    if tonumber(c.window) == target then
+        c:jump_to()
+        client.focus = c
+        c:raise()
+        return
+    end
+end
+
+error("client not found")
+EOF
+    local status=$?
+    set -e
+
+    [ $status -eq 0 ]
 }
 
 pick_dialog_backend() {
@@ -611,6 +650,11 @@ activate_terminal() {
         warn "No terminal window found to focus (try TMUX_NOTIFY_WINDOW_ID, --class/--classes, or --no-activate)"
         return
     fi
+
+    if activate_window_with_awesome_client "$wid"; then
+        return
+    fi
+
     xdotool windowactivate "$wid" 2>/dev/null || warn "Failed to activate terminal window"
 }
 
