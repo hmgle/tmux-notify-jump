@@ -177,6 +177,60 @@ is_wayland_session() {
     [ -n "${WAYLAND_DISPLAY:-}" ]
 }
 
+window_has_wm_state() {
+    local wid="${1:-}"
+    if ! is_integer "$wid"; then
+        return 1
+    fi
+    xprop -id "$wid" WM_STATE >/dev/null 2>&1
+}
+
+get_window_parent_id() {
+    local wid="${1:-}"
+    if ! is_integer "$wid"; then
+        return 1
+    fi
+
+    local parent=""
+    parent="$(
+        xwininfo -id "$wid" 2>/dev/null |
+            sed -n 's/^[[:space:]]*Parent window id: \([0-9][0-9]*\) .*/\1/p' |
+            sed -n '1p'
+    )"
+    if is_integer "$parent" && [ "$parent" -gt 0 ] && [ "$parent" != "$wid" ]; then
+        printf '%s' "$parent"
+        return 0
+    fi
+    return 1
+}
+
+resolve_wm_managed_window_id() {
+    local wid="${1:-}"
+    if ! is_integer "$wid"; then
+        return 1
+    fi
+
+    local current="$wid"
+    local depth=0
+    while is_integer "$current" && [ "$current" -gt 0 ] && [ "$depth" -lt 20 ]; do
+        if window_has_wm_state "$current"; then
+            printf '%s' "$current"
+            return 0
+        fi
+
+        local parent=""
+        parent="$(get_window_parent_id "$current" 2>/dev/null || true)"
+        if ! is_integer "$parent" || [ "$parent" -le 0 ] || [ "$parent" = "$current" ]; then
+            break
+        fi
+
+        current="$parent"
+        depth=$((depth + 1))
+    done
+
+    return 1
+}
+
 find_window_id_by_pid_tree() {
     local pid="${1:-}"
     if ! is_integer "$pid"; then
@@ -187,17 +241,19 @@ find_window_id_by_pid_tree() {
     local depth=0
     while is_integer "$current_pid" && [ "$current_pid" -gt 1 ] && [ "$depth" -lt 50 ]; do
         local ids=""
-        ids="$(xdotool search --onlyvisible --pid "$current_pid" 2>/dev/null || true)"
+        ids="$(xdotool search --onlyvisible --maxdepth 2 --pid "$current_pid" 2>/dev/null || true)"
         local wid=""
         if IFS= read -r wid <<<"$ids"; then
+            wid="$(resolve_wm_managed_window_id "$wid" 2>/dev/null || printf '%s' "$wid")"
             if is_integer "$wid"; then
                 printf '%s' "$wid"
                 return 0
             fi
         fi
 
-        ids="$(xdotool search --pid "$current_pid" 2>/dev/null || true)"
+        ids="$(xdotool search --maxdepth 2 --pid "$current_pid" 2>/dev/null || true)"
         if IFS= read -r wid <<<"$ids"; then
+            wid="$(resolve_wm_managed_window_id "$wid" 2>/dev/null || printf '%s' "$wid")"
             if is_integer "$wid"; then
                 printf '%s' "$wid"
                 return 0
@@ -518,9 +574,14 @@ handle_action() {
         if [ -z "$SENDER_CLIENT_TTY" ]; then
             SENDER_CLIENT_TTY="$(get_sender_tmux_client_tty 2>/dev/null || true)"
         fi
-        if [ -z "$SENDER_CLIENT_PID" ]; then
-            if [ -n "$SENDER_CLIENT_TTY" ]; then
-                SENDER_CLIENT_PID="$(get_tmux_client_pid_by_tty "$SENDER_CLIENT_TTY" 2>/dev/null || true)"
+        if [ -n "$SENDER_CLIENT_TTY" ]; then
+            local tty_client_pid=""
+            tty_client_pid="$(get_tmux_client_pid_by_tty "$SENDER_CLIENT_TTY" 2>/dev/null || true)"
+            if is_integer "$tty_client_pid"; then
+                # In tmux-aware flows, tty->client_pid is usually the most precise
+                # way to identify the terminal window. This should override
+                # wrapper-supplied parent pids such as notify hook PPIDs.
+                SENDER_CLIENT_PID="$tty_client_pid"
             fi
         fi
         if [ -z "$SENDER_CLIENT_PID" ]; then
@@ -626,6 +687,10 @@ activate_terminal() {
         wid="$WINDOWID"
     fi
 
+    if [ -n "$wid" ]; then
+        wid="$(resolve_wm_managed_window_id "$wid" 2>/dev/null || printf '%s' "$wid")"
+    fi
+
     if [ -z "$wid" ]; then
         local class_list="${WINDOW_CLASS_LIST:-$WINDOW_CLASS}"
         local class_item
@@ -634,8 +699,9 @@ activate_terminal() {
             class_item="$(trim_ws "$class_item")"
             [ -n "$class_item" ] || continue
             local ids=""
-            ids="$(xdotool search --onlyvisible --class "$class_item" 2>/dev/null || true)"
+            ids="$(xdotool search --onlyvisible --maxdepth 2 --class "$class_item" 2>/dev/null || true)"
             if IFS= read -r wid <<<"$ids"; then
+                wid="$(resolve_wm_managed_window_id "$wid" 2>/dev/null || printf '%s' "$wid")"
                 :
             else
                 wid=""
