@@ -275,23 +275,31 @@ activate_window_with_awesome_client() {
         return 1
     fi
 
+    local output=""
     set +e
-    awesome-client >/dev/null 2>&1 <<EOF
-local target = ${wid}
+    output="$(
+        awesome-client 2>&1 <<EOF
+local target = $wid
 
 for _, c in ipairs(client.get()) do
     if tonumber(c.window) == target then
         c:jump_to()
         client.focus = c
         c:raise()
-        return
+        return "ok"
     end
 end
 
 error("client not found")
 EOF
+    )"
     local status=$?
     set -e
+
+    if [ $status -ne 0 ] && [ -n "${output:-}" ]; then
+        output="${output//$'\n'/; }"
+        log_debug "awesome-client activation failed for window $wid: $output"
+    fi
 
     [ $status -eq 0 ]
 }
@@ -367,8 +375,12 @@ require_tools() {
             return
         fi
         if ! command -v xdotool >/dev/null 2>&1; then
-            warn "Missing xdotool; terminal focusing is disabled"
-            NO_ACTIVATE=1
+            if command -v awesome-client >/dev/null 2>&1; then
+                warn "Missing xdotool; falling back to awesome-client-only activation"
+            else
+                warn "Missing xdotool; terminal focusing is disabled"
+                NO_ACTIVATE=1
+            fi
         fi
     fi
 }
@@ -860,6 +872,10 @@ if [ "$DETACH" -eq 1 ]; then
     # `notify-send --wait` must stay alive to handle actions, so detach into a new
     # session when possible.
     if ! is_truthy "${TMUX_NOTIFY_ALREADY_DETACHED:-0}"; then
+        if [ "$FOCUS_ONLY" -eq 1 ] && ! is_integer "${SENDER_CLIENT_PID:-}" && is_integer "${PPID:-}"; then
+            SENDER_CLIENT_PID="$PPID"
+        fi
+
         child_args=()
         if [ "$FOCUS_ONLY" -eq 1 ]; then
             child_args+=(--focus-only)
