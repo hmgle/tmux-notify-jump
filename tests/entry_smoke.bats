@@ -102,6 +102,236 @@ FAKE
     [[ "$output" == *"Notification sent"* ]]
 }
 
+@test "tmux-notify-jump-macos.sh: tmux client pid overrides wrapper sender pid for bundle detection" {
+    fake_bin="$TEST_TEMP_DIR/bin"
+    mkdir -p "$fake_bin"
+
+    cat >"$fake_bin/tmux" <<'FAKE'
+#!/usr/bin/env bash
+cmd="$1"
+shift || true
+
+case "$cmd" in
+    list-sessions)
+        exit 0
+        ;;
+    list-panes)
+        if [ "${1:-}" = "-a" ] && [ "${2:-}" = "-F" ] && [ "${3:-}" = "#{pane_id}" ]; then
+            printf '%%9\n'
+            exit 0
+        fi
+        exit 1
+        ;;
+    list-clients)
+        if [ "${1:-}" = "-F" ] && [ "${2:-}" = "#{client_tty} #{client_pane}" ]; then
+            printf '/dev/ttys222 %%1\n'
+            exit 0
+        fi
+        if [ "${1:-}" = "-F" ] && [ "${2:-}" = "#{client_tty} #{client_pid}" ]; then
+            printf '/dev/ttys222 222\n'
+            exit 0
+        fi
+        if [ "${1:-}" = "-F" ] && [ "${2:-}" = "#{client_activity} #{client_pid} #{client_session}" ]; then
+            printf '10 222 work\n'
+            exit 0
+        fi
+        if [ "${1:-}" = "-F" ] && [ "${2:-}" = "#{client_activity} #{client_tty} #{client_session}" ]; then
+            printf '10 /dev/ttys222 work\n'
+            exit 0
+        fi
+        exit 1
+        ;;
+    display-message)
+        if [ "${1:-}" = "-p" ] && [ "${2:-}" = "-t" ] && [ "${3:-}" = "%9" ] && [ "${4:-}" = "#S:#I.#P" ]; then
+            printf 'work:3.1'
+            exit 0
+        fi
+        if [ "${1:-}" = "-p" ] && [ "${2:-}" = "-t" ] && [ "${3:-}" = "%1" ] && [ "${4:-}" = "#S" ]; then
+            printf 'work'
+            exit 0
+        fi
+        if [ "${1:-}" = "-p" ] && [ "${2:-}" = "#{client_tty}" ]; then
+            printf '/dev/ttys222'
+            exit 0
+        fi
+        exit 1
+        ;;
+    switch-client)
+        printf '%s\n' "$*" >"$TEST_TEMP_DIR/switch-client.args"
+        exit 0
+        ;;
+    select-window|select-pane)
+        exit 0
+        ;;
+esac
+
+exit 1
+FAKE
+    chmod +x "$fake_bin/tmux"
+
+    cat >"$fake_bin/osascript" <<'FAKE'
+#!/usr/bin/env bash
+if [ "${1:-}" = "-" ]; then
+    printf 'Jump\n'
+    exit 0
+fi
+
+if [ "${1:-}" = "-e" ]; then
+    printf '%s\n' "${2:-}" >>"$TEST_TEMP_DIR/osascript.log"
+    case "${2:-}" in
+        *'net.kovidgoyal.kitty'*)
+            exit 0
+            ;;
+        *)
+            exit 1
+            ;;
+    esac
+fi
+
+exit 1
+FAKE
+    chmod +x "$fake_bin/osascript"
+
+    cat >"$fake_bin/lsappinfo" <<'FAKE'
+#!/usr/bin/env bash
+pid="${@: -1}"
+if [ "$pid" = "222" ]; then
+    printf 'bundleid="net.kovidgoyal.kitty"\n'
+fi
+exit 0
+FAKE
+    chmod +x "$fake_bin/lsappinfo"
+
+    cat >"$fake_bin/ps" <<'FAKE'
+#!/usr/bin/env bash
+pid=""
+field=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -p)
+            pid="$2"
+            shift 2
+            ;;
+        -o)
+            field="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+case "$field" in
+    ppid=)
+        case "$pid" in
+            111) printf '1\n' ;;
+            222) printf '999\n' ;;
+            *) printf '1\n' ;;
+        esac
+        ;;
+    comm=)
+        case "$pid" in
+            111) printf 'codex\n' ;;
+            222) printf 'kitty\n' ;;
+            *) printf 'launchd\n' ;;
+        esac
+        ;;
+esac
+FAKE
+    chmod +x "$fake_bin/ps"
+
+    run env PATH="$fake_bin:$PATH" TEST_TEMP_DIR="$TEST_TEMP_DIR" TMUX="/tmp/tmux-test,123,0" TMUX_PANE="%1" \
+        "$PROJECT_ROOT/tmux-notify-jump-macos.sh" \
+        --target "%9" \
+        --sender-pid 111 \
+        --dedupe-ms 0 \
+        --ui dialog \
+        --title "hello" \
+        --body "world"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Jumped to work:3.1"* ]]
+
+    run cat "$TEST_TEMP_DIR/osascript.log"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'tell application id "net.kovidgoyal.kitty" to activate'* ]]
+    [[ "$output" != *'com.github.wez.wezterm'* ]]
+
+    run cat "$TEST_TEMP_DIR/switch-client.args"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"-c /dev/ttys222 -t work"* ]]
+}
+
+@test "tmux-notify-jump-macos.sh: detach does not forward default bundle ids" {
+    fake_bin="$TEST_TEMP_DIR/bin"
+    mkdir -p "$fake_bin"
+
+    cat >"$fake_bin/terminal-notifier" <<'FAKE'
+#!/usr/bin/env bash
+exit 0
+FAKE
+    chmod +x "$fake_bin/terminal-notifier"
+
+    cat >"$fake_bin/python3" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >"$TEST_TEMP_DIR/python3.args"
+exit 0
+FAKE
+    chmod +x "$fake_bin/python3"
+
+    run env PATH="$fake_bin:$PATH" TEST_TEMP_DIR="$TEST_TEMP_DIR" \
+        "$PROJECT_ROOT/tmux-notify-jump-macos.sh" \
+        --focus-only \
+        --detach \
+        --no-activate \
+        --dedupe-ms 0 \
+        --title "hello" \
+        --body "world"
+
+    [ "$status" -eq 0 ]
+
+    run cat "$TEST_TEMP_DIR/python3.args"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"--focus-only"* ]]
+    [[ "$output" != *"--bundle-ids"* ]]
+}
+
+@test "tmux-notify-jump-macos.sh: detach forwards explicit bundle ids" {
+    fake_bin="$TEST_TEMP_DIR/bin"
+    mkdir -p "$fake_bin"
+
+    cat >"$fake_bin/terminal-notifier" <<'FAKE'
+#!/usr/bin/env bash
+exit 0
+FAKE
+    chmod +x "$fake_bin/terminal-notifier"
+
+    cat >"$fake_bin/python3" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >"$TEST_TEMP_DIR/python3.args"
+exit 0
+FAKE
+    chmod +x "$fake_bin/python3"
+
+    run env PATH="$fake_bin:$PATH" TEST_TEMP_DIR="$TEST_TEMP_DIR" \
+        "$PROJECT_ROOT/tmux-notify-jump-macos.sh" \
+        --focus-only \
+        --detach \
+        --no-activate \
+        --bundle-ids "net.kovidgoyal.kitty" \
+        --dedupe-ms 0 \
+        --title "hello" \
+        --body "world"
+
+    [ "$status" -eq 0 ]
+
+    run cat "$TEST_TEMP_DIR/python3.args"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"--bundle-ids"* ]]
+    [[ "$output" == *"net.kovidgoyal.kitty"* ]]
+}
+
 @test "tmux-notify-jump-linux.sh: awesome-client receives inline window id" {
     fake_bin="$TEST_TEMP_DIR/bin"
     mkdir -p "$fake_bin"
