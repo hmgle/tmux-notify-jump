@@ -166,7 +166,7 @@ detect_bundle_id_from_pid_tree() {
         info="$(lsappinfo info -only bundleid -pid "$pid" 2>/dev/null || true)"
         info="$(printf '%s' "$info" | tr '\n' ' ')"
         local bid=""
-        bid="$(printf '%s' "$info" | sed -nE 's/.*[Bb]undleid=\"([^\"]+)\".*/\\1/p')"
+        bid="$(printf '%s' "$info" | sed -nE 's/.*[Bb]undleid=\"([^\"]+)\".*/\1/p')"
         bid="$(trim_ws "$bid")"
         if [ -n "$bid" ]; then
             printf '%s' "$bid"
@@ -247,7 +247,9 @@ autodetect_sender_terminal_bundle_ids() {
         return
     fi
     local sender_pid="${SENDER_CLIENT_PID:-}"
-    if [ -n "${SENDER_PID:-}" ] && [[ "$SENDER_PID" =~ ^[0-9]+$ ]]; then
+    if [ "$FOCUS_ONLY" -ne 0 ] && [ -n "${SENDER_PID:-}" ] && [[ "$SENDER_PID" =~ ^[0-9]+$ ]]; then
+        sender_pid="$SENDER_PID"
+    elif [ -z "${sender_pid:-}" ] && [ -n "${SENDER_PID:-}" ] && [[ "$SENDER_PID" =~ ^[0-9]+$ ]]; then
         sender_pid="$SENDER_PID"
     fi
     if [ -z "${sender_pid:-}" ]; then
@@ -606,9 +608,14 @@ handle_action() {
         if [ -z "$SENDER_CLIENT_TTY" ]; then
             SENDER_CLIENT_TTY="$(get_sender_tmux_client_tty 2>/dev/null || true)"
         fi
-        if [ -z "$SENDER_CLIENT_PID" ]; then
-            if [ -n "$SENDER_CLIENT_TTY" ]; then
-                SENDER_CLIENT_PID="$(get_tmux_client_pid_by_tty "$SENDER_CLIENT_TTY" 2>/dev/null || true)"
+        if [ -n "$SENDER_CLIENT_TTY" ]; then
+            local tty_client_pid=""
+            tty_client_pid="$(get_tmux_client_pid_by_tty "$SENDER_CLIENT_TTY" 2>/dev/null || true)"
+            if [[ "$tty_client_pid" =~ ^[0-9]+$ ]]; then
+                # In tmux-aware flows, the client attached to the pane is the
+                # terminal we want to focus. This must override wrapper-supplied
+                # parent pids such as the notify hook caller (e.g. Codex).
+                SENDER_CLIENT_PID="$tty_client_pid"
             fi
         fi
         if [ -z "$SENDER_CLIENT_PID" ]; then
@@ -868,7 +875,7 @@ if [ "$DETACH" -eq 1 ]; then
         if [ "$NO_ACTIVATE" -eq 1 ]; then
             child_args+=(--no-activate)
         fi
-        if [ -n "${BUNDLE_ID_LIST:-}" ]; then
+        if [ "$BUNDLE_ID_EXPLICIT" -eq 1 ] && [ -n "${BUNDLE_ID_LIST:-}" ]; then
             child_args+=(--bundle-ids "$BUNDLE_ID_LIST")
         fi
         if [ -n "${SENDER_CLIENT_TTY:-}" ]; then
