@@ -961,6 +961,123 @@ get_tmux_client_pid_by_tty() {
     return 1
 }
 
+get_active_tmux_client_pid_for_pane() {
+    local pane="${1:-}"
+    [ -n "$pane" ] || return 1
+    if [ -z "${TMUX:-}" ]; then
+        return 1
+    fi
+
+    local output=""
+    output="$(tmux_cmd list-clients -F "#{client_activity} #{client_pid} #{client_pane}" 2>/dev/null || true)"
+    local best_activity=-1
+    local best_pid=""
+    local line=""
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        local activity="${line%% *}"
+        local rest="${line#* }"
+        local pid="${rest%% *}"
+        local client_pane="${rest#* }"
+
+        if ! is_integer "$activity"; then
+            continue
+        fi
+        if ! is_integer "$pid"; then
+            continue
+        fi
+        if [ "$client_pane" != "$pane" ]; then
+            continue
+        fi
+
+        if [ "$activity" -gt "$best_activity" ]; then
+            best_activity="$activity"
+            best_pid="$pid"
+        fi
+    done <<<"$output"
+
+    if is_integer "$best_pid"; then
+        printf '%s' "$best_pid"
+        return 0
+    fi
+    return 1
+}
+
+process_env_has_ssh() {
+    local pid="${1:-}"
+    if ! is_integer "$pid"; then
+        return 1
+    fi
+
+    local environ="/proc/$pid/environ"
+    [ -r "$environ" ] || return 1
+
+    if tr '\0' '\n' <"$environ" 2>/dev/null | grep -Eq '^(SSH_CONNECTION|SSH_CLIENT|SSH_TTY)='; then
+        return 0
+    fi
+    return 1
+}
+
+process_tree_has_sshd() {
+    local pid="${1:-}"
+    if ! is_integer "$pid"; then
+        return 1
+    fi
+
+    local current_pid="$pid"
+    local depth=0
+    while is_integer "$current_pid" && [ "$current_pid" -gt 1 ] && [ "$depth" -lt 50 ]; do
+        local comm=""
+        comm="$(ps -p "$current_pid" -o comm= 2>/dev/null || true)"
+        comm="$(trim_ws "$comm")"
+        case "$comm" in
+            sshd|sshd:*|*/sshd|*/sshd:*)
+                return 0
+                ;;
+        esac
+
+        local ppid=""
+        ppid="$(ps -p "$current_pid" -o ppid= 2>/dev/null || true)"
+        ppid="$(trim_ws "$ppid")"
+        if ! is_integer "$ppid" || [ "$ppid" -le 1 ] || [ "$ppid" = "$current_pid" ]; then
+            break
+        fi
+
+        current_pid="$ppid"
+        depth=$((depth + 1))
+    done
+
+    return 1
+}
+
+tmux_client_pid_is_remote_ssh() {
+    local pid="${1:-}"
+    if ! is_integer "$pid"; then
+        return 1
+    fi
+
+    process_env_has_ssh "$pid" && return 0
+    process_tree_has_sshd "$pid" && return 0
+    return 1
+}
+
+tmux_notify_should_suppress_remote_client() {
+    if is_truthy "${TMUX_NOTIFY_REMOTE:-0}"; then
+        return 1
+    fi
+    if [ -z "${TMUX_PANE:-}" ] || ! is_pane_id "$TMUX_PANE"; then
+        return 1
+    fi
+
+    local client_pid=""
+    client_pid="$(get_active_tmux_client_pid_for_pane "$TMUX_PANE" 2>/dev/null || true)"
+    if ! is_integer "$client_pid"; then
+        return 1
+    fi
+
+    tmux_client_pid_is_remote_ssh "$client_pid"
+}
+
 cache_root_dir() {
     local home="${HOME:-}"
     if [ -n "${XDG_CACHE_HOME:-}" ]; then

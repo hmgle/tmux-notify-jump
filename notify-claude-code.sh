@@ -235,6 +235,11 @@ else
     log_debug "tmux not installed"
 fi
 
+if tmux_notify_should_suppress_remote_client; then
+    log_debug "suppressing notification for remote ssh tmux client"
+    exit 0
+fi
+
 JUMP_SH="$(resolve_tmux_notify_jump_cmd "$SCRIPT_DIR")"
 if ! is_executable_cmd "$JUMP_SH"; then
     log_debug "jump command not found/executable: $JUMP_SH"

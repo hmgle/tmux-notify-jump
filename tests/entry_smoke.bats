@@ -273,6 +273,12 @@ exit 0
 FAKE
     chmod +x "$fake_bin/terminal-notifier"
 
+    cat >"$fake_bin/osascript" <<'FAKE'
+#!/usr/bin/env bash
+exit 0
+FAKE
+    chmod +x "$fake_bin/osascript"
+
     cat >"$fake_bin/python3" <<'FAKE'
 #!/usr/bin/env bash
 printf '%s\n' "$@" >"$TEST_TEMP_DIR/python3.args"
@@ -306,6 +312,12 @@ FAKE
 exit 0
 FAKE
     chmod +x "$fake_bin/terminal-notifier"
+
+    cat >"$fake_bin/osascript" <<'FAKE'
+#!/usr/bin/env bash
+exit 0
+FAKE
+    chmod +x "$fake_bin/osascript"
 
     cat >"$fake_bin/python3" <<'FAKE'
 #!/usr/bin/env bash

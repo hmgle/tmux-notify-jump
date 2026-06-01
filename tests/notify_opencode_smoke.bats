@@ -158,3 +158,155 @@ FAKE
     [[ "$captured" == *"Session Ended"* ]]
     [[ "$captured" == *"user requested"* ]]
 }
+
+@test "notify-opencode.sh: remote ssh tmux client suppresses notification by default" {
+    fake_bin="$TEST_TEMP_DIR/bin"
+    mkdir -p "$fake_bin"
+
+    cat >"$fake_bin/tmux-notify-jump" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$CAPTURE_FILE"
+exit 0
+FAKE
+    chmod +x "$fake_bin/tmux-notify-jump"
+
+    cat >"$fake_bin/tmux" <<'FAKE'
+#!/usr/bin/env bash
+cmd="$1"
+shift || true
+
+case "$cmd" in
+    list-sessions)
+        exit 0
+        ;;
+    list-clients)
+        if [ "${1:-}" = "-F" ] && [ "${2:-}" = "#{client_activity} #{client_pid} #{client_pane}" ]; then
+            printf '50 222 %%1\n'
+            exit 0
+        fi
+        exit 1
+        ;;
+esac
+
+exit 1
+FAKE
+    chmod +x "$fake_bin/tmux"
+
+    cat >"$fake_bin/ps" <<'FAKE'
+#!/usr/bin/env bash
+if [ "${1:-}" = "-p" ] && [ "${3:-}" = "-o" ] && [ "${4:-}" = "ppid=" ]; then
+    case "${2:-}" in
+        222) printf '111\n' ;;
+        111) printf '1\n' ;;
+        *) printf '1\n' ;;
+    esac
+    exit 0
+fi
+
+if [ "${1:-}" = "-p" ] && [ "${3:-}" = "-o" ] && [ "${4:-}" = "comm=" ]; then
+    case "${2:-}" in
+        222) printf 'bash\n' ;;
+        111) printf 'sshd\n' ;;
+        *) printf 'init\n' ;;
+    esac
+    exit 0
+fi
+
+exit 1
+FAKE
+    chmod +x "$fake_bin/ps"
+
+    export CAPTURE_FILE="$TEST_TEMP_DIR/captured_args"
+    export TMUX_NOTIFY_JUMP_SH="$fake_bin/tmux-notify-jump"
+
+    run bash -c '
+        export PATH="'"$fake_bin"':$PATH"
+        export CAPTURE_FILE
+        export TMUX_NOTIFY_JUMP_SH
+        export TMUX="/tmp/tmux-test,123,0"
+        export TMUX_PANE="%1"
+        echo "{\"event_type\":\"session.idle\",\"message\":\"test idle\"}" \
+            | "'"$PROJECT_ROOT/notify-opencode.sh"'"
+    '
+
+    [ "$status" -eq 0 ]
+    [ ! -f "$CAPTURE_FILE" ]
+}
+
+@test "notify-opencode.sh: TMUX_NOTIFY_REMOTE allows remote ssh tmux notification" {
+    fake_bin="$TEST_TEMP_DIR/bin"
+    mkdir -p "$fake_bin"
+
+    cat >"$fake_bin/tmux-notify-jump" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$CAPTURE_FILE"
+exit 0
+FAKE
+    chmod +x "$fake_bin/tmux-notify-jump"
+
+    cat >"$fake_bin/tmux" <<'FAKE'
+#!/usr/bin/env bash
+cmd="$1"
+shift || true
+
+case "$cmd" in
+    list-sessions)
+        exit 0
+        ;;
+    list-clients)
+        if [ "${1:-}" = "-F" ] && [ "${2:-}" = "#{client_activity} #{client_pid} #{client_pane}" ]; then
+            printf '50 222 %%1\n'
+            exit 0
+        fi
+        exit 1
+        ;;
+esac
+
+exit 1
+FAKE
+    chmod +x "$fake_bin/tmux"
+
+    cat >"$fake_bin/ps" <<'FAKE'
+#!/usr/bin/env bash
+if [ "${1:-}" = "-p" ] && [ "${3:-}" = "-o" ] && [ "${4:-}" = "ppid=" ]; then
+    case "${2:-}" in
+        222) printf '111\n' ;;
+        111) printf '1\n' ;;
+        *) printf '1\n' ;;
+    esac
+    exit 0
+fi
+
+if [ "${1:-}" = "-p" ] && [ "${3:-}" = "-o" ] && [ "${4:-}" = "comm=" ]; then
+    case "${2:-}" in
+        222) printf 'bash\n' ;;
+        111) printf 'sshd\n' ;;
+        *) printf 'init\n' ;;
+    esac
+    exit 0
+fi
+
+exit 1
+FAKE
+    chmod +x "$fake_bin/ps"
+
+    export CAPTURE_FILE="$TEST_TEMP_DIR/captured_args"
+    export TMUX_NOTIFY_JUMP_SH="$fake_bin/tmux-notify-jump"
+
+    run bash -c '
+        export PATH="'"$fake_bin"':$PATH"
+        export CAPTURE_FILE
+        export TMUX_NOTIFY_JUMP_SH
+        export TMUX="/tmp/tmux-test,123,0"
+        export TMUX_PANE="%1"
+        export TMUX_NOTIFY_REMOTE=1
+        echo "{\"event_type\":\"session.idle\",\"message\":\"test idle\"}" \
+            | "'"$PROJECT_ROOT/notify-opencode.sh"'"
+    '
+
+    [ "$status" -eq 0 ]
+    [ -f "$CAPTURE_FILE" ]
+
+    captured="$(cat "$CAPTURE_FILE")"
+    [[ "$captured" == *"--target"* ]]
+}
