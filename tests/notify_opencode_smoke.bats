@@ -179,9 +179,16 @@ case "$cmd" in
     list-sessions)
         exit 0
         ;;
+    display-message)
+        if [ "${1:-}" = "-p" ] && [ "${2:-}" = "-t" ] && [ "${3:-}" = "%1" ] && [ "${4:-}" = "#S" ]; then
+            printf 'work\n'
+            exit 0
+        fi
+        exit 1
+        ;;
     list-clients)
-        if [ "${1:-}" = "-F" ] && [ "${2:-}" = "#{client_activity} #{client_pid} #{client_pane}" ]; then
-            printf '50 222 %%1\n'
+        if [ "${1:-}" = "-F" ] && [ "${2:-}" = "#{client_pid} #{client_session}" ]; then
+            printf '222 work\n'
             exit 0
         fi
         exit 1
@@ -253,9 +260,16 @@ case "$cmd" in
     list-sessions)
         exit 0
         ;;
+    display-message)
+        if [ "${1:-}" = "-p" ] && [ "${2:-}" = "-t" ] && [ "${3:-}" = "%1" ] && [ "${4:-}" = "#S" ]; then
+            printf 'work\n'
+            exit 0
+        fi
+        exit 1
+        ;;
     list-clients)
-        if [ "${1:-}" = "-F" ] && [ "${2:-}" = "#{client_activity} #{client_pid} #{client_pane}" ]; then
-            printf '50 222 %%1\n'
+        if [ "${1:-}" = "-F" ] && [ "${2:-}" = "#{client_pid} #{client_session}" ]; then
+            printf '222 work\n'
             exit 0
         fi
         exit 1

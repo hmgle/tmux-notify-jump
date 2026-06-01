@@ -148,8 +148,12 @@ teardown() {
 if [ "${1:-}" = "list-sessions" ]; then
     exit 0
 fi
-if [ "${1:-}" = "list-clients" ] && [ "${2:-}" = "-F" ] && [ "${3:-}" = "#{client_activity} #{client_pid} #{client_pane}" ]; then
-    printf '50 222 %%1\n'
+if [ "${1:-}" = "display-message" ] && [ "${2:-}" = "-p" ] && [ "${3:-}" = "-t" ] && [ "${4:-}" = "%1" ] && [ "${5:-}" = "#S" ]; then
+    printf 'work\n'
+    exit 0
+fi
+if [ "${1:-}" = "list-clients" ] && [ "${2:-}" = "-F" ] && [ "${3:-}" = "#{client_pid} #{client_session}" ]; then
+    printf '222 work\n'
     exit 0
 fi
 exit 1
@@ -183,6 +187,54 @@ FAKE
     [ "$status" -eq 0 ]
 }
 
+@test "tmux_notify_should_suppress_remote_client: suppresses remote ssh client in same session even on another pane" {
+    fake_bin="$TEST_TEMP_DIR/bin"
+    mkdir -p "$fake_bin"
+
+    cat >"$fake_bin/tmux" <<'FAKE'
+#!/usr/bin/env bash
+if [ "${1:-}" = "list-sessions" ]; then
+    exit 0
+fi
+if [ "${1:-}" = "display-message" ] && [ "${2:-}" = "-p" ] && [ "${3:-}" = "-t" ] && [ "${4:-}" = "%1" ] && [ "${5:-}" = "#S" ]; then
+    printf 'work\n'
+    exit 0
+fi
+if [ "${1:-}" = "list-clients" ] && [ "${2:-}" = "-F" ] && [ "${3:-}" = "#{client_pid} #{client_session}" ]; then
+    printf '222 work\n'
+    exit 0
+fi
+exit 1
+FAKE
+    chmod +x "$fake_bin/tmux"
+
+    cat >"$fake_bin/ps" <<'FAKE'
+#!/usr/bin/env bash
+if [ "${1:-}" = "-p" ] && [ "${3:-}" = "-o" ] && [ "${4:-}" = "comm=" ]; then
+    case "${2:-}" in
+        222) printf 'zsh\n' ;;
+        111) printf 'sshd\n' ;;
+        *) printf 'init\n' ;;
+    esac
+    exit 0
+fi
+if [ "${1:-}" = "-p" ] && [ "${3:-}" = "-o" ] && [ "${4:-}" = "ppid=" ]; then
+    case "${2:-}" in
+        222) printf '111\n' ;;
+        111) printf '1\n' ;;
+        *) printf '1\n' ;;
+    esac
+    exit 0
+fi
+exit 1
+FAKE
+    chmod +x "$fake_bin/ps"
+
+    run env PATH="$fake_bin:$PATH" TMUX="/tmp/tmux-test,123,0" TMUX_PANE="%1" bash -c '. "'"$PROJECT_ROOT"'/tmux-notify-jump-lib.sh"; tmux_notify_should_suppress_remote_client'
+
+    [ "$status" -eq 0 ]
+}
+
 @test "tmux_notify_should_suppress_remote_client: does not suppress local client" {
     fake_bin="$TEST_TEMP_DIR/bin"
     mkdir -p "$fake_bin"
@@ -192,8 +244,12 @@ FAKE
 if [ "${1:-}" = "list-sessions" ]; then
     exit 0
 fi
-if [ "${1:-}" = "list-clients" ] && [ "${2:-}" = "-F" ] && [ "${3:-}" = "#{client_activity} #{client_pid} #{client_pane}" ]; then
-    printf '50 222 %%1\n'
+if [ "${1:-}" = "display-message" ] && [ "${2:-}" = "-p" ] && [ "${3:-}" = "-t" ] && [ "${4:-}" = "%1" ] && [ "${5:-}" = "#S" ]; then
+    printf 'work\n'
+    exit 0
+fi
+if [ "${1:-}" = "list-clients" ] && [ "${2:-}" = "-F" ] && [ "${3:-}" = "#{client_pid} #{client_session}" ]; then
+    printf '222 work\n'
     exit 0
 fi
 exit 1

@@ -961,45 +961,31 @@ get_tmux_client_pid_by_tty() {
     return 1
 }
 
-get_active_tmux_client_pid_for_pane() {
-    local pane="${1:-}"
-    [ -n "$pane" ] || return 1
+tmux_session_has_remote_ssh_client() {
+    local target_session="${1:-}"
+    [ -n "$target_session" ] || return 1
     if [ -z "${TMUX:-}" ]; then
         return 1
     fi
 
     local output=""
-    output="$(tmux_cmd list-clients -F "#{client_activity} #{client_pid} #{client_pane}" 2>/dev/null || true)"
-    local best_activity=-1
-    local best_pid=""
+    output="$(tmux_cmd list-clients -F "#{client_pid} #{client_session}" 2>/dev/null || true)"
     local line=""
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        local activity="${line%% *}"
-        local rest="${line#* }"
-        local pid="${rest%% *}"
-        local client_pane="${rest#* }"
+        local pid="${line%% *}"
+        local session="${line#* }"
 
-        if ! is_integer "$activity"; then
-            continue
-        fi
         if ! is_integer "$pid"; then
             continue
         fi
-        if [ "$client_pane" != "$pane" ]; then
+        if [ "$session" != "$target_session" ]; then
             continue
         fi
 
-        if [ "$activity" -gt "$best_activity" ]; then
-            best_activity="$activity"
-            best_pid="$pid"
-        fi
+        tmux_client_pid_is_remote_ssh "$pid" && return 0
     done <<<"$output"
 
-    if is_integer "$best_pid"; then
-        printf '%s' "$best_pid"
-        return 0
-    fi
     return 1
 }
 
@@ -1065,17 +1051,14 @@ tmux_notify_should_suppress_remote_client() {
     if is_truthy "${TMUX_NOTIFY_REMOTE:-0}"; then
         return 1
     fi
-    if [ -z "${TMUX_PANE:-}" ] || ! is_pane_id "$TMUX_PANE"; then
+
+    local session=""
+    session="$(get_current_tmux_session 2>/dev/null || true)"
+    if [ -z "$session" ]; then
         return 1
     fi
 
-    local client_pid=""
-    client_pid="$(get_active_tmux_client_pid_for_pane "$TMUX_PANE" 2>/dev/null || true)"
-    if ! is_integer "$client_pid"; then
-        return 1
-    fi
-
-    tmux_client_pid_is_remote_ssh "$client_pid"
+    tmux_session_has_remote_ssh_client "$session"
 }
 
 cache_root_dir() {
