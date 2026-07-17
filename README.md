@@ -24,6 +24,7 @@ This repo contains:
 - `tmux-notify-jump-hook.sh`: helper for tmux hooks (uses `#{hook_pane}` pane id)
 - `notify-codex.sh`: Codex CLI wrapper (reads JSON from `$1`)
 - `notify-claude-code.sh`: Claude Code wrapper (reads JSON from stdin)
+- `notify-kimi-code.sh`: Kimi Code CLI wrapper (reads hook JSON from stdin)
 - `notify-opencode.sh`: OpenCode wrapper (reads JSON from stdin)
 - `opencode-plugin/tmux-notify-jump.ts`: OpenCode plugin (bridges events to `notify-opencode.sh`)
 
@@ -45,9 +46,9 @@ This repo contains:
 - `xdotool` for focusing the terminal window before jumping (the script auto-disables focusing if missing)
 - `python3` for safer Unicode truncation
 
-### Wrappers (Codex/Claude/OpenCode hooks)
+### Wrappers (Codex/Claude/Kimi/OpenCode hooks)
 
-- `jq` (required by `notify-codex.sh`, `notify-claude-code.sh`, and `notify-opencode.sh`; if missing, the wrappers no-op)
+- `jq` (required by the Codex, Claude, Kimi, and OpenCode wrappers; if missing, the wrappers no-op)
 
 ## Install
 
@@ -62,6 +63,7 @@ Optional: configure hooks (makes backups; won’t overwrite existing `notify=` /
 ```bash
 ./install.sh --prefix "$HOME/.local" --symlink --configure-codex
 ./install.sh --prefix "$HOME/.local" --symlink --configure-claude
+./install.sh --prefix "$HOME/.local" --symlink --configure-kimi
 ./install.sh --prefix "$HOME/.local" --symlink --configure-opencode
 ```
 
@@ -74,7 +76,7 @@ Uninstall:
 Or run from the repo (no install):
 
 ```bash
-chmod +x tmux-notify-jump tmux-notify-jump-linux.sh tmux-notify-jump-macos.sh tmux-notify-jump-hook.sh notify-codex.sh notify-claude-code.sh notify-opencode.sh
+chmod +x tmux-notify-jump tmux-notify-jump-linux.sh tmux-notify-jump-macos.sh tmux-notify-jump-hook.sh notify-codex.sh notify-claude-code.sh notify-kimi-code.sh notify-opencode.sh
 ```
 
 ## Usage
@@ -140,7 +142,7 @@ CLI flags override environment variables where applicable.
 - `TMUX_NOTIFY_ACTION_GOTO_LABEL`: label for the "goto" action (default: `Jump`)
 - `TMUX_NOTIFY_ACTION_DISMISS_LABEL`: label for the "dismiss" action (default: `Dismiss`)
 
-To switch modes without changing your Codex/Claude/OpenCode hook config, create `~/.config/tmux-notify-jump/env`:
+To switch modes without changing your Codex/Claude/Kimi/OpenCode hook config, create `~/.config/tmux-notify-jump/env`:
 
 ```bash
 TMUX_NOTIFY_UI=dialog
@@ -280,6 +282,64 @@ Notes:
 - If tmux isn’t available/running, the wrapper falls back to `--focus-only` by default (set `CLAUDE_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0` to restore no-op).
 - The wrapper prefers `tmux-notify-jump` on your `PATH`. To override, set `TMUX_NOTIFY_JUMP_SH` to an executable (e.g. `tmux-notify-jump-macos.sh`).
 - If you installed via `./install.sh`, you can auto-configure with `./install.sh --prefix "$HOME/.local" --configure-claude` (it creates a timestamped `settings.json.bak.*` before editing; requires `python3`).
+
+## Kimi Code CLI integration
+
+Kimi Code CLI sends hook payloads as JSON on stdin. Use `notify-kimi-code.sh` to translate those payloads into notification titles and bodies while preserving tmux targeting, SSH suppression, and focus-only fallback behavior.
+
+Recommended installation and configuration:
+
+```bash
+./install.sh --prefix "$HOME/.local" --symlink --configure-kimi
+```
+
+The installer backs up an existing config before appending hooks to `~/.kimi-code/config.toml`. To configure them manually, add:
+
+```toml
+[[hooks]]
+event = "Stop"
+command = "/path/to/notify-kimi-code.sh"
+
+[[hooks]]
+event = "PermissionRequest"
+command = "/path/to/notify-kimi-code.sh"
+
+[[hooks]]
+event = "StopFailure"
+command = "/path/to/notify-kimi-code.sh"
+
+[[hooks]]
+event = "Notification"
+command = "/path/to/notify-kimi-code.sh"
+```
+
+The default events cover a completed agent turn, an approval request, a failed turn, and background task terminal states. A direct hook command to `tmux-notify-jump` is only suitable for a static notification; the wrapper is needed to read Kimi's JSON fields and select the correct pane or fallback behavior.
+
+Optional filtering (comma-separated lists; `*` = all):
+
+- `KIMI_NOTIFY_EVENTS`: event whitelist (empty = default: `Stop,PermissionRequest,StopFailure,Notification`)
+- `KIMI_NOTIFY_EXCLUDE_EVENTS`: event blacklist (set to `*` to disable all)
+- `KIMI_NOTIFY_TYPES`: `Notification.notification_type` whitelist (empty = all)
+- `KIMI_NOTIFY_EXCLUDE_TYPES`: notification type blacklist
+- `KIMI_NOTIFY_SHOW_EVENT_TYPE`: include `[event]` in the title (`1`/`0`; default: `1`)
+
+Optional UI and timeout routing:
+
+- `KIMI_NOTIFY_UI_BY_TYPE`: per-notification type UI (e.g. `task.completed:notification,task.failed:dialog`)
+- `KIMI_NOTIFY_UI_BY_EVENT`: per-event UI (e.g. `Stop:notification,PermissionRequest:dialog`)
+- `KIMI_NOTIFY_UI`: wrapper default UI (falls back to `TMUX_NOTIFY_UI`)
+- `KIMI_NOTIFY_TIMEOUT_MS_BY_TYPE`: per-notification type timeout in milliseconds
+- `KIMI_NOTIFY_TIMEOUT_MS_BY_EVENT`: per-event timeout in milliseconds
+- `KIMI_NOTIFY_TIMEOUT_MS`: default timeout (default: `0`, daemon-dependent sticky notification)
+
+Notes:
+
+- Run Kimi inside tmux so `TMUX_PANE` identifies the originating pane.
+- If the hook lacks tmux environment variables, set `KIMI_NOTIFY_FALLBACK_TARGET=1` (or `TMUX_NOTIFY_FALLBACK_TARGET=1`) to use the most recently active tmux pane.
+- If tmux is unavailable, focus-only fallback is enabled by default. Disable it with `KIMI_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0`.
+- Set `KIMI_NOTIFY_DEBUG=1` to log wrapper diagnostics under `~/.kimi-code/log/notify-kimi-code.log`.
+- The wrapper requires `jq` and otherwise exits successfully without affecting Kimi's workflow.
+- See the [official Kimi Hooks documentation](https://www.kimi.com/code/docs/kimi-code-cli/customization/hooks.html) for the event contract and payload format.
 
 ## OpenCode integration
 
