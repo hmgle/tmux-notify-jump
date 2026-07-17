@@ -337,7 +337,7 @@ Notes:
 - Run Kimi inside tmux so `TMUX_PANE` identifies the originating pane.
 - If the hook lacks tmux environment variables, set `KIMI_NOTIFY_FALLBACK_TARGET=1` (or `TMUX_NOTIFY_FALLBACK_TARGET=1`) to use the most recently active tmux pane.
 - If tmux is unavailable, focus-only fallback is enabled by default. Disable it with `KIMI_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0`.
-- Set `KIMI_NOTIFY_DEBUG=1` to log wrapper diagnostics under `~/.kimi-code/log/notify-kimi-code.log`.
+- Set `KIMI_NOTIFY_DEBUG=1` to log wrapper diagnostics under `$KIMI_CODE_HOME/logs/notify-kimi-code.log` (default root: `~/.kimi-code`).
 - The wrapper requires `jq` and otherwise exits successfully without affecting Kimi's workflow.
 - See the [official Kimi Hooks documentation](https://www.kimi.com/code/docs/kimi-code-cli/customization/hooks.html) for the event contract and payload format.
 

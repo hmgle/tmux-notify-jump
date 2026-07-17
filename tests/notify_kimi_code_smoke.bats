@@ -56,6 +56,16 @@ captured_args() {
     [ ! -f "$CAPTURE_FILE" ]
 }
 
+@test "notify-kimi-code.sh: debug logging follows the Kimi data directory" {
+    export KIMI_NOTIFY_DEBUG=1
+    export KIMI_CODE_HOME="$TEST_TEMP_DIR/kimi-home"
+    run_kimi_hook 'not json'
+
+    [ "$status" -eq 0 ]
+    [ -f "$KIMI_CODE_HOME/logs/notify-kimi-code.log" ]
+    grep -q 'invalid JSON payload; ignoring' "$KIMI_CODE_HOME/logs/notify-kimi-code.log"
+}
+
 @test "notify-kimi-code.sh: Stop maps to a detached focus notification" {
     run_kimi_hook '{"hook_event_name":"Stop","session_id":"session_abc","cwd":"/tmp/project"}'
 
@@ -116,6 +126,18 @@ captured_args() {
     captured="$(captured_args)"
     [[ "$captured" == *"--ui"$'\n'"dialog"* ]]
     [[ "$captured" == *"--timeout"$'\n'"4321"* ]]
+}
+
+@test "notify-kimi-code.sh: unknown event truncation does not append fallback text" {
+    export KIMI_NOTIFY_EVENTS="*"
+    printf -v long_text '%100000s' ''
+    long_text="${long_text// /x}"
+    run_kimi_hook "{\"hook_event_name\":\"FutureEvent\",\"data\":\"$long_text\"}"
+
+    [ "$status" -eq 0 ]
+    captured="$(captured_args)"
+    [[ "$captured" == *"Kimi [FutureEvent]: FutureEvent"* ]]
+    [[ "$captured" != *"Event occurred"* ]]
 }
 
 @test "install.sh: configure-kimi creates valid hook blocks and is idempotent" {

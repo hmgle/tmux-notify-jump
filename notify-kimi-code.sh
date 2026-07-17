@@ -2,6 +2,8 @@
 set -euo pipefail
 
 # Kimi Code CLI hook integration for tmux-notify-jump. Reads JSON from stdin.
+# Hook runners may provide a restricted PATH, especially under tmux on macOS.
+# Under `set -u`, PATH may also be unset, so avoid expanding it unconditionally.
 if [ -n "${PATH:-}" ]; then
     export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
 else
@@ -20,7 +22,8 @@ ensure_tmux_notify_socket_from_env
 
 log_debug() {
     [ "${KIMI_NOTIFY_DEBUG:-0}" = "1" ] || return 0
-    local logfile="${KIMI_NOTIFY_DEBUG_LOG:-$HOME/.kimi-code/log/notify-kimi-code.log}"
+    local kimi_home="${KIMI_CODE_HOME:-$HOME/.kimi-code}"
+    local logfile="${KIMI_NOTIFY_DEBUG_LOG:-$kimi_home/logs/notify-kimi-code.log}"
     mkdir -p "$(dirname "$logfile")" 2>/dev/null || true
     printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$logfile" 2>/dev/null || true
 }
@@ -39,6 +42,8 @@ is_valid_ui() {
 }
 
 lookup_kv_map() {
+    # Look up a key in a comma-separated key:value map.
+    # Example: task.completed:notification,task.failed:dialog
     local key="${1:-}"
     local map="${2:-}"
     [ -n "$key" ] || return 1
@@ -128,7 +133,7 @@ case "$EVENT_NAME" in
         ;;
     *)
         TITLE_MSG="$EVENT_NAME"
-        MESSAGE="$(jq -r 'tostring' <<<"$payload" 2>/dev/null | head -c 200 || printf '%s' 'Event occurred')"
+        MESSAGE="$(jq -r 'tostring | .[:200]' <<<"$payload" 2>/dev/null || printf '%s' 'Event occurred')"
         ;;
 esac
 
