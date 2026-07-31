@@ -105,7 +105,9 @@ pane_title="$(tmux_cmd display-message -p -t "$HOOK_PANE_ID" '#{pane_title}' 2>/
 
 sender_tty=""
 sender_pid=""
-clients_info="$(tmux_cmd list-clients -F "#{client_tty}"$'\t'"#{client_pid}"$'\t'"#{client_pane}" 2>/dev/null || true)"
+# #{pane_id} expands to the client's active pane in list-clients context;
+# #{client_pane} is not a valid tmux format variable and expands empty.
+clients_info="$(tmux_cmd list-clients -F "#{client_tty}"$'\t'"#{client_pid}"$'\t'"#{pane_id}" 2>/dev/null || true)"
 while IFS=$'\t' read -r tty pid pane; do
     [ -n "${pane:-}" ] || continue
     if [ "$pane" = "$HOOK_PANE_ID" ] && [ -n "${tty:-}" ]; then
