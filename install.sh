@@ -432,7 +432,7 @@ configure_pi() {
     esac
 
     echo "Installed Pi extension: $ext_dst"
-    echo "Ensure tmux-notify-jump is on your PATH"
+    echo "Ensure notify-pi.sh is on your PATH"
 }
 
 while [ $# -gt 0 ]; do
@@ -523,6 +523,7 @@ FILES=(
     notify-claude-code.sh
     notify-kimi-code.sh
     notify-opencode.sh
+    notify-pi.sh
 )
 
 if [ "$UNINSTALL" -eq 1 ]; then
