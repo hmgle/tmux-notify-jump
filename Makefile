@@ -10,6 +10,7 @@ SCRIPTS := \
 	notify-claude-code.sh \
 	notify-kimi-code.sh \
 	notify-opencode.sh \
+	notify-pi.sh \
 	install.sh
 
 help:

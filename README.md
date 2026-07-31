@@ -27,6 +27,8 @@ This repo contains:
 - `notify-kimi-code.sh`: Kimi Code CLI wrapper (reads hook JSON from stdin)
 - `notify-opencode.sh`: OpenCode wrapper (reads JSON from stdin)
 - `opencode-plugin/tmux-notify-jump.ts`: OpenCode plugin (bridges events to `notify-opencode.sh`)
+- `pi-extension/tmux-notify-jump.ts`: Pi coding agent extension (bridges events to `notify-pi.sh`)
+- `notify-pi.sh`: Pi wrapper (reads JSON from stdin)
 
 ## Requirements
 
@@ -46,9 +48,9 @@ This repo contains:
 - `xdotool` for focusing the terminal window before jumping (the script auto-disables focusing if missing)
 - `python3` for safer Unicode truncation
 
-### Wrappers (Codex/Claude/Kimi/OpenCode hooks)
+### Wrappers (Codex/Claude/Kimi/OpenCode/Pi hooks)
 
-- `jq` (required by the Codex, Claude, Kimi, and OpenCode wrappers; if missing, the wrappers no-op)
+- `jq` (required by the Codex, Claude, Kimi, OpenCode, and Pi wrappers; if missing, the wrappers no-op)
 
 ## Install
 
@@ -65,6 +67,7 @@ Optional: configure hooks (makes backups; won’t overwrite existing `notify=` /
 ./install.sh --prefix "$HOME/.local" --symlink --configure-claude
 ./install.sh --prefix "$HOME/.local" --symlink --configure-kimi
 ./install.sh --prefix "$HOME/.local" --symlink --configure-opencode
+./install.sh --prefix "$HOME/.local" --symlink --configure-pi
 ```
 
 Uninstall:
@@ -76,7 +79,7 @@ Uninstall:
 Or run from the repo (no install):
 
 ```bash
-chmod +x tmux-notify-jump tmux-notify-jump-linux.sh tmux-notify-jump-macos.sh tmux-notify-jump-hook.sh notify-codex.sh notify-claude-code.sh notify-kimi-code.sh notify-opencode.sh
+chmod +x tmux-notify-jump tmux-notify-jump-linux.sh tmux-notify-jump-macos.sh tmux-notify-jump-hook.sh notify-codex.sh notify-claude-code.sh notify-kimi-code.sh notify-opencode.sh notify-pi.sh
 ```
 
 ## Usage
@@ -385,6 +388,57 @@ Notes:
 - If tmux isn't available/running, the wrapper falls back to `--focus-only` by default (set `OPENCODE_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0` to restore no-op).
 - The wrapper prefers `tmux-notify-jump` on your `PATH`. To override, set `TMUX_NOTIFY_JUMP_SH` to an executable.
 - Override the shell wrapper path in the plugin with `OPENCODE_NOTIFY_CMD` (default: `notify-opencode.sh` on PATH).
+
+## Pi integration
+
+[Pi](https://pi.dev/docs/latest) has no shell-command hook system; its integration point is TypeScript extensions. Use `pi-extension/tmux-notify-jump.ts`, a thin bridge that forwards Pi lifecycle events as JSON on stdin to `notify-pi.sh`, which calls `tmux-notify-jump` (or `TMUX_NOTIFY_JUMP_SH` if set) — same pattern as the OpenCode integration, with the same tmux targeting, SSH suppression, and focus-only fallback behavior as the other wrappers.
+
+Install the scripts and the extension:
+
+```bash
+./install.sh --prefix "$HOME/.local" --symlink --configure-pi
+```
+
+Or manually:
+
+```bash
+cp pi-extension/tmux-notify-jump.ts ~/.pi/agent/extensions/
+# and ensure notify-pi.sh is on your PATH
+```
+
+Default events: `agent_settled` (Pi is fully idle — no auto-retry, compaction, or queued follow-up left). Additional events (`agent_end`, `turn_end`) can be enabled via filtering.
+
+Optional event filtering (comma-separated lists; `*` = all):
+
+- `PI_NOTIFY_EVENTS`: whitelist (empty = default: `agent_settled`)
+- `PI_NOTIFY_EXCLUDE_EVENTS`: blacklist (set to `*` to disable all)
+- `PI_NOTIFY_SHOW_EVENT_TYPE`: include `[event]` in title (`1`/`0`; default: `1`)
+
+Optional UI/timeout routing (per-event):
+
+- `PI_NOTIFY_UI_BY_EVENT`: per-event UI override (e.g. `agent_settled:notification,agent_end:dialog`)
+- `PI_NOTIFY_TIMEOUT_MS_BY_EVENT`: per-event timeout override (e.g. `agent_settled:10000,agent_end:0`)
+- `PI_NOTIFY_UI`: wrapper default UI override (falls back to `TMUX_NOTIFY_UI` if unset)
+- `PI_NOTIFY_TIMEOUT_MS`: default notification timeout (default: `0`, sticky; daemon-dependent)
+
+UI override precedence: `PI_NOTIFY_UI_BY_EVENT` → `PI_NOTIFY_UI` → `TMUX_NOTIFY_UI`/default.
+
+Extension-level options:
+
+- `PI_NOTIFY_CMD`: bridge command (default: `notify-pi.sh` on PATH)
+- `PI_NOTIFY_HEADLESS`: also notify when Pi runs without UI, i.e. print (`-p`) and JSON event-stream modes (`1` enables; default: `0`). TUI and RPC (editor-driven) modes always notify — Pi reports `ctx.hasUI` as true there.
+
+Notes:
+
+- Run Pi inside tmux so `TMUX_PANE` identifies the originating pane.
+- By default, notifications are suppressed when any attached tmux client in the current session looks like an SSH session. Set `TMUX_NOTIFY_REMOTE=1` to allow remote-attached clients to notify as well.
+- If the extension runs without tmux env but a tmux server is running, set `PI_NOTIFY_FALLBACK_TARGET=1` (or `TMUX_NOTIFY_FALLBACK_TARGET=1`) to target the most recently active tmux client pane.
+- If tmux isn't available/running, the wrapper falls back to `--focus-only` by default (set `PI_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0` to restore no-op).
+- On macOS (and on Linux if you have `zenity`/`kdialog`/`yad`), set `PI_NOTIFY_UI=dialog` (or `TMUX_NOTIFY_UI=dialog`) to use a modal "Jump/Dismiss" dialog that stays until clicked.
+- Requires `jq` (otherwise the wrapper no-ops; set `PI_NOTIFY_DEBUG=1` to see why in logs).
+- Set `PI_NOTIFY_DEBUG=1` to log diagnostics to `~/.pi/agent/logs/notify-pi.log` (override with `PI_NOTIFY_DEBUG_LOG`).
+- If you enable multiple events (e.g. `agent_end,agent_settled`), a settled run may emit two notifications back-to-back; their titles differ, so the built-in dedupe does not merge them.
+- See the [official Pi extensions documentation](https://pi.dev/docs/latest/extensions) for the event contract.
 
 ## Tests
 

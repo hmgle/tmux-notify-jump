@@ -123,7 +123,7 @@ case "$cmd" in
         exit 1
         ;;
     list-clients)
-        if [ "${1:-}" = "-F" ] && [ "${2:-}" = "#{client_tty} #{client_pane}" ]; then
+        if [ "${1:-}" = "-F" ] && [ "${2:-}" = "#{client_tty} #{pane_id}" ]; then
             printf '/dev/ttys222 %%1\n'
             exit 0
         fi
