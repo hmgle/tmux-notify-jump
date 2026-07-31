@@ -610,7 +610,9 @@ ensure_tmux_notify_socket_from_env() {
 
 get_best_tmux_client_pane_id() {
     local output=""
-    output="$(tmux_cmd list-clients -F "#{client_activity} #{client_pane}" 2>/dev/null || true)"
+    # #{pane_id} expands to the client's active pane in list-clients context;
+    # #{client_pane} is not a valid tmux format variable and expands empty.
+    output="$(tmux_cmd list-clients -F "#{client_activity} #{pane_id}" 2>/dev/null || true)"
     local best_activity=0
     local best_pane=""
     local line=""
@@ -884,7 +886,7 @@ get_sender_tmux_client_tty() {
 
     if [ -n "${TMUX_PANE:-}" ]; then
         local clients_by_pane=""
-        clients_by_pane="$(tmux_cmd list-clients -F "#{client_tty} #{client_pane}" 2>/dev/null || true)"
+        clients_by_pane="$(tmux_cmd list-clients -F "#{client_tty} #{pane_id}" 2>/dev/null || true)"
         local line=""
         while IFS= read -r line; do
             [ -n "$line" ] || continue
