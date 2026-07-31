@@ -9,10 +9,12 @@ CONFIGURE_CODEX=0
 CONFIGURE_CLAUDE=0
 CONFIGURE_KIMI=0
 CONFIGURE_OPENCODE=0
+CONFIGURE_PI=0
 CODEX_CONFIG_PATH="${CODEX_CONFIG_PATH:-}"
 CLAUDE_CONFIG_PATH="${CLAUDE_CONFIG_PATH:-}"
 KIMI_CONFIG_PATH="${KIMI_CONFIG_PATH:-}"
 OPENCODE_PLUGIN_PATH="${OPENCODE_PLUGIN_PATH:-}"
+PI_EXTENSION_PATH="${PI_EXTENSION_PATH:-}"
 
 usage() {
     cat <<EOF
@@ -27,10 +29,12 @@ Options:
   --configure-claude Configure Claude hooks (opt-in)
   --configure-kimi  Configure Kimi Code CLI hooks (opt-in)
   --configure-opencode Configure OpenCode plugin (opt-in)
+  --configure-pi    Configure Pi coding agent extension (opt-in)
   --codex-config <path>  Codex config.toml path (default: ~/.codex/config.toml)
   --claude-config <path> Claude settings.json path (default: ~/.claude/settings.json)
   --kimi-config <path>   Kimi config.toml path (default: ~/.kimi-code/config.toml)
   --opencode-plugin-path <path> OpenCode plugins dir (default: ~/.config/opencode/plugins)
+  --pi-extension-path <path> Pi extensions dir (default: ~/.pi/agent/extensions)
   --uninstall       Remove installed files
   -h, --help        Show help
 
@@ -41,6 +45,7 @@ Examples:
   $0 --prefix "\$HOME/.local" --symlink --configure-claude
   $0 --prefix "\$HOME/.local" --symlink --configure-kimi
   $0 --prefix "\$HOME/.local" --symlink --configure-opencode
+  $0 --prefix "\$HOME/.local" --symlink --configure-pi
 EOF
 }
 
@@ -384,6 +389,52 @@ configure_opencode() {
     echo "Ensure notify-opencode.sh is on your PATH"
 }
 
+configure_pi() {
+    local ext_dir="${PI_EXTENSION_PATH:-$HOME/.pi/agent/extensions}"
+    local ext_src="$REPO_DIR/pi-extension/tmux-notify-jump.ts"
+    local ext_dst="$ext_dir/tmux-notify-jump.ts"
+
+    if [ ! -f "$ext_src" ]; then
+        echo "Warning: Pi extension source not found: $ext_src"
+        return 0
+    fi
+
+    mkdir -p "$ext_dir"
+
+    if [ -f "$ext_dst" ] || [ -L "$ext_dst" ]; then
+        local existing_target=""
+        if [ -L "$ext_dst" ]; then
+            # readlink -f is GNU-only; fall back to portable resolution
+            existing_target="$(readlink -f "$ext_dst" 2>/dev/null \
+                || python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$ext_dst" 2>/dev/null \
+                || true)"
+        fi
+        local canonical_src=""
+        canonical_src="$(readlink -f "$ext_src" 2>/dev/null \
+            || python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$ext_src" 2>/dev/null \
+            || true)"
+        if [ -n "$existing_target" ] && [ -n "$canonical_src" ] \
+            && [ "$existing_target" = "$canonical_src" ]; then
+            echo "Pi extension already installed: $ext_dst"
+            return 0
+        fi
+        backup_file "$ext_dst"
+    fi
+
+    case "$MODE" in
+        symlink)
+            ln -sf "$ext_src" "$ext_dst"
+            ;;
+        copy)
+            rm -f "$ext_dst"
+            cp -f "$ext_src" "$ext_dst"
+            ;;
+    esac
+
+    echo "Installed Pi extension: $ext_dst"
+    echo "Ensure tmux-notify-jump is on your PATH"
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --prefix)
@@ -414,6 +465,9 @@ while [ $# -gt 0 ]; do
         --configure-opencode)
             CONFIGURE_OPENCODE=1
             ;;
+        --configure-pi)
+            CONFIGURE_PI=1
+            ;;
         --codex-config)
             shift
             [ $# -gt 0 ] || die "--codex-config requires a path"
@@ -433,6 +487,11 @@ while [ $# -gt 0 ]; do
             shift
             [ $# -gt 0 ] || die "--opencode-plugin-path requires a path"
             OPENCODE_PLUGIN_PATH="$1"
+            ;;
+        --pi-extension-path)
+            shift
+            [ $# -gt 0 ] || die "--pi-extension-path requires a path"
+            PI_EXTENSION_PATH="$1"
             ;;
         --uninstall)
             UNINSTALL=1
@@ -518,4 +577,8 @@ fi
 
 if [ "$CONFIGURE_OPENCODE" -eq 1 ]; then
     configure_opencode
+fi
+
+if [ "$CONFIGURE_PI" -eq 1 ]; then
+    configure_pi
 fi
