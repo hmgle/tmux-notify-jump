@@ -504,12 +504,22 @@ FAKE
 }
 
 @test "tmux-notify-jump-linux.sh: dry-run reports wezterm tab switch toggle" {
-    run "$PROJECT_ROOT/tmux-notify-jump-linux.sh" \
+    fake_bin="$TEST_TEMP_DIR/bin"
+    mkdir -p "$fake_bin"
+    cat >"$fake_bin/xdotool" <<'FAKE'
+#!/usr/bin/env bash
+exit 0
+FAKE
+    chmod +x "$fake_bin/xdotool"
+
+    run env PATH="$fake_bin:$PATH" XDG_SESSION_TYPE=x11 WAYLAND_DISPLAY= \
+        "$PROJECT_ROOT/tmux-notify-jump-linux.sh" \
         --focus-only --dry-run --title "hello" --body "world"
     [ "$status" -eq 0 ]
     [[ "$output" == *"Wezterm tab switch: yes"* ]]
 
-    run env TMUX_NOTIFY_WEZTERM_TAB=0 "$PROJECT_ROOT/tmux-notify-jump-linux.sh" \
+    run env PATH="$fake_bin:$PATH" XDG_SESSION_TYPE=x11 WAYLAND_DISPLAY= TMUX_NOTIFY_WEZTERM_TAB=0 \
+        "$PROJECT_ROOT/tmux-notify-jump-linux.sh" \
         --focus-only --dry-run --title "hello" --body "world"
     [ "$status" -eq 0 ]
     [[ "$output" == *"Wezterm tab switch: no"* ]]
@@ -518,6 +528,12 @@ FAKE
         --focus-only --no-activate --dry-run --title "hello" --body "world"
     [ "$status" -eq 0 ]
     [[ "$output" == *"Wezterm tab switch: no (--no-activate)"* ]]
+
+    run env XDG_SESSION_TYPE=wayland WAYLAND_DISPLAY=wayland-0 \
+        "$PROJECT_ROOT/tmux-notify-jump-linux.sh" \
+        --focus-only --dry-run --title "hello" --body "world"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Wezterm tab switch: no (Wayland session)"* ]]
 }
 
 @test "tmux-notify-jump-linux.sh: goto activates the wezterm pane hosting the tmux client tty" {

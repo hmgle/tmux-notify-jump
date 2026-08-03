@@ -428,6 +428,33 @@ timeout_ms_to_seconds() {
     printf '%s' "$(( (ms + 999) / 1000 ))"
 }
 
+# Decide whether terminal activation is possible and disable it (with the
+# reason recorded in NO_ACTIVATE_REASON) when it is not. Called before the
+# dry-run block so dry-run reports the NO_ACTIVATE value that would actually
+# take effect at runtime.
+detect_activation_capability() {
+    NO_ACTIVATE_REASON=""
+    if [ "$NO_ACTIVATE" -eq 1 ]; then
+        NO_ACTIVATE_REASON="--no-activate"
+        return
+    fi
+    if is_wayland_session; then
+        warn "Wayland session detected; terminal focusing is disabled"
+        NO_ACTIVATE=1
+        NO_ACTIVATE_REASON="Wayland session"
+        return
+    fi
+    if ! command -v xdotool >/dev/null 2>&1; then
+        if command -v awesome-client >/dev/null 2>&1; then
+            warn "Missing xdotool; falling back to awesome-client-only activation"
+        else
+            warn "Missing xdotool; terminal focusing is disabled"
+            NO_ACTIVATE=1
+            NO_ACTIVATE_REASON="no xdotool"
+        fi
+    fi
+}
+
 require_tools() {
     if [ "$UI" = "dialog" ]; then
         if ! pick_dialog_backend >/dev/null 2>&1; then
@@ -441,21 +468,6 @@ require_tools() {
     fi
     if [ "$FOCUS_ONLY" -eq 0 ]; then
         require_tool tmux
-    fi
-    if [ "$NO_ACTIVATE" -eq 0 ]; then
-        if is_wayland_session; then
-            warn "Wayland session detected; terminal focusing is disabled"
-            NO_ACTIVATE=1
-            return
-        fi
-        if ! command -v xdotool >/dev/null 2>&1; then
-            if command -v awesome-client >/dev/null 2>&1; then
-                warn "Missing xdotool; falling back to awesome-client-only activation"
-            else
-                warn "Missing xdotool; terminal focusing is disabled"
-                NO_ACTIVATE=1
-            fi
-        fi
     fi
 }
 
@@ -921,13 +933,15 @@ TITLE="$(truncate_text "$MAX_TITLE" "$TITLE")"
 BODY="$(truncate_text "$MAX_BODY" "$BODY")"
 BODY="$(wrap_text "$WRAP_COLS" "$BODY")"
 
+detect_activation_capability
+
 if [ "$DRY_RUN" -eq 1 ]; then
     print_dry_run_target
     print_dry_run_common
     log "UI: $UI"
     log "Window classes: ${WINDOW_CLASS_LIST:-$WINDOW_CLASS}"
     if [ "$NO_ACTIVATE" -eq 1 ]; then
-        log "Wezterm tab switch: no (--no-activate)"
+        log "Wezterm tab switch: no (${NO_ACTIVATE_REASON:-disabled})"
     else
         log "Wezterm tab switch: $(is_truthy "${TMUX_NOTIFY_WEZTERM_TAB:-1}" && echo "yes" || echo "no")"
     fi
