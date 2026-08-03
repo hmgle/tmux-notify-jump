@@ -312,7 +312,6 @@ find_wezterm_pane_id_by_tty() {
     local tty="${1:-}"
     [ -n "$tty" ] || return 1
     command -v wezterm >/dev/null 2>&1 || return 1
-    command -v python3 >/dev/null 2>&1 || return 1
 
     local pane_list=""
     pane_list="$(wezterm cli list --format json 2>/dev/null || true)"
@@ -322,8 +321,9 @@ find_wezterm_pane_id_by_tty() {
     fi
 
     local pane_id=""
-    set +e
-    pane_id="$(printf '%s' "$pane_list" | python3 -c 'import json, sys
+    if command -v python3 >/dev/null 2>&1; then
+        set +e
+        pane_id="$(printf '%s' "$pane_list" | python3 -c 'import json, sys
 tty = sys.argv[1]
 try:
     panes = json.load(sys.stdin)
@@ -335,10 +335,19 @@ for pane in panes:
         raise SystemExit(0)
 raise SystemExit(1)
 ' "$tty")"
-    local status=$?
-    set -e
+        local status=$?
+        set -e
+        if [ $status -ne 0 ]; then
+            pane_id=""
+        fi
+    fi
 
-    if [ $status -ne 0 ] || ! is_integer "$pane_id"; then
+    if [ -z "$pane_id" ] && command -v jq >/dev/null 2>&1; then
+        pane_id="$(printf '%s' "$pane_list" |
+            jq -r --arg tty "$tty" '[.[] | select(.tty_name == $tty) | .pane_id][0] // empty' 2>/dev/null || true)"
+    fi
+
+    if ! is_integer "$pane_id"; then
         log_debug "No wezterm pane found for tty $tty"
         return 1
     fi
@@ -346,6 +355,9 @@ raise SystemExit(1)
 }
 
 activate_wezterm_tab() {
+    # `wezterm cli activate-pane` focuses the wezterm window, so honor
+    # --no-activate just like activate_terminal does.
+    [ "$NO_ACTIVATE" -eq 0 ] || return 0
     if ! is_truthy "${TMUX_NOTIFY_WEZTERM_TAB:-1}"; then
         return 0
     fi
