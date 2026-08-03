@@ -136,6 +136,7 @@ CLI flags override environment variables where applicable.
 - `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK`: when hooks run without tmux (missing or no server/target), fall back to `--focus-only` instead of no-op (`0` disables; default: `1`)
 - `TMUX_NOTIFY_REMOTE`: allow notifications when any attached tmux client in the current session appears to be attached over SSH (`0` suppresses; default: `0`)
 - `TMUX_NOTIFY_CLASS` / `TMUX_NOTIFY_CLASSES`: terminal window class(es) used by `xdotool search --class`
+- `TMUX_NOTIFY_WEZTERM_TAB`: on Linux, after focusing the terminal window, also switch to the wezterm tab/pane that hosts the tmux client (matched via `wezterm cli list` by tty; `0` disables; default: `1`). Silently skipped when the terminal is not wezterm.
 - `TMUX_NOTIFY_BUNDLE_ID` / `TMUX_NOTIFY_BUNDLE_IDS`: macOS terminal bundle id(s) for `osascript` activation (overrides auto-detection; e.g. kitty is `net.kovidgoyal.kitty`)
 - `TMUX_NOTIFY_UI`: default for `--ui` (`notification` or `dialog`)
 - `TMUX_NOTIFY_TIMEOUT`: default notification timeout in ms

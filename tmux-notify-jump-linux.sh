@@ -84,6 +84,10 @@ Options:
 Examples:
   $0 "2:1.0" "Build finished" "Click to jump to the pane"
   $0 --target "work:0.1" --title "Task complete"
+
+Environment:
+  TMUX_NOTIFY_WEZTERM_TAB=0  Disable switching to the wezterm tab that hosts
+                             the tmux client on click (enabled by default)
 EOF
 }
 
@@ -302,6 +306,66 @@ EOF
     fi
 
     [ $status -eq 0 ]
+}
+
+find_wezterm_pane_id_by_tty() {
+    local tty="${1:-}"
+    [ -n "$tty" ] || return 1
+    command -v wezterm >/dev/null 2>&1 || return 1
+    command -v python3 >/dev/null 2>&1 || return 1
+
+    local pane_list=""
+    pane_list="$(wezterm cli list --format json 2>/dev/null || true)"
+    if [ -z "$pane_list" ]; then
+        log_debug "wezterm cli list returned no data (no reachable GUI instance?)"
+        return 1
+    fi
+
+    local pane_id=""
+    set +e
+    pane_id="$(printf '%s' "$pane_list" | python3 -c 'import json, sys
+tty = sys.argv[1]
+try:
+    panes = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(1)
+for pane in panes:
+    if pane.get("tty_name") == tty:
+        print(pane.get("pane_id"))
+        raise SystemExit(0)
+raise SystemExit(1)
+' "$tty")"
+    local status=$?
+    set -e
+
+    if [ $status -ne 0 ] || ! is_integer "$pane_id"; then
+        log_debug "No wezterm pane found for tty $tty"
+        return 1
+    fi
+    printf '%s' "$pane_id"
+}
+
+activate_wezterm_tab() {
+    if ! is_truthy "${TMUX_NOTIFY_WEZTERM_TAB:-1}"; then
+        return 0
+    fi
+
+    local tty="$SENDER_CLIENT_TTY"
+    if [ -z "$tty" ] && [ "$FOCUS_ONLY" -eq 0 ]; then
+        tty="$(get_sender_tmux_client_tty 2>/dev/null || true)"
+    fi
+    [ -n "$tty" ] || return 0
+
+    local wezterm_pane_id=""
+    wezterm_pane_id="$(find_wezterm_pane_id_by_tty "$tty" 2>/dev/null || true)"
+    [ -n "$wezterm_pane_id" ] || return 0
+
+    if wezterm cli activate-pane --pane-id "$wezterm_pane_id" 2>/dev/null; then
+        log_debug "Activated wezterm pane $wezterm_pane_id (tty $tty)"
+    else
+        log_debug "Failed to activate wezterm pane $wezterm_pane_id"
+    fi
+    return 0
 }
 
 pick_dialog_backend() {
@@ -625,6 +689,7 @@ handle_action() {
 
     if [ "$action" = "goto" ]; then
         activate_terminal
+        activate_wezterm_tab
         if [ "$FOCUS_ONLY" -eq 0 ]; then
             jump_to_pane
         else
@@ -851,6 +916,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
     print_dry_run_common
     log "UI: $UI"
     log "Window classes: ${WINDOW_CLASS_LIST:-$WINDOW_CLASS}"
+    log "Wezterm tab switch: $(is_truthy "${TMUX_NOTIFY_WEZTERM_TAB:-1}" && echo "yes" || echo "no")"
     if is_integer "$FOCUS_WINDOW_ID"; then
         log "Focus window id: $FOCUS_WINDOW_ID"
     fi
