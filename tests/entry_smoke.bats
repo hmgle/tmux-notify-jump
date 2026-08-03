@@ -513,6 +513,11 @@ FAKE
         --focus-only --dry-run --title "hello" --body "world"
     [ "$status" -eq 0 ]
     [[ "$output" == *"Wezterm tab switch: no"* ]]
+
+    run "$PROJECT_ROOT/tmux-notify-jump-linux.sh" \
+        --focus-only --no-activate --dry-run --title "hello" --body "world"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Wezterm tab switch: no (--no-activate)"* ]]
 }
 
 @test "tmux-notify-jump-linux.sh: goto activates the wezterm pane hosting the tmux client tty" {

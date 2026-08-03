@@ -322,7 +322,6 @@ find_wezterm_pane_id_by_tty() {
 
     local pane_id=""
     if command -v python3 >/dev/null 2>&1; then
-        set +e
         pane_id="$(printf '%s' "$pane_list" | python3 -c 'import json, sys
 tty = sys.argv[1]
 try:
@@ -334,12 +333,7 @@ for pane in panes:
         print(pane.get("pane_id"))
         raise SystemExit(0)
 raise SystemExit(1)
-' "$tty")"
-        local status=$?
-        set -e
-        if [ $status -ne 0 ]; then
-            pane_id=""
-        fi
+' "$tty")" || pane_id=""
     fi
 
     if [ -z "$pane_id" ] && command -v jq >/dev/null 2>&1; then
@@ -348,7 +342,11 @@ raise SystemExit(1)
     fi
 
     if ! is_integer "$pane_id"; then
-        log_debug "No wezterm pane found for tty $tty"
+        if ! command -v python3 >/dev/null 2>&1 && ! command -v jq >/dev/null 2>&1; then
+            log_debug "Cannot match wezterm pane for tty $tty: no JSON parser available (need python3 or jq)"
+        else
+            log_debug "No wezterm pane found for tty $tty"
+        fi
         return 1
     fi
     printf '%s' "$pane_id"
@@ -928,7 +926,11 @@ if [ "$DRY_RUN" -eq 1 ]; then
     print_dry_run_common
     log "UI: $UI"
     log "Window classes: ${WINDOW_CLASS_LIST:-$WINDOW_CLASS}"
-    log "Wezterm tab switch: $(is_truthy "${TMUX_NOTIFY_WEZTERM_TAB:-1}" && echo "yes" || echo "no")"
+    if [ "$NO_ACTIVATE" -eq 1 ]; then
+        log "Wezterm tab switch: no (--no-activate)"
+    else
+        log "Wezterm tab switch: $(is_truthy "${TMUX_NOTIFY_WEZTERM_TAB:-1}" && echo "yes" || echo "no")"
+    fi
     if is_integer "$FOCUS_WINDOW_ID"; then
         log "Focus window id: $FOCUS_WINDOW_ID"
     fi
