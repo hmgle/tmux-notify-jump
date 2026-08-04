@@ -84,6 +84,10 @@ Options:
 Examples:
   $0 "2:1.0" "Build finished" "Click to jump to the pane"
   $0 --target "work:0.1" --title "Task complete"
+
+Environment:
+  TMUX_NOTIFY_WEZTERM_TAB=0  Disable switching to the wezterm tab that hosts
+                             the tmux client on click (enabled by default)
 EOF
 }
 
@@ -304,6 +308,76 @@ EOF
     [ $status -eq 0 ]
 }
 
+find_wezterm_pane_id_by_tty() {
+    local tty="${1:-}"
+    [ -n "$tty" ] || return 1
+    command -v wezterm >/dev/null 2>&1 || return 1
+
+    local pane_list=""
+    pane_list="$(wezterm cli list --format json 2>/dev/null || true)"
+    if [ -z "$pane_list" ]; then
+        log_debug "wezterm cli list returned no data (no reachable GUI instance?)"
+        return 1
+    fi
+
+    local pane_id=""
+    if command -v python3 >/dev/null 2>&1; then
+        pane_id="$(printf '%s' "$pane_list" | python3 -c 'import json, sys
+tty = sys.argv[1]
+try:
+    panes = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(1)
+for pane in panes:
+    if pane.get("tty_name") == tty:
+        print(pane.get("pane_id"))
+        raise SystemExit(0)
+raise SystemExit(1)
+' "$tty")" || pane_id=""
+    fi
+
+    if [ -z "$pane_id" ] && command -v jq >/dev/null 2>&1; then
+        pane_id="$(printf '%s' "$pane_list" |
+            jq -r --arg tty "$tty" '[.[] | select(.tty_name == $tty) | .pane_id][0] // empty' 2>/dev/null || true)"
+    fi
+
+    if ! is_integer "$pane_id"; then
+        if ! command -v python3 >/dev/null 2>&1 && ! command -v jq >/dev/null 2>&1; then
+            log_debug "Cannot match wezterm pane for tty $tty: no JSON parser available (need python3 or jq)"
+        else
+            log_debug "No wezterm pane found for tty $tty"
+        fi
+        return 1
+    fi
+    printf '%s' "$pane_id"
+}
+
+activate_wezterm_tab() {
+    # `wezterm cli activate-pane` focuses the wezterm window, so honor
+    # --no-activate just like activate_terminal does.
+    [ "$NO_ACTIVATE" -eq 0 ] || return 0
+    if ! is_truthy "${TMUX_NOTIFY_WEZTERM_TAB:-1}"; then
+        return 0
+    fi
+
+    local tty="$SENDER_CLIENT_TTY"
+    if [ -z "$tty" ] && [ "$FOCUS_ONLY" -eq 0 ]; then
+        tty="$(get_sender_tmux_client_tty 2>/dev/null || true)"
+    fi
+    [ -n "$tty" ] || return 0
+
+    local wezterm_pane_id=""
+    wezterm_pane_id="$(find_wezterm_pane_id_by_tty "$tty" 2>/dev/null || true)"
+    [ -n "$wezterm_pane_id" ] || return 0
+
+    if wezterm cli activate-pane --pane-id "$wezterm_pane_id" 2>/dev/null; then
+        log_debug "Activated wezterm pane $wezterm_pane_id (tty $tty)"
+    else
+        log_debug "Failed to activate wezterm pane $wezterm_pane_id"
+    fi
+    return 0
+}
+
 pick_dialog_backend() {
     if command -v zenity >/dev/null 2>&1; then
         printf '%s' "zenity"
@@ -354,6 +428,33 @@ timeout_ms_to_seconds() {
     printf '%s' "$(( (ms + 999) / 1000 ))"
 }
 
+# Decide whether terminal activation is possible and disable it (with the
+# reason recorded in NO_ACTIVATE_REASON) when it is not. Called before the
+# dry-run block so dry-run reports the NO_ACTIVATE value that would actually
+# take effect at runtime.
+detect_activation_capability() {
+    NO_ACTIVATE_REASON=""
+    if [ "$NO_ACTIVATE" -eq 1 ]; then
+        NO_ACTIVATE_REASON="--no-activate"
+        return
+    fi
+    if is_wayland_session; then
+        warn "Wayland session detected; terminal focusing is disabled"
+        NO_ACTIVATE=1
+        NO_ACTIVATE_REASON="Wayland session"
+        return
+    fi
+    if ! command -v xdotool >/dev/null 2>&1; then
+        if command -v awesome-client >/dev/null 2>&1; then
+            warn "Missing xdotool; falling back to awesome-client-only activation"
+        else
+            warn "Missing xdotool; terminal focusing is disabled"
+            NO_ACTIVATE=1
+            NO_ACTIVATE_REASON="no xdotool"
+        fi
+    fi
+}
+
 require_tools() {
     if [ "$UI" = "dialog" ]; then
         if ! pick_dialog_backend >/dev/null 2>&1; then
@@ -367,21 +468,6 @@ require_tools() {
     fi
     if [ "$FOCUS_ONLY" -eq 0 ]; then
         require_tool tmux
-    fi
-    if [ "$NO_ACTIVATE" -eq 0 ]; then
-        if is_wayland_session; then
-            warn "Wayland session detected; terminal focusing is disabled"
-            NO_ACTIVATE=1
-            return
-        fi
-        if ! command -v xdotool >/dev/null 2>&1; then
-            if command -v awesome-client >/dev/null 2>&1; then
-                warn "Missing xdotool; falling back to awesome-client-only activation"
-            else
-                warn "Missing xdotool; terminal focusing is disabled"
-                NO_ACTIVATE=1
-            fi
-        fi
     fi
 }
 
@@ -625,6 +711,7 @@ handle_action() {
 
     if [ "$action" = "goto" ]; then
         activate_terminal
+        activate_wezterm_tab
         if [ "$FOCUS_ONLY" -eq 0 ]; then
             jump_to_pane
         else
@@ -846,11 +933,18 @@ TITLE="$(truncate_text "$MAX_TITLE" "$TITLE")"
 BODY="$(truncate_text "$MAX_BODY" "$BODY")"
 BODY="$(wrap_text "$WRAP_COLS" "$BODY")"
 
+detect_activation_capability
+
 if [ "$DRY_RUN" -eq 1 ]; then
     print_dry_run_target
     print_dry_run_common
     log "UI: $UI"
     log "Window classes: ${WINDOW_CLASS_LIST:-$WINDOW_CLASS}"
+    if [ "$NO_ACTIVATE" -eq 1 ]; then
+        log "Wezterm tab switch: no (${NO_ACTIVATE_REASON:-disabled})"
+    else
+        log "Wezterm tab switch: $(is_truthy "${TMUX_NOTIFY_WEZTERM_TAB:-1}" && echo "yes" || echo "no")"
+    fi
     if is_integer "$FOCUS_WINDOW_ID"; then
         log "Focus window id: $FOCUS_WINDOW_ID"
     fi

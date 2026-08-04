@@ -503,6 +503,193 @@ FAKE
     [ "$output" = "1" ]
 }
 
+@test "tmux-notify-jump-linux.sh: dry-run reports wezterm tab switch toggle" {
+    fake_bin="$TEST_TEMP_DIR/bin"
+    mkdir -p "$fake_bin"
+    cat >"$fake_bin/xdotool" <<'FAKE'
+#!/usr/bin/env bash
+exit 0
+FAKE
+    chmod +x "$fake_bin/xdotool"
+
+    run env PATH="$fake_bin:$PATH" XDG_SESSION_TYPE=x11 WAYLAND_DISPLAY= \
+        "$PROJECT_ROOT/tmux-notify-jump-linux.sh" \
+        --focus-only --dry-run --title "hello" --body "world"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Wezterm tab switch: yes"* ]]
+
+    run env PATH="$fake_bin:$PATH" XDG_SESSION_TYPE=x11 WAYLAND_DISPLAY= TMUX_NOTIFY_WEZTERM_TAB=0 \
+        "$PROJECT_ROOT/tmux-notify-jump-linux.sh" \
+        --focus-only --dry-run --title "hello" --body "world"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Wezterm tab switch: no"* ]]
+
+    run "$PROJECT_ROOT/tmux-notify-jump-linux.sh" \
+        --focus-only --no-activate --dry-run --title "hello" --body "world"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Wezterm tab switch: no (--no-activate)"* ]]
+
+    run env XDG_SESSION_TYPE=wayland WAYLAND_DISPLAY=wayland-0 \
+        "$PROJECT_ROOT/tmux-notify-jump-linux.sh" \
+        --focus-only --dry-run --title "hello" --body "world"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Wezterm tab switch: no (Wayland session)"* ]]
+}
+
+@test "tmux-notify-jump-linux.sh: goto activates the wezterm pane hosting the tmux client tty" {
+    fake_bin="$TEST_TEMP_DIR/bin"
+    mkdir -p "$fake_bin"
+
+    cat >"$fake_bin/zenity" <<'FAKE'
+#!/usr/bin/env bash
+exit 0
+FAKE
+    chmod +x "$fake_bin/zenity"
+
+    cat >"$fake_bin/xdotool" <<'FAKE'
+#!/usr/bin/env bash
+case "$1" in
+    search)
+        printf '12345\n'
+        exit 0
+        ;;
+    windowactivate)
+        exit 0
+        ;;
+esac
+exit 0
+FAKE
+    chmod +x "$fake_bin/xdotool"
+
+    cat >"$fake_bin/xprop" <<'FAKE'
+#!/usr/bin/env bash
+if [ "$3" = "WM_STATE" ]; then
+    printf 'WM_STATE(WM_STATE):\n'
+    exit 0
+fi
+exit 1
+FAKE
+    chmod +x "$fake_bin/xprop"
+
+    cat >"$fake_bin/wezterm" <<'FAKE'
+#!/usr/bin/env bash
+if [ "$1" = "cli" ] && [ "$2" = "list" ]; then
+    printf '[{"pane_id":7,"tab_id":3,"tty_name":"/dev/pts/77"},{"pane_id":8,"tab_id":4,"tty_name":"/dev/pts/88"}]'
+    exit 0
+fi
+if [ "$1" = "cli" ] && [ "$2" = "activate-pane" ]; then
+    printf '%s\n' "$*" >"$TEST_TEMP_DIR/wezterm.args"
+    exit 0
+fi
+exit 1
+FAKE
+    chmod +x "$fake_bin/wezterm"
+
+    run env PATH="$fake_bin:$PATH" TEST_TEMP_DIR="$TEST_TEMP_DIR" \
+        "$PROJECT_ROOT/tmux-notify-jump-linux.sh" \
+        --focus-only \
+        --sender-tty /dev/pts/77 \
+        --dedupe-ms 0 \
+        --ui dialog \
+        --title "hello" \
+        --body "world"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Focused terminal"* ]]
+    run cat "$TEST_TEMP_DIR/wezterm.args"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"--pane-id 7"* ]]
+}
+
+@test "tmux-notify-jump-linux.sh: --no-activate skips wezterm tab activation" {
+    fake_bin="$TEST_TEMP_DIR/bin"
+    mkdir -p "$fake_bin"
+
+    cat >"$fake_bin/zenity" <<'FAKE'
+#!/usr/bin/env bash
+exit 0
+FAKE
+    chmod +x "$fake_bin/zenity"
+
+    cat >"$fake_bin/wezterm" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TEMP_DIR/wezterm.args"
+if [ "$1" = "cli" ] && [ "$2" = "list" ]; then
+    printf '[{"pane_id":7,"tab_id":3,"tty_name":"/dev/pts/77"}]'
+fi
+exit 0
+FAKE
+    chmod +x "$fake_bin/wezterm"
+
+    run env PATH="$fake_bin:$PATH" TEST_TEMP_DIR="$TEST_TEMP_DIR" \
+        "$PROJECT_ROOT/tmux-notify-jump-linux.sh" \
+        --focus-only \
+        --no-activate \
+        --sender-tty /dev/pts/77 \
+        --dedupe-ms 0 \
+        --ui dialog \
+        --title "hello" \
+        --body "world"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Focused terminal"* ]]
+    [ ! -f "$TEST_TEMP_DIR/wezterm.args" ]
+}
+
+@test "tmux-notify-jump-linux.sh: goto without wezterm on PATH stays silent" {
+    fake_bin="$TEST_TEMP_DIR/bin"
+    mkdir -p "$fake_bin"
+
+    cat >"$fake_bin/zenity" <<'FAKE'
+#!/usr/bin/env bash
+exit 0
+FAKE
+    chmod +x "$fake_bin/zenity"
+
+    cat >"$fake_bin/xdotool" <<'FAKE'
+#!/usr/bin/env bash
+case "$1" in
+    search)
+        printf '12345\n'
+        exit 0
+        ;;
+    windowactivate)
+        exit 0
+        ;;
+esac
+exit 0
+FAKE
+    chmod +x "$fake_bin/xdotool"
+
+    cat >"$fake_bin/xprop" <<'FAKE'
+#!/usr/bin/env bash
+if [ "$3" = "WM_STATE" ]; then
+    printf 'WM_STATE(WM_STATE):\n'
+    exit 0
+fi
+exit 1
+FAKE
+    chmod +x "$fake_bin/xprop"
+
+    cat >"$fake_bin/wezterm" <<'FAKE'
+#!/usr/bin/env bash
+exit 127
+FAKE
+    chmod +x "$fake_bin/wezterm"
+
+    run env PATH="$fake_bin:$PATH" \
+        "$PROJECT_ROOT/tmux-notify-jump-linux.sh" \
+        --focus-only \
+        --sender-tty /dev/pts/77 \
+        --dedupe-ms 0 \
+        --ui dialog \
+        --title "hello" \
+        --body "world"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Focused terminal"* ]]
+}
+
 @test "install.sh: unknown option returns error" {
     run "$PROJECT_ROOT/install.sh" --definitely-unknown-option
 
