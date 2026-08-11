@@ -1143,7 +1143,7 @@ prepare_tmux_jump_client() {
     if [ -z "$selected" ]; then
         selected="$(best_tmux_terminal_client "$JUMP_TARGET_SESSION_ID" 2>/dev/null || true)"
     fi
-    if [ -z "$selected" ] && [ "${TMUX_NOTIFY_UNATTACHED_FALLBACK:-none}" = "single" ]; then
+    if [ -z "$selected" ] && [ "${TMUX_NOTIFY_UNATTACHED_FALLBACK:-single}" = "single" ]; then
         selected="$(single_tmux_terminal_client 2>/dev/null || true)"
     fi
     if [ -z "$selected" ]; then

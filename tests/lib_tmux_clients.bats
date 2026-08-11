@@ -65,6 +65,42 @@ FAKE
     chmod +x "$fake_bin/tmux"
 }
 
+write_multiple_tmux_clients_fake() {
+    cat >"$fake_bin/tmux" <<'FAKE'
+#!/usr/bin/env bash
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+    list-clients)
+        [ "${1:-}" = "-F" ] || exit 1
+        [ "${2:-}" = '#{client_control_mode}|#{client_activity}|#{client_name}|#{client_tty}|#{client_pid}|#{session_id}|#{pane_id}|#{session_name}' ] || exit 1
+        printf '1|30|control-pty|/dev/pts/9|900|$2|%%9|target\n'
+        printf '0|20|/dev/pts/1|/dev/pts/1|100|$1|%%1|work\n'
+        printf '0|10|/dev/pts/2|/dev/pts/2|200|$3|%%2|other\n'
+        ;;
+    display-message)
+        if [ "${1:-}" = "-p" ] && [ "${2:-}" = "-t" ] && [ "${3:-}" = "%9" ] && [ "${4:-}" = '#{session_id}|#{pane_id}' ]; then
+            printf '$2|%%9\n'
+            exit 0
+        fi
+        if [ "${1:-}" = "-c" ]; then
+            printf '%s\n' "$*" >"$TEST_TEMP_DIR/display.args"
+            exit 0
+        fi
+        exit 1
+        ;;
+    switch-client)
+        printf '%s\n' "$*" >"$TEST_TEMP_DIR/switch.args"
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+FAKE
+    chmod +x "$fake_bin/tmux"
+}
+
 @test "terminal client inventory excludes control clients even with a tty" {
     write_tmux_inventory_fake
 
@@ -90,7 +126,8 @@ FAKE
     write_tmux_inventory_fake
 
     run env PATH="$fake_bin:$PATH" TEST_TEMP_DIR="$TEST_TEMP_DIR" TMUX="/tmp/test,1,0" \
-        bash -c '. "'"$PROJECT_ROOT"'/tmux-notify-jump-lib.sh";
+        TMUX_NOTIFY_UNATTACHED_FALLBACK=none bash -c \
+        '. "'"$PROJECT_ROOT"'/tmux-notify-jump-lib.sh";
             SESSION=target; WINDOW=0; PANE=0; PANE_ID=%9; SENDER_CLIENT_TTY=;
             prepare_tmux_jump_client'
 
@@ -102,12 +139,13 @@ FAKE
     [[ "$output" == *'target session target is not visible'* ]]
 }
 
-@test "single-client fallback switches one explicit ordinary client" {
+@test "default fallback switches one explicit ordinary client" {
     write_tmux_inventory_fake
 
     run env PATH="$fake_bin:$PATH" TEST_TEMP_DIR="$TEST_TEMP_DIR" TMUX="/tmp/test,1,0" \
-        TMUX_NOTIFY_UNATTACHED_FALLBACK=single _QUIET=0 bash -c \
-        '. "'"$PROJECT_ROOT"'/tmux-notify-jump-lib.sh";
+        _QUIET=0 bash -c \
+        'unset TMUX_NOTIFY_UNATTACHED_FALLBACK;
+            . "'"$PROJECT_ROOT"'/tmux-notify-jump-lib.sh";
             SESSION=target; WINDOW=0; PANE=0; PANE_ID=%9; SENDER_CLIENT_TTY=;
             jump_to_pane'
 
@@ -117,4 +155,18 @@ FAKE
     [ "$status" -eq 0 ]
     [[ "$output" == *'-c /dev/pts/1 -t target:0'* ]]
     [[ "$output" != *'control-pty'* ]]
+}
+
+@test "default fallback refuses to choose between ordinary clients" {
+    write_multiple_tmux_clients_fake
+
+    run env PATH="$fake_bin:$PATH" TEST_TEMP_DIR="$TEST_TEMP_DIR" TMUX="/tmp/test,1,0" \
+        bash -c 'unset TMUX_NOTIFY_UNATTACHED_FALLBACK;
+            . "'"$PROJECT_ROOT"'/tmux-notify-jump-lib.sh";
+            SESSION=target; WINDOW=0; PANE=0; PANE_ID=%9; SENDER_CLIENT_TTY=;
+            jump_to_pane'
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *'not visible (no ordinary terminal client)'* ]]
+    [ ! -e "$TEST_TEMP_DIR/switch.args" ]
 }
