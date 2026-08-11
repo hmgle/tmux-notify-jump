@@ -123,20 +123,10 @@ case "$cmd" in
         exit 1
         ;;
     list-clients)
-        if [ "${1:-}" = "-F" ] && [ "${2:-}" = "#{client_tty} #{pane_id}" ]; then
-            printf '/dev/ttys222 %%1\n'
-            exit 0
-        fi
-        if [ "${1:-}" = "-F" ] && [ "${2:-}" = "#{client_tty} #{client_pid}" ]; then
-            printf '/dev/ttys222 222\n'
-            exit 0
-        fi
-        if [ "${1:-}" = "-F" ] && [ "${2:-}" = "#{client_activity} #{client_pid} #{client_session}" ]; then
-            printf '10 222 work\n'
-            exit 0
-        fi
-        if [ "${1:-}" = "-F" ] && [ "${2:-}" = "#{client_activity} #{client_tty} #{client_session}" ]; then
-            printf '10 /dev/ttys222 work\n'
+        if [ "${1:-}" = "-F" ] && [ "${2:-}" = '#{client_control_mode}|#{client_activity}|#{client_name}|#{client_tty}|#{client_pid}|#{session_id}|#{pane_id}|#{session_name}' ]; then
+            pane='%1'
+            [ ! -f "$TEST_TEMP_DIR/switched" ] || pane='%9'
+            printf '0|10|/dev/ttys222|/dev/ttys222|222|$1|%s|work\n' "$pane"
             exit 0
         fi
         exit 1
@@ -150,14 +140,19 @@ case "$cmd" in
             printf 'work'
             exit 0
         fi
-        if [ "${1:-}" = "-p" ] && [ "${2:-}" = "#{client_tty}" ]; then
-            printf '/dev/ttys222'
+        if [ "${1:-}" = "-p" ] && [ "${2:-}" = "-t" ] && [ "${3:-}" = "%1" ] && [ "${4:-}" = "#{session_id}" ]; then
+            printf '$1'
+            exit 0
+        fi
+        if [ "${1:-}" = "-p" ] && [ "${2:-}" = "-t" ] && [ "${3:-}" = "%9" ] && [ "${4:-}" = '#{session_id}|#{pane_id}' ]; then
+            printf '$1|%%9'
             exit 0
         fi
         exit 1
         ;;
     switch-client)
         printf '%s\n' "$*" >"$TEST_TEMP_DIR/switch-client.args"
+        : >"$TEST_TEMP_DIR/switched"
         exit 0
         ;;
     select-window|select-pane)
@@ -260,7 +255,7 @@ FAKE
 
     run cat "$TEST_TEMP_DIR/switch-client.args"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"-c /dev/ttys222 -t work"* ]]
+    [[ "$output" == *"-c /dev/ttys222 -t work:3"* ]]
 }
 
 @test "tmux-notify-jump-macos.sh: detach does not forward default bundle ids" {

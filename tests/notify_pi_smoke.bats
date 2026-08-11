@@ -185,11 +185,15 @@ case "$cmd" in
             printf 'work\n'
             exit 0
         fi
+        if [ "${1:-}" = "-p" ] && [ "${2:-}" = "-t" ] && [ "${3:-}" = "work" ] && [ "${4:-}" = "#{session_id}" ]; then
+            printf '$1\n'
+            exit 0
+        fi
         exit 1
         ;;
     list-clients)
-        if [ "${1:-}" = "-F" ] && [ "${2:-}" = "#{client_pid} #{client_session}" ]; then
-            printf '222 work\n'
+        if [ "${1:-}" = "-F" ] && [ "${2:-}" = '#{client_control_mode}|#{client_activity}|#{client_name}|#{client_tty}|#{client_pid}|#{session_id}|#{pane_id}|#{session_name}' ]; then
+            printf '0|10|/dev/pts/1|/dev/pts/1|222|$1|%%1|work\n'
             exit 0
         fi
         exit 1
@@ -266,11 +270,15 @@ case "$cmd" in
             printf 'work\n'
             exit 0
         fi
+        if [ "${1:-}" = "-p" ] && [ "${2:-}" = "-t" ] && [ "${3:-}" = "work" ] && [ "${4:-}" = "#{session_id}" ]; then
+            printf '$1\n'
+            exit 0
+        fi
         exit 1
         ;;
     list-clients)
-        if [ "${1:-}" = "-F" ] && [ "${2:-}" = "#{client_pid} #{client_session}" ]; then
-            printf '222 work\n'
+        if [ "${1:-}" = "-F" ] && [ "${2:-}" = '#{client_control_mode}|#{client_activity}|#{client_name}|#{client_tty}|#{client_pid}|#{session_id}|#{pane_id}|#{session_name}' ]; then
+            printf '0|10|/dev/pts/1|/dev/pts/1|222|$1|%%1|work\n'
             exit 0
         fi
         exit 1

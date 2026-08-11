@@ -594,6 +594,7 @@ handle_action_callback() {
     fi
 
     # `terminal-notifier -execute` runs only on click; treat any callback as "goto".
+    prepare_tmux_jump_client
     activate_terminal
     jump_to_pane
 }
@@ -644,10 +645,12 @@ handle_action() {
     action="$(send_notification)"
 
     if [ "$action" = "goto" ]; then
-        activate_terminal
         if [ "$FOCUS_ONLY" -eq 0 ]; then
+            prepare_tmux_jump_client
+            activate_terminal
             jump_to_pane
         else
+            activate_terminal
             log "Focused terminal"
         fi
     elif [ "$action" = "dismiss" ]; then
@@ -674,23 +677,6 @@ activate_terminal() {
     done
 
     warn "Failed to activate terminal (set TMUX_NOTIFY_BUNDLE_ID(S) or use --no-activate)"
-}
-
-jump_to_pane() {
-    ensure_target_resolved
-    local switch_args=()
-    if [ -n "$SENDER_CLIENT_TTY" ]; then
-        switch_args=(-c "$SENDER_CLIENT_TTY")
-    fi
-
-    if ! tmux_cmd switch-client "${switch_args[@]}" -t "$SESSION" ';' \
-        select-window -t "$SESSION:$WINDOW" ';' \
-        select-pane -t "$SESSION:$WINDOW.$PANE" 2>/dev/null; then
-        warn "Failed to switch tmux client; selecting target window and pane only"
-        tmux_cmd select-window -t "$SESSION:$WINDOW" 2>/dev/null || die "Failed to select window"
-        tmux_cmd select-pane -t "$SESSION:$WINDOW.$PANE" 2>/dev/null || die "Failed to select pane"
-    fi
-    log "Jumped to $SESSION:$WINDOW.$PANE"
 }
 
 parse_args() {

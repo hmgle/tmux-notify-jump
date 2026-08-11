@@ -89,6 +89,13 @@ There are two main modes:
 - **Jump mode**: pass `--target` (or a positional target). Requires a running tmux server.
 - **Focus-only mode**: pass `--focus-only`. Does not require tmux; clicking just focuses your terminal window/app.
 
+Jump mode inventories tmux clients and treats only
+`client_control_mode=0` rows as user-visible terminals. On click it selects an
+explicit client (the propagated sender client first, otherwise an ordinary
+client already viewing the target session), runs `switch-client -c`, and
+verifies that exact client reached the target pane. A persistent control-mode
+client is never a jump target, even if tmux reports a TTY for it.
+
 ```bash
 ./tmux-notify-jump <session>:<window>.<pane> [title] [body]
 ./tmux-notify-jump --target <session:window.pane> [--title <title>] [--body <body>]
@@ -134,6 +141,7 @@ CLI flags override environment variables where applicable.
 - `TMUX_NOTIFY_TMUX_SOCKET`: tmux server socket path (passed to `tmux -S`; useful if you run multiple tmux servers)
 - `TMUX_NOTIFY_FALLBACK_TARGET`: if not running inside tmux, fall back to the most recently active tmux client pane as the jump target (`0` disables; default: `0`)
 - `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK`: when hooks run without tmux (missing or no server/target), fall back to `--focus-only` instead of no-op (`0` disables; default: `1`)
+- `TMUX_NOTIFY_UNATTACHED_FALLBACK`: policy when the target session has no identifiable ordinary client. The default `none` reports that the target is not visible and does not move an unrelated terminal; `single` permits switching the server's sole ordinary client explicitly.
 - `TMUX_NOTIFY_REMOTE`: allow notifications when any attached tmux client in the current session appears to be attached over SSH (`0` suppresses; default: `0`)
 - `TMUX_NOTIFY_CLASS` / `TMUX_NOTIFY_CLASSES`: terminal window class(es) used by `xdotool search --class`
 - `TMUX_NOTIFY_WEZTERM_TAB`: on Linux, after focusing the terminal window, also switch to the wezterm tab/pane that hosts the tmux client (matched via `wezterm cli list` by tty; `0` disables; default: `1`). Requires `python3` or `jq` for JSON parsing; silently skipped when neither is available, when `--no-activate` is set, or when the terminal is not wezterm.
@@ -459,7 +467,8 @@ Notes:
 
 - Actions not available: your `notify-send`/notification daemon may not support `-A` or `--wait`; the script falls back to a plain notification (no jump).
 - macOS click does nothing: `terminal-notifier -execute` runs the callback without inheriting your shell environment; ensure `tmux-notify-jump-macos.sh` is up to date (it passes callback args explicitly and adds common Homebrew paths to `PATH`).
-- Jump stays in the wrong session: make sure the notification was sent from inside tmux (`TMUX_PANE` set); the script captures the originating tmux client when sending so it can switch that same client on click.
+- Target session is reported as not visible: inspect `tmux list-clients -F 'name=#{client_name} tty=#{client_tty} control=#{client_control_mode} session=#{session_name}'`. A session with only `control=1` clients has no terminal to activate. Attach a real terminal to it, propagate `--sender-tty` from the originating client, or set `TMUX_NOTIFY_UNATTACHED_FALLBACK=single` only when the server has exactly one ordinary client and moving it is unambiguous.
+- Jump stays in the wrong session: make sure the notification was sent from inside tmux (`TMUX_PANE` set) and that its sender TTY still names an ordinary client. Successful jumps now verify the explicit client's session and pane; enable `TMUX_NOTIFY_DEBUG=1` to inspect selection details.
 - Focus goes to the wrong terminal:
   - macOS: the script tries to detect the terminal hosting the tmux client that triggered the notification; override with `TMUX_NOTIFY_BUNDLE_ID(S)` / `--bundle-id(s)` (or use `--no-activate`).
   - Linux/X11: set `TMUX_NOTIFY_WINDOW_ID`, pass `--class/--classes`, or use `--no-activate`.

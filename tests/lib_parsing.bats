@@ -152,8 +152,12 @@ if [ "${1:-}" = "display-message" ] && [ "${2:-}" = "-p" ] && [ "${3:-}" = "-t" 
     printf 'work\n'
     exit 0
 fi
-if [ "${1:-}" = "list-clients" ] && [ "${2:-}" = "-F" ] && [ "${3:-}" = "#{client_pid} #{client_session}" ]; then
-    printf '222 work\n'
+if [ "${1:-}" = "display-message" ] && [ "${2:-}" = "-p" ] && [ "${3:-}" = "-t" ] && [ "${4:-}" = "work" ] && [ "${5:-}" = "#{session_id}" ]; then
+    printf '$1\n'
+    exit 0
+fi
+if [ "${1:-}" = "list-clients" ] && [ "${2:-}" = "-F" ] && [ "${3:-}" = '#{client_control_mode}|#{client_activity}|#{client_name}|#{client_tty}|#{client_pid}|#{session_id}|#{pane_id}|#{session_name}' ]; then
+    printf '0|10|/dev/pts/1|/dev/pts/1|222|$1|%%1|work\n'
     exit 0
 fi
 exit 1
@@ -200,8 +204,12 @@ if [ "${1:-}" = "display-message" ] && [ "${2:-}" = "-p" ] && [ "${3:-}" = "-t" 
     printf 'work\n'
     exit 0
 fi
-if [ "${1:-}" = "list-clients" ] && [ "${2:-}" = "-F" ] && [ "${3:-}" = "#{client_pid} #{client_session}" ]; then
-    printf '222 work\n'
+if [ "${1:-}" = "display-message" ] && [ "${2:-}" = "-p" ] && [ "${3:-}" = "-t" ] && [ "${4:-}" = "work" ] && [ "${5:-}" = "#{session_id}" ]; then
+    printf '$1\n'
+    exit 0
+fi
+if [ "${1:-}" = "list-clients" ] && [ "${2:-}" = "-F" ] && [ "${3:-}" = '#{client_control_mode}|#{client_activity}|#{client_name}|#{client_tty}|#{client_pid}|#{session_id}|#{pane_id}|#{session_name}' ]; then
+    printf '0|10|/dev/pts/2|/dev/pts/2|222|$1|%%2|work\n'
     exit 0
 fi
 exit 1
@@ -248,8 +256,12 @@ if [ "${1:-}" = "display-message" ] && [ "${2:-}" = "-p" ] && [ "${3:-}" = "-t" 
     printf 'work\n'
     exit 0
 fi
-if [ "${1:-}" = "list-clients" ] && [ "${2:-}" = "-F" ] && [ "${3:-}" = "#{client_pid} #{client_session}" ]; then
-    printf '222 work\n'
+if [ "${1:-}" = "display-message" ] && [ "${2:-}" = "-p" ] && [ "${3:-}" = "-t" ] && [ "${4:-}" = "work" ] && [ "${5:-}" = "#{session_id}" ]; then
+    printf '$1\n'
+    exit 0
+fi
+if [ "${1:-}" = "list-clients" ] && [ "${2:-}" = "-F" ] && [ "${3:-}" = '#{client_control_mode}|#{client_activity}|#{client_name}|#{client_tty}|#{client_pid}|#{session_id}|#{pane_id}|#{session_name}' ]; then
+    printf '0|10|/dev/pts/1|/dev/pts/1|222|$1|%%1|work\n'
     exit 0
 fi
 exit 1
