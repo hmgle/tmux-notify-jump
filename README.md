@@ -96,6 +96,13 @@ client already viewing the target session), runs `switch-client -c`, and
 verifies that exact client reached the target pane. A persistent control-mode
 client is never a jump target, even if tmux reports a TTY for it.
 
+tmux 2.1 or newer exposes `client_control_mode` and provides this exact
+classification. On older tmux releases the format expands empty, so the script
+falls back to accepting only clients with a non-empty TTY. That keeps ordinary
+terminal jumps working and excludes pipe-backed background control clients,
+but an ancient tmux cannot distinguish a control client that itself owns a TTY;
+upgrade tmux when exact isolation is required.
+
 ```bash
 ./tmux-notify-jump <session>:<window>.<pane> [title] [body]
 ./tmux-notify-jump --target <session:window.pane> [--title <title>] [--body <body>]

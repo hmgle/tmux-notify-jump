@@ -628,7 +628,23 @@ tmux_terminal_client_rows() {
         local pane_id=""
         local session_name=""
         IFS='|' read -r control activity name tty pid session_id pane_id session_name <<<"$line"
-        [ "$control" = "0" ] || continue
+        case "$control" in
+            1)
+                continue
+                ;;
+            0)
+                ;;
+            "")
+                # tmux before 2.1 does not expose client_control_mode. A TTY
+                # is the only available visibility signal there; it still
+                # excludes pipe-backed background control clients.
+                [ -n "$tty" ] || continue
+                ;;
+            *)
+                # Unknown non-empty values must not weaken control filtering.
+                continue
+                ;;
+        esac
         [ -n "$name" ] || continue
         printf '%s|%s|%s|%s|%s|%s|%s\n' \
             "$activity" "$name" "$tty" "$pid" "$session_id" "$pane_id" "$session_name"

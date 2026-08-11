@@ -52,6 +52,19 @@ FAKE
     chmod +x "$fake_bin/tmux"
 }
 
+write_legacy_tmux_inventory_fake() {
+    cat >"$fake_bin/tmux" <<'FAKE'
+#!/usr/bin/env bash
+if [ "${1:-}" = "list-clients" ] && [ "${2:-}" = "-F" ]; then
+    printf '|120|legacy-terminal|/dev/pts/7|700|$1|%%7|legacy\n'
+    printf '|130|legacy-background||701|$2|%%8|background\n'
+    exit 0
+fi
+exit 1
+FAKE
+    chmod +x "$fake_bin/tmux"
+}
+
 @test "terminal client inventory excludes control clients even with a tty" {
     write_tmux_inventory_fake
 
@@ -61,6 +74,16 @@ FAKE
     [ "$status" -eq 0 ]
     [[ "$output" == *'/dev/pts/1|/dev/pts/1|100|$1|%1|work'* ]]
     [[ "$output" != *'control-pty'* ]]
+}
+
+@test "terminal client inventory uses tty fallback on pre-2.1 tmux" {
+    write_legacy_tmux_inventory_fake
+
+    run env PATH="$fake_bin:$PATH" PROJECT_ROOT="$PROJECT_ROOT" bash -c \
+        '. "'"$PROJECT_ROOT"'/tmux-notify-jump-lib.sh"; tmux_terminal_client_rows'
+
+    [ "$status" -eq 0 ]
+    [ "$output" = "120|legacy-terminal|/dev/pts/7|700|\$1|%7|legacy" ]
 }
 
 @test "strict jump reports a target session with only a control client" {
