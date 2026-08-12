@@ -232,6 +232,20 @@ FAKE
     [[ "$output" != *'control-pty'* ]]
 }
 
+@test "unknown fallback values warn and use the single-client policy" {
+    write_tmux_inventory_fake
+
+    run env PATH="$fake_bin:$PATH" TEST_TEMP_DIR="$TEST_TEMP_DIR" TMUX="/tmp/test,1,0" \
+        TMUX_NOTIFY_UNATTACHED_FALLBACK=1 _QUIET=0 bash -c \
+        '. "'"$PROJECT_ROOT"'/tmux-notify-jump-lib.sh";
+            SESSION=target; WINDOW=0; PANE=0; PANE_ID=%9; SENDER_CLIENT_TTY=;
+            jump_to_pane'
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Unknown TMUX_NOTIFY_UNATTACHED_FALLBACK value '1'"* ]]
+    [[ "$output" == *'Jumped to target:0.0 via /dev/pts/1'* ]]
+}
+
 @test "default fallback refuses to choose between ordinary clients" {
     write_multiple_tmux_clients_fake
 

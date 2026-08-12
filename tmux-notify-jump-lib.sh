@@ -1131,6 +1131,22 @@ single_tmux_terminal_client() {
     printf '%s' "$only"
 }
 
+# Resolve the policy for a target no ordinary client is viewing. Unknown
+# values are reported rather than silently selecting the strict policy, which
+# is the opposite of what an attempt to switch this on would intend.
+tmux_unattached_fallback_policy() {
+    local policy="${TMUX_NOTIFY_UNATTACHED_FALLBACK:-single}"
+    case "$policy" in
+        single | none)
+            printf '%s' "$policy"
+            ;;
+        *)
+            warn "Unknown TMUX_NOTIFY_UNATTACHED_FALLBACK value '$policy'; expected 'single' or 'none', using 'single'"
+            printf 'single'
+            ;;
+    esac
+}
+
 prepare_tmux_jump_client() {
     ensure_target_resolved
     local target_spec="${PANE_ID:-$SESSION:$WINDOW.$PANE}"
@@ -1141,6 +1157,9 @@ prepare_tmux_jump_client() {
     JUMP_TARGET_PANE_ID="${target_info#*|}"
     [ -n "$JUMP_TARGET_SESSION_ID" ] || die "Target pane no longer exists: $target_spec"
 
+    local fallback_policy=""
+    fallback_policy="$(tmux_unattached_fallback_policy)"
+
     local selected=""
     if [ -n "${SENDER_CLIENT_TTY:-}" ]; then
         selected="$(find_tmux_terminal_client_by_tty "$SENDER_CLIENT_TTY" 2>/dev/null || true)"
@@ -1148,7 +1167,7 @@ prepare_tmux_jump_client() {
     if [ -z "$selected" ]; then
         selected="$(best_tmux_terminal_client "$JUMP_TARGET_SESSION_ID" 2>/dev/null || true)"
     fi
-    if [ -z "$selected" ] && [ "${TMUX_NOTIFY_UNATTACHED_FALLBACK:-single}" = "single" ]; then
+    if [ -z "$selected" ] && [ "$fallback_policy" = "single" ]; then
         selected="$(single_tmux_terminal_client 2>/dev/null || true)"
     fi
     if [ -z "$selected" ]; then
