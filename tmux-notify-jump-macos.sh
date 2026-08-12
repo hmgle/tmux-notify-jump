@@ -70,6 +70,7 @@ CB_FOCUS_ONLY=""
 CB_NO_ACTIVATE=""
 CB_TMUX_SOCKET=""
 CB_BUNDLE_IDS=""
+CB_UNATTACHED_FALLBACK=""
 
 print_usage() {
     cat <<EOF
@@ -409,6 +410,9 @@ send_notification_execute() {
     exec_cmd+=" --cb-no-activate $(printf '%q' "$NO_ACTIVATE")"
     exec_cmd+=" --cb-tmux-socket $(printf '%q' "${TMUX_SOCKET:-}")"
     exec_cmd+=" --cb-bundle-ids $(printf '%q' "$BUNDLE_ID_LIST")"
+    # `-execute` runs without the sending shell's environment, so jump policy
+    # has to travel as an argument like every other callback input.
+    exec_cmd+=" --cb-unattached-fallback $(printf '%q' "${TMUX_NOTIFY_UNATTACHED_FALLBACK:-}")"
 
     local args=(
         -title "$TITLE"
@@ -572,8 +576,11 @@ handle_action_callback() {
     TMUX_SOCKET="${CB_TMUX_SOCKET:-}"
     BUNDLE_ID_LIST="${CB_BUNDLE_IDS:-$BUNDLE_ID_LIST}"
     TMUX_NOTIFY_TMUX_SOCKET="${TMUX_SOCKET:-}"
+    if [ -n "${CB_UNATTACHED_FALLBACK:-}" ]; then
+        TMUX_NOTIFY_UNATTACHED_FALLBACK="$CB_UNATTACHED_FALLBACK"
+    fi
 
-    log_debug "action-callback: focus_only=$FOCUS_ONLY target=$TARGET sender_tty=$SENDER_CLIENT_TTY sender_pid=$SENDER_PID no_activate=$NO_ACTIVATE tmux_socket=$TMUX_SOCKET"
+    log_debug "action-callback: focus_only=$FOCUS_ONLY target=$TARGET sender_tty=$SENDER_CLIENT_TTY sender_pid=$SENDER_PID no_activate=$NO_ACTIVATE tmux_socket=$TMUX_SOCKET unattached_fallback=${TMUX_NOTIFY_UNATTACHED_FALLBACK:-}"
 
     if [ "$FOCUS_ONLY" -eq 1 ]; then
         if [ -n "${SENDER_PID:-}" ] && [[ "$SENDER_PID" =~ ^[0-9]+$ ]]; then
@@ -765,6 +772,13 @@ parse_args() {
                 shift
                 [ $# -gt 0 ] || die "--cb-bundle-ids requires an argument"
                 CB_BUNDLE_IDS="$1"
+                shift
+                continue
+                ;;
+            --cb-unattached-fallback)
+                shift
+                [ $# -gt 0 ] || die "--cb-unattached-fallback requires an argument"
+                CB_UNATTACHED_FALLBACK="$1"
                 shift
                 continue
                 ;;

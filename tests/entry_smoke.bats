@@ -691,3 +691,36 @@ FAKE
     [ "$status" -ne 0 ]
     [[ "$output" == *"Unknown option"* ]]
 }
+
+@test "tmux-notify-jump-macos.sh: execute callback forwards the unattached fallback policy" {
+    fake_bin="$TEST_TEMP_DIR/bin"
+    mkdir -p "$fake_bin"
+
+    cat >"$fake_bin/terminal-notifier" <<'FAKE'
+#!/usr/bin/env bash
+if [ "${1:-}" = "-help" ]; then
+    echo "-title"
+    exit 0
+fi
+printf '%s\n' "$@" >"$TEST_TEMP_DIR/terminal-notifier.args"
+exit 0
+FAKE
+    chmod +x "$fake_bin/terminal-notifier"
+
+    run env PATH="$fake_bin:$PATH" TEST_TEMP_DIR="$TEST_TEMP_DIR" \
+        TMUX_NOTIFY_UNATTACHED_FALLBACK=none \
+        "$PROJECT_ROOT/tmux-notify-jump-macos.sh" \
+        --focus-only \
+        --ui notification \
+        --no-activate \
+        --dedupe-ms 0 \
+        --title "hello" \
+        --body "world"
+
+    [ "$status" -eq 0 ]
+
+    run cat "$TEST_TEMP_DIR/terminal-notifier.args"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"--action-callback"* ]]
+    [[ "$output" == *"--cb-unattached-fallback none"* ]]
+}
