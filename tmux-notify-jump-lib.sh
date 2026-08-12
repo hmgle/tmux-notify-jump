@@ -645,6 +645,10 @@ tmux_terminal_client_rows() {
                 continue
                 ;;
         esac
+        # #{client_name} is newer than #{client_control_mode}. Releases that
+        # lack it expand the field empty, so fall back to the tty: that is what
+        # a terminal client is named on every tmux that accepts `-c <tty>`.
+        [ -n "$name" ] || name="$tty"
         [ -n "$name" ] || continue
         printf '%s|%s|%s|%s|%s|%s|%s\n' \
             "$activity" "$name" "$tty" "$pid" "$session_id" "$pane_id" "$session_name"
@@ -1135,6 +1139,7 @@ prepare_tmux_jump_client() {
     [ -n "$target_info" ] || die "Target pane no longer exists: $target_spec"
     JUMP_TARGET_SESSION_ID="${target_info%%|*}"
     JUMP_TARGET_PANE_ID="${target_info#*|}"
+    [ -n "$JUMP_TARGET_SESSION_ID" ] || die "Target pane no longer exists: $target_spec"
 
     local selected=""
     if [ -n "${SENDER_CLIENT_TTY:-}" ]; then
@@ -1202,12 +1207,19 @@ jump_to_pane() {
         local pane_id=""
         local session_name=""
         IFS='|' read -r activity name tty pid session_id pane_id session_name <<<"$line"
-        if [ "$name" = "$JUMP_CLIENT_NAME" ] \
-            && [ "$session_id" = "$JUMP_TARGET_SESSION_ID" ] \
-            && [ "$pane_id" = "$JUMP_TARGET_PANE_ID" ]; then
-            matched=1
-            break
+        if [ "$name" != "$JUMP_CLIENT_NAME" ] \
+            || [ "$session_id" != "$JUMP_TARGET_SESSION_ID" ]; then
+            continue
         fi
+        # Old tmux releases do not expand #{pane_id} in client context. Verify
+        # the session only there instead of failing a jump that did happen.
+        if [ -z "$pane_id" ]; then
+            log_debug "client pane not reported; verified session only"
+        elif [ "$pane_id" != "$JUMP_TARGET_PANE_ID" ]; then
+            continue
+        fi
+        matched=1
+        break
     done < <(tmux_terminal_client_rows)
     if [ "$matched" -ne 1 ]; then
         log_debug "client switch postcondition failed: client=$JUMP_CLIENT_NAME target_session=$JUMP_TARGET_SESSION_ID target_pane=$JUMP_TARGET_PANE_ID rows=$actual"

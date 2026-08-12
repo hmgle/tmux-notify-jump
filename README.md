@@ -101,7 +101,10 @@ classification. On older tmux releases the format expands empty, so the script
 falls back to accepting only clients with a non-empty TTY. That keeps ordinary
 terminal jumps working and excludes pipe-backed background control clients,
 but an ancient tmux cannot distinguish a control client that itself owns a TTY;
-upgrade tmux when exact isolation is required.
+upgrade tmux when exact isolation is required. Releases without
+`#{client_name}` identify each client by its TTY (which `switch-client -c`
+accepts), and releases that do not expand `#{pane_id}` in client context verify
+the jump by session alone.
 
 ```bash
 ./tmux-notify-jump <session>:<window>.<pane> [title] [body]

@@ -56,11 +56,59 @@ write_legacy_tmux_inventory_fake() {
     cat >"$fake_bin/tmux" <<'FAKE'
 #!/usr/bin/env bash
 if [ "${1:-}" = "list-clients" ] && [ "${2:-}" = "-F" ]; then
-    printf '|120|legacy-terminal|/dev/pts/7|700|$1|%%7|legacy\n'
-    printf '|130|legacy-background||701|$2|%%8|background\n'
+    printf '|120||/dev/pts/7|700|$1|%%7|legacy\n'
+    printf '|130|||701|$2|%%8|background\n'
     exit 0
 fi
 exit 1
+FAKE
+    chmod +x "$fake_bin/tmux"
+}
+
+write_nameless_tmux_inventory_fake() {
+    cat >"$fake_bin/tmux" <<'FAKE'
+#!/usr/bin/env bash
+if [ "${1:-}" = "list-clients" ] && [ "${2:-}" = "-F" ]; then
+    printf '0|120||/dev/pts/7|700|$1|%%7|work\n'
+    printf '1|130||/dev/pts/9|900|$2|%%9|control\n'
+    exit 0
+fi
+exit 1
+FAKE
+    chmod +x "$fake_bin/tmux"
+}
+
+write_legacy_jump_tmux_fake() {
+    cat >"$fake_bin/tmux" <<'FAKE'
+#!/usr/bin/env bash
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+    list-clients)
+        [ "${1:-}" = "-F" ] || exit 1
+        # Pre-2.1 tmux: no control mode, no client name, no pane in client context.
+        if [ -f "$TEST_TEMP_DIR/switched" ]; then
+            printf '|20||/dev/pts/1|100|$2||target\n'
+        else
+            printf '|20||/dev/pts/1|100|$1||work\n'
+        fi
+        ;;
+    display-message)
+        if [ "${1:-}" = "-p" ] && [ "${2:-}" = "-t" ] && [ "${3:-}" = "%9" ] && [ "${4:-}" = '#{session_id}|#{pane_id}' ]; then
+            printf '$2|%%9\n'
+            exit 0
+        fi
+        exit 1
+        ;;
+    switch-client)
+        printf '%s\n' "$*" >"$TEST_TEMP_DIR/switch.args"
+        : >"$TEST_TEMP_DIR/switched"
+        ;;
+    *)
+        exit 1
+        ;;
+esac
 FAKE
     chmod +x "$fake_bin/tmux"
 }
@@ -119,7 +167,34 @@ FAKE
         '. "'"$PROJECT_ROOT"'/tmux-notify-jump-lib.sh"; tmux_terminal_client_rows'
 
     [ "$status" -eq 0 ]
-    [ "$output" = "120|legacy-terminal|/dev/pts/7|700|\$1|%7|legacy" ]
+    [ "$output" = "120|/dev/pts/7|/dev/pts/7|700|\$1|%7|legacy" ]
+}
+
+@test "terminal client inventory names clients by tty when client_name is absent" {
+    write_nameless_tmux_inventory_fake
+
+    run env PATH="$fake_bin:$PATH" PROJECT_ROOT="$PROJECT_ROOT" bash -c \
+        '. "'"$PROJECT_ROOT"'/tmux-notify-jump-lib.sh"; tmux_terminal_client_rows'
+
+    [ "$status" -eq 0 ]
+    [ "$output" = "120|/dev/pts/7|/dev/pts/7|700|\$1|%7|work" ]
+}
+
+@test "legacy tmux jump verifies the session when client panes are unreported" {
+    write_legacy_jump_tmux_fake
+
+    run env PATH="$fake_bin:$PATH" TEST_TEMP_DIR="$TEST_TEMP_DIR" TMUX="/tmp/test,1,0" \
+        _QUIET=0 bash -c \
+        'unset TMUX_NOTIFY_UNATTACHED_FALLBACK;
+            . "'"$PROJECT_ROOT"'/tmux-notify-jump-lib.sh";
+            SESSION=target; WINDOW=0; PANE=0; PANE_ID=%9; SENDER_CLIENT_TTY=;
+            jump_to_pane'
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'Jumped to target:0.0 via /dev/pts/1'* ]]
+    run cat "$TEST_TEMP_DIR/switch.args"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'-c /dev/pts/1 -t target:0'* ]]
 }
 
 @test "strict jump reports a target session with only a control client" {
