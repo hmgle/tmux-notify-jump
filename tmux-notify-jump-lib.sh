@@ -24,6 +24,11 @@
 
 set -euo pipefail
 
+# Jump state is shared between client preparation and the click handler.
+JUMP_CLIENT_NAME=""
+JUMP_TARGET_SESSION_ID=""
+JUMP_TARGET_PANE_ID=""
+
 # =============================================================================
 # Shared Logging Functions
 # =============================================================================
@@ -655,6 +660,13 @@ tmux_terminal_client_rows() {
     done <<<"$output"
 }
 
+# Keep client inventory consumers consistent about field order as tmux adds
+# client metadata and older releases leave individual fields empty.
+read_tmux_client_row() {
+    IFS='|' read -r CLIENT_ACTIVITY CLIENT_NAME CLIENT_TTY CLIENT_PID \
+        CLIENT_SESSION_ID CLIENT_PANE_ID CLIENT_SESSION_NAME <<<"${1:-}"
+}
+
 get_best_tmux_client_pane_id() {
     local output=""
     output="$(tmux_terminal_client_rows)"
@@ -663,23 +675,16 @@ get_best_tmux_client_pane_id() {
     local line=""
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        local activity=""
-        local name=""
-        local tty=""
-        local pid=""
-        local session_id=""
-        local pane=""
-        local session_name=""
-        IFS='|' read -r activity name tty pid session_id pane session_name <<<"$line"
-        if ! is_integer "$activity"; then
+        read_tmux_client_row "$line"
+        if ! is_integer "$CLIENT_ACTIVITY"; then
             continue
         fi
-        if [ -z "$pane" ] || ! is_pane_id "$pane"; then
+        if [ -z "$CLIENT_PANE_ID" ] || ! is_pane_id "$CLIENT_PANE_ID"; then
             continue
         fi
-        if [ "$activity" -gt "$best_activity" ]; then
-            best_activity="$activity"
-            best_pane="$pane"
+        if [ "$CLIENT_ACTIVITY" -gt "$best_activity" ]; then
+            best_activity="$CLIENT_ACTIVITY"
+            best_pane="$CLIENT_PANE_ID"
         fi
     done <<<"$output"
 
@@ -920,28 +925,21 @@ get_sender_tmux_client_pid() {
     local line=""
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        local activity=""
-        local name=""
-        local tty=""
-        local pid=""
-        local session_id=""
-        local pane_id=""
-        local session_name=""
-        IFS='|' read -r activity name tty pid session_id pane_id session_name <<<"$line"
+        read_tmux_client_row "$line"
 
-        if ! is_integer "$activity"; then
+        if ! is_integer "$CLIENT_ACTIVITY"; then
             continue
         fi
-        if ! is_integer "$pid"; then
+        if ! is_integer "$CLIENT_PID"; then
             continue
         fi
-        if [ -n "$current_session_id" ] && [ "$session_id" != "$current_session_id" ]; then
+        if [ -n "$current_session_id" ] && [ "$CLIENT_SESSION_ID" != "$current_session_id" ]; then
             continue
         fi
 
-        if [ "$activity" -gt "$best_activity" ]; then
-            best_activity="$activity"
-            best_pid="$pid"
+        if [ "$CLIENT_ACTIVITY" -gt "$best_activity" ]; then
+            best_activity="$CLIENT_ACTIVITY"
+            best_pid="$CLIENT_PID"
         fi
     done <<<"$output"
 
@@ -957,25 +955,19 @@ get_sender_tmux_client_tty() {
         return 1
     fi
 
+    local clients=""
+    clients="$(tmux_terminal_client_rows)"
+
     if [ -n "${TMUX_PANE:-}" ]; then
-        local clients_by_pane=""
-        clients_by_pane="$(tmux_terminal_client_rows)"
         local line=""
         while IFS= read -r line; do
             [ -n "$line" ] || continue
-            local activity=""
-            local name=""
-            local tty=""
-            local pid=""
-            local session_id=""
-            local pane=""
-            local session_name=""
-            IFS='|' read -r activity name tty pid session_id pane session_name <<<"$line"
-            if [ "$pane" = "$TMUX_PANE" ] && [ -n "$tty" ]; then
-                printf '%s' "$tty"
+            read_tmux_client_row "$line"
+            if [ "$CLIENT_PANE_ID" = "$TMUX_PANE" ] && [ -n "$CLIENT_TTY" ]; then
+                printf '%s' "$CLIENT_TTY"
                 return 0
             fi
-        done <<<"$clients_by_pane"
+        done <<<"$clients"
     fi
 
     local current_session_id=""
@@ -983,32 +975,23 @@ get_sender_tmux_client_tty() {
 
     local best_tty=""
     local best_activity=0
-    local clients_by_activity=""
-    clients_by_activity="$(tmux_terminal_client_rows)"
     local line=""
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        local activity=""
-        local name=""
-        local tty=""
-        local pid=""
-        local session_id=""
-        local pane_id=""
-        local session_name=""
-        IFS='|' read -r activity name tty pid session_id pane_id session_name <<<"$line"
+        read_tmux_client_row "$line"
 
-        if ! is_integer "$activity"; then
+        if ! is_integer "$CLIENT_ACTIVITY"; then
             continue
         fi
-        if [ -n "$current_session_id" ] && [ "$session_id" != "$current_session_id" ]; then
+        if [ -n "$current_session_id" ] && [ "$CLIENT_SESSION_ID" != "$current_session_id" ]; then
             continue
         fi
 
-        if [ "$activity" -gt "$best_activity" ] && [ -n "$tty" ]; then
-            best_activity="$activity"
-            best_tty="$tty"
+        if [ "$CLIENT_ACTIVITY" -gt "$best_activity" ] && [ -n "$CLIENT_TTY" ]; then
+            best_activity="$CLIENT_ACTIVITY"
+            best_tty="$CLIENT_TTY"
         fi
-    done <<<"$clients_by_activity"
+    done <<<"$clients"
 
     if [ -n "$best_tty" ]; then
         printf '%s' "$best_tty"
@@ -1029,95 +1012,55 @@ get_tmux_client_pid_by_tty() {
     local line=""
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        local activity=""
-        local name=""
-        local client_tty=""
-        local pid=""
-        local session_id=""
-        local pane_id=""
-        local session_name=""
-        IFS='|' read -r activity name client_tty pid session_id pane_id session_name <<<"$line"
-        if [ "$client_tty" = "$tty" ] && is_integer "$pid"; then
-            printf '%s' "$pid"
+        read_tmux_client_row "$line"
+        if [ "$CLIENT_TTY" = "$tty" ] && is_integer "$CLIENT_PID"; then
+            printf '%s' "$CLIENT_PID"
             return 0
         fi
     done <<<"$output"
     return 1
 }
 
-get_tmux_client_name_by_tty() {
-    local tty="${1:-}"
-    [ -n "$tty" ] || return 1
-    local line=""
-    while IFS= read -r line; do
-        [ -n "$line" ] || continue
-        local activity=""
-        local name=""
-        local client_tty=""
-        local pid=""
-        local session_id=""
-        local pane_id=""
-        local session_name=""
-        IFS='|' read -r activity name client_tty pid session_id pane_id session_name <<<"$line"
-        if [ "$client_tty" = "$tty" ]; then
-            printf '%s' "$name"
-            return 0
-        fi
-    done < <(tmux_terminal_client_rows)
-    return 1
-}
-
 find_tmux_terminal_client_by_tty() {
-    local tty="${1:-}"
+    local rows="${1:-}"
+    local tty="${2:-}"
     [ -n "$tty" ] || return 1
     local line=""
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        local activity=""
-        local name=""
-        local client_tty=""
-        local pid=""
-        local session_id=""
-        local pane_id=""
-        local session_name=""
-        IFS='|' read -r activity name client_tty pid session_id pane_id session_name <<<"$line"
-        if [ "$client_tty" = "$tty" ]; then
+        read_tmux_client_row "$line"
+        if [ "$CLIENT_TTY" = "$tty" ]; then
             printf '%s' "$line"
             return 0
         fi
-    done < <(tmux_terminal_client_rows)
+    done <<<"$rows"
     return 1
 }
 
 best_tmux_terminal_client() {
-    local required_session_id="${1:-}"
+    local rows="${1:-}"
+    local required_session_id="${2:-}"
     local best_activity=-1
     local best_line=""
     local line=""
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        local activity=""
-        local name=""
-        local tty=""
-        local pid=""
-        local session_id=""
-        local pane_id=""
-        local session_name=""
-        IFS='|' read -r activity name tty pid session_id pane_id session_name <<<"$line"
-        is_integer "$activity" || continue
-        if [ -n "$required_session_id" ] && [ "$session_id" != "$required_session_id" ]; then
+        read_tmux_client_row "$line"
+        is_integer "$CLIENT_ACTIVITY" || continue
+        if [ -n "$required_session_id" ] && [ "$CLIENT_SESSION_ID" != "$required_session_id" ]; then
             continue
         fi
-        if [ "$activity" -gt "$best_activity" ]; then
-            best_activity="$activity"
+        if [ "$CLIENT_ACTIVITY" -gt "$best_activity" ]; then
+            best_activity="$CLIENT_ACTIVITY"
             best_line="$line"
         fi
-    done < <(tmux_terminal_client_rows)
+    done <<<"$rows"
     [ -n "$best_line" ] || return 1
     printf '%s' "$best_line"
 }
 
 single_tmux_terminal_client() {
+    local rows="${1:-}"
     local only=""
     local count=0
     local line=""
@@ -1126,7 +1069,7 @@ single_tmux_terminal_client() {
         only="$line"
         count=$((count + 1))
         [ "$count" -le 1 ] || return 1
-    done < <(tmux_terminal_client_rows)
+    done <<<"$rows"
     [ "$count" -eq 1 ] || return 1
     printf '%s' "$only"
 }
@@ -1160,31 +1103,25 @@ prepare_tmux_jump_client() {
     local fallback_policy=""
     fallback_policy="$(tmux_unattached_fallback_policy)"
 
+    local rows=""
+    rows="$(tmux_terminal_client_rows)"
     local selected=""
     if [ -n "${SENDER_CLIENT_TTY:-}" ]; then
-        selected="$(find_tmux_terminal_client_by_tty "$SENDER_CLIENT_TTY" 2>/dev/null || true)"
+        selected="$(find_tmux_terminal_client_by_tty "$rows" "$SENDER_CLIENT_TTY" 2>/dev/null || true)"
     fi
     if [ -z "$selected" ]; then
-        selected="$(best_tmux_terminal_client "$JUMP_TARGET_SESSION_ID" 2>/dev/null || true)"
+        selected="$(best_tmux_terminal_client "$rows" "$JUMP_TARGET_SESSION_ID" 2>/dev/null || true)"
     fi
     if [ -z "$selected" ] && [ "$fallback_policy" = "single" ]; then
-        selected="$(single_tmux_terminal_client 2>/dev/null || true)"
+        selected="$(single_tmux_terminal_client "$rows" 2>/dev/null || true)"
     fi
     if [ -z "$selected" ]; then
         local visible=""
-        visible="$(best_tmux_terminal_client 2>/dev/null || true)"
+        visible="$(best_tmux_terminal_client "$rows" 2>/dev/null || true)"
         if [ -n "$visible" ]; then
-            local visible_activity=""
-            local visible_name=""
-            local visible_tty=""
-            local visible_pid=""
-            local visible_session_id=""
-            local visible_pane_id=""
-            local visible_session_name=""
-            IFS='|' read -r visible_activity visible_name visible_tty visible_pid \
-                visible_session_id visible_pane_id visible_session_name <<<"$visible"
-            log_debug "visibility notice client=$visible_name tty=$visible_tty pid=$visible_pid session=$visible_session_name session_id=$visible_session_id pane=$visible_pane_id activity=$visible_activity"
-            tmux_cmd display-message -c "$visible_name" \
+            read_tmux_client_row "$visible"
+            log_debug "visibility notice client=$CLIENT_NAME tty=$CLIENT_TTY pid=$CLIENT_PID session=$CLIENT_SESSION_NAME session_id=$CLIENT_SESSION_ID pane=$CLIENT_PANE_ID activity=$CLIENT_ACTIVITY"
+            tmux_cmd display-message -c "$CLIENT_NAME" \
                 "tmux-notify-jump: target session $SESSION is not visible (no ordinary terminal client)" \
                 >/dev/null 2>&1 || true
         fi
@@ -1192,14 +1129,15 @@ prepare_tmux_jump_client() {
         die "Target session $SESSION is not visible (no ordinary terminal client)"
     fi
 
-    local selected_activity=""
-    local selected_tty=""
-    local selected_session_id=""
-    local selected_pane_id=""
-    local selected_session_name=""
-    IFS='|' read -r selected_activity JUMP_CLIENT_NAME selected_tty SENDER_CLIENT_PID \
-        selected_session_id selected_pane_id selected_session_name <<<"$selected"
-    SENDER_CLIENT_TTY="$selected_tty"
+    read_tmux_client_row "$selected"
+    local selected_activity="$CLIENT_ACTIVITY"
+    local selected_tty="$CLIENT_TTY"
+    local selected_session_id="$CLIENT_SESSION_ID"
+    local selected_pane_id="$CLIENT_PANE_ID"
+    local selected_session_name="$CLIENT_SESSION_NAME"
+    JUMP_CLIENT_NAME="$CLIENT_NAME"
+    SENDER_CLIENT_PID="$CLIENT_PID"
+    [ -n "$selected_tty" ] && SENDER_CLIENT_TTY="$selected_tty"
     log_debug "selected tmux client=$JUMP_CLIENT_NAME tty=$SENDER_CLIENT_TTY pid=$SENDER_CLIENT_PID session=$selected_session_name session_id=$selected_session_id pane=$selected_pane_id activity=$selected_activity"
 }
 
@@ -1212,36 +1150,29 @@ jump_to_pane() {
         die "Failed to switch terminal client $JUMP_CLIENT_NAME to $SESSION:$WINDOW.$PANE"
     fi
 
-    local actual=""
-    actual="$(best_tmux_terminal_client "$JUMP_TARGET_SESSION_ID" 2>/dev/null || true)"
+    local rows=""
+    rows="$(tmux_terminal_client_rows)"
     local matched=0
     local line=""
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        local activity=""
-        local name=""
-        local tty=""
-        local pid=""
-        local session_id=""
-        local pane_id=""
-        local session_name=""
-        IFS='|' read -r activity name tty pid session_id pane_id session_name <<<"$line"
-        if [ "$name" != "$JUMP_CLIENT_NAME" ] \
-            || [ "$session_id" != "$JUMP_TARGET_SESSION_ID" ]; then
+        read_tmux_client_row "$line"
+        if [ "$CLIENT_NAME" != "$JUMP_CLIENT_NAME" ] \
+            || [ "$CLIENT_SESSION_ID" != "$JUMP_TARGET_SESSION_ID" ]; then
             continue
         fi
         # Old tmux releases do not expand #{pane_id} in client context. Verify
         # the session only there instead of failing a jump that did happen.
-        if [ -z "$pane_id" ]; then
+        if [ -z "$CLIENT_PANE_ID" ]; then
             log_debug "client pane not reported; verified session only"
-        elif [ "$pane_id" != "$JUMP_TARGET_PANE_ID" ]; then
+        elif [ "$CLIENT_PANE_ID" != "$JUMP_TARGET_PANE_ID" ]; then
             continue
         fi
         matched=1
         break
-    done < <(tmux_terminal_client_rows)
+    done <<<"$rows"
     if [ "$matched" -ne 1 ]; then
-        log_debug "client switch postcondition failed: client=$JUMP_CLIENT_NAME target_session=$JUMP_TARGET_SESSION_ID target_pane=$JUMP_TARGET_PANE_ID rows=$actual"
+        log_debug "client switch postcondition failed: client=$JUMP_CLIENT_NAME target_session=$JUMP_TARGET_SESSION_ID target_pane=$JUMP_TARGET_PANE_ID rows=$rows"
         die "tmux client switch did not make $SESSION:$WINDOW.$PANE visible"
     fi
     log "Jumped to $SESSION:$WINDOW.$PANE via $JUMP_CLIENT_NAME"
@@ -1262,23 +1193,16 @@ tmux_session_has_remote_ssh_client() {
     local line=""
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        local activity=""
-        local name=""
-        local tty=""
-        local pid=""
-        local session_id=""
-        local pane_id=""
-        local session_name=""
-        IFS='|' read -r activity name tty pid session_id pane_id session_name <<<"$line"
+        read_tmux_client_row "$line"
 
-        if ! is_integer "$pid"; then
+        if ! is_integer "$CLIENT_PID"; then
             continue
         fi
-        if [ "$session_id" != "$target_session_id" ]; then
+        if [ "$CLIENT_SESSION_ID" != "$target_session_id" ]; then
             continue
         fi
 
-        tmux_client_pid_is_remote_ssh "$pid" && return 0
+        tmux_client_pid_is_remote_ssh "$CLIENT_PID" && return 0
     done <<<"$output"
 
     return 1

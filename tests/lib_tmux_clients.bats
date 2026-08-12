@@ -22,6 +22,7 @@ case "$cmd" in
     list-clients)
         [ "${1:-}" = "-F" ] || exit 1
         [ "${2:-}" = '#{client_control_mode}|#{client_activity}|#{client_name}|#{client_tty}|#{client_pid}|#{session_id}|#{pane_id}|#{session_name}' ] || exit 1
+        printf 'list-clients\n' >>"$TEST_TEMP_DIR/list-clients.calls"
         printf '1|30|control-pty|/dev/pts/9|900|$2|%%9|target\n'
         if [ -f "$TEST_TEMP_DIR/switched" ]; then
             printf '0|20|/dev/pts/1|/dev/pts/1|100|$2|%%9|target\n'
@@ -149,6 +150,32 @@ FAKE
     chmod +x "$fake_bin/tmux"
 }
 
+write_ttyless_target_client_fake() {
+    cat >"$fake_bin/tmux" <<'FAKE'
+#!/usr/bin/env bash
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+    list-clients)
+        [ "${1:-}" = "-F" ] || exit 1
+        printf '0|20|target-client||100|$2|%%9|target\n'
+        ;;
+    display-message)
+        if [ "${1:-}" = "-p" ] && [ "${2:-}" = "-t" ] && [ "${3:-}" = "%9" ]; then
+            printf '$2|%%9\n'
+            exit 0
+        fi
+        exit 1
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+FAKE
+    chmod +x "$fake_bin/tmux"
+}
+
 @test "terminal client inventory excludes control clients even with a tty" {
     write_tmux_inventory_fake
 
@@ -230,6 +257,9 @@ FAKE
     [ "$status" -eq 0 ]
     [[ "$output" == *'-c /dev/pts/1 -t target:0'* ]]
     [[ "$output" != *'control-pty'* ]]
+    run wc -l <"$TEST_TEMP_DIR/list-clients.calls"
+    [ "$status" -eq 0 ]
+    [ "$output" -eq 2 ]
 }
 
 @test "unknown fallback values warn and use the single-client policy" {
@@ -244,6 +274,19 @@ FAKE
     [ "$status" -eq 0 ]
     [[ "$output" == *"Unknown TMUX_NOTIFY_UNATTACHED_FALLBACK value '1'"* ]]
     [[ "$output" == *'Jumped to target:0.0 via /dev/pts/1'* ]]
+}
+
+@test "ttyless selected clients preserve the known sender tty" {
+    write_ttyless_target_client_fake
+
+    run env PATH="$fake_bin:$PATH" TEST_TEMP_DIR="$TEST_TEMP_DIR" TMUX="/tmp/test,1,0" \
+        bash -c '. "'"$PROJECT_ROOT"'/tmux-notify-jump-lib.sh";
+            SESSION=target; WINDOW=0; PANE=0; PANE_ID=%9;
+            SENDER_CLIENT_TTY=/dev/pts/original; prepare_tmux_jump_client;
+            printf "%s|%s" "$JUMP_CLIENT_NAME" "$SENDER_CLIENT_TTY"'
+
+    [ "$status" -eq 0 ]
+    [ "$output" = 'target-client|/dev/pts/original' ]
 }
 
 @test "default fallback refuses to choose between ordinary clients" {
