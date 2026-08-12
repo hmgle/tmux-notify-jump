@@ -92,9 +92,11 @@ There are two main modes:
 Jump mode inventories tmux clients and treats only
 `client_control_mode=0` rows as user-visible terminals. On click it selects an
 explicit client (the propagated sender client first, otherwise an ordinary
-client already viewing the target session), runs `switch-client -c`, and
-verifies that exact client reached the target pane. A persistent control-mode
-client is never a jump target, even if tmux reports a TTY for it.
+client already viewing the target session, otherwise the server's sole
+ordinary client), runs `switch-client -c`, and verifies that exact client
+reached the target pane. A persistent control-mode client is never a jump
+target, even if tmux reports a TTY for it. Set
+`TMUX_NOTIFY_UNATTACHED_FALLBACK=none` to disable the sole-client fallback.
 
 tmux 2.1 or newer exposes `client_control_mode` and provides this exact
 classification. On older tmux releases the format expands empty, so the script
@@ -151,7 +153,7 @@ CLI flags override environment variables where applicable.
 - `TMUX_NOTIFY_TMUX_SOCKET`: tmux server socket path (passed to `tmux -S`; useful if you run multiple tmux servers)
 - `TMUX_NOTIFY_FALLBACK_TARGET`: if not running inside tmux, fall back to the most recently active tmux client pane as the jump target (`0` disables; default: `0`)
 - `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK`: when hooks run without tmux (missing or no server/target), fall back to `--focus-only` instead of no-op (`0` disables; default: `1`)
-- `TMUX_NOTIFY_UNATTACHED_FALLBACK`: policy when the target session has no identifiable ordinary client. The default `single` switches the server's sole ordinary client; it still refuses when there are zero or multiple ordinary clients. Set `none` for strict mode, which reports that the target is not visible instead of moving a terminal.
+- `TMUX_NOTIFY_UNATTACHED_FALLBACK`: policy when the target session has no identifiable ordinary client. The default `single` switches the server's sole ordinary client; it still refuses when there are zero or multiple ordinary clients. Set `none` for strict mode, which reports that the target is not visible instead of moving a terminal. Unknown values warn and fall back to `single`. On macOS the selected policy is forwarded to the notification click callback.
 - `TMUX_NOTIFY_REMOTE`: allow notifications when any attached tmux client in the current session appears to be attached over SSH (`0` suppresses; default: `0`)
 - `TMUX_NOTIFY_CLASS` / `TMUX_NOTIFY_CLASSES`: terminal window class(es) used by `xdotool search --class`
 - `TMUX_NOTIFY_WEZTERM_TAB`: on Linux, after focusing the terminal window, also switch to the wezterm tab/pane that hosts the tmux client (matched via `wezterm cli list` by tty; `0` disables; default: `1`). Requires `python3` or `jq` for JSON parsing; silently skipped when neither is available, when `--no-activate` is set, or when the terminal is not wezterm.
