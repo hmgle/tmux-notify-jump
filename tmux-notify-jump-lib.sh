@@ -661,7 +661,8 @@ tmux_terminal_client_rows() {
 }
 
 # Keep client inventory consumers consistent about field order as tmux adds
-# client metadata and older releases leave individual fields empty.
+# client metadata and older releases leave individual fields empty. These are
+# process-global scratch variables: every call overwrites all CLIENT_* fields.
 read_tmux_client_row() {
     IFS='|' read -r CLIENT_ACTIVITY CLIENT_NAME CLIENT_TTY CLIENT_PID \
         CLIENT_SESSION_ID CLIENT_PANE_ID CLIENT_SESSION_NAME <<<"${1:-}"
@@ -1137,7 +1138,11 @@ prepare_tmux_jump_client() {
     local selected_session_name="$CLIENT_SESSION_NAME"
     JUMP_CLIENT_NAME="$CLIENT_NAME"
     SENDER_CLIENT_PID="$CLIENT_PID"
-    [ -n "$selected_tty" ] && SENDER_CLIENT_TTY="$selected_tty"
+    # A tty-less selected row cannot improve activation, so retain the known
+    # sender tty even though it may identify a different client.
+    if [ -n "$selected_tty" ]; then
+        SENDER_CLIENT_TTY="$selected_tty"
+    fi
     log_debug "selected tmux client=$JUMP_CLIENT_NAME tty=$SENDER_CLIENT_TTY pid=$SENDER_CLIENT_PID session=$selected_session_name session_id=$selected_session_id pane=$selected_pane_id activity=$selected_activity"
 }
 
