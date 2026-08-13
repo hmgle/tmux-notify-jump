@@ -9,6 +9,7 @@ SCRIPTS := \
 	notify-codex.sh \
 	notify-claude-code.sh \
 	notify-kimi-code.sh \
+	notify-grok.sh \
 	notify-opencode.sh \
 	notify-pi.sh \
 	install.sh
@@ -45,4 +46,3 @@ test:
 
 check: syntax lint test
 	@echo "All checks passed."
-
