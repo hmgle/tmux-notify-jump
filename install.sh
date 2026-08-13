@@ -8,11 +8,13 @@ UNINSTALL=0
 CONFIGURE_CODEX=0
 CONFIGURE_CLAUDE=0
 CONFIGURE_KIMI=0
+CONFIGURE_GROK=0
 CONFIGURE_OPENCODE=0
 CONFIGURE_PI=0
 CODEX_CONFIG_PATH="${CODEX_CONFIG_PATH:-}"
 CLAUDE_CONFIG_PATH="${CLAUDE_CONFIG_PATH:-}"
 KIMI_CONFIG_PATH="${KIMI_CONFIG_PATH:-}"
+GROK_HOOKS_PATH="${GROK_HOOKS_PATH:-}"
 OPENCODE_PLUGIN_PATH="${OPENCODE_PLUGIN_PATH:-}"
 PI_EXTENSION_PATH="${PI_EXTENSION_PATH:-}"
 
@@ -28,11 +30,13 @@ Options:
   --configure-codex Configure Codex notify hook (opt-in)
   --configure-claude Configure Claude hooks (opt-in)
   --configure-kimi  Configure Kimi Code CLI hooks (opt-in)
+  --configure-grok  Configure Grok Build hooks (opt-in)
   --configure-opencode Configure OpenCode plugin (opt-in)
   --configure-pi    Configure Pi coding agent extension (opt-in)
   --codex-config <path>  Codex config.toml path (default: ~/.codex/config.toml)
   --claude-config <path> Claude settings.json path (default: ~/.claude/settings.json)
   --kimi-config <path>   Kimi config.toml path (default: ~/.kimi-code/config.toml)
+  --grok-hooks-path <path> Grok hooks dir (default: \$GROK_HOME/hooks or ~/.grok/hooks)
   --opencode-plugin-path <path> OpenCode plugins dir (default: ~/.config/opencode/plugins)
   --pi-extension-path <path> Pi extensions dir (default: ~/.pi/agent/extensions)
   --uninstall       Remove installed files
@@ -44,6 +48,7 @@ Examples:
   $0 --prefix "\$HOME/.local" --symlink --configure-codex
   $0 --prefix "\$HOME/.local" --symlink --configure-claude
   $0 --prefix "\$HOME/.local" --symlink --configure-kimi
+  $0 --prefix "\$HOME/.local" --symlink --configure-grok
   $0 --prefix "\$HOME/.local" --symlink --configure-opencode
   $0 --prefix "\$HOME/.local" --symlink --configure-pi
 EOF
@@ -343,6 +348,113 @@ configure_kimi() {
     echo "Configured Kimi Code CLI hooks in: $cfg"
 }
 
+configure_grok() {
+    local notify_cmd="$1"
+    local grok_home="${GROK_HOME:-$HOME/.grok}"
+    local hooks_dir="${GROK_HOOKS_PATH:-$grok_home/hooks}"
+    local cfg="$hooks_dir/tmux-notify-jump.json"
+
+    mkdir -p "$hooks_dir"
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "python3 not found; cannot auto-configure Grok Build hooks. Edit manually:"
+        echo "  $cfg -> hooks Stop/Notification/PostToolUseFailure -> command: $notify_cmd"
+        return 0
+    fi
+
+    python3 - "$cfg" "$notify_cmd" <<'PY'
+import json
+import os
+import shutil
+import sys
+import time
+
+path = sys.argv[1]
+cmd = sys.argv[2]
+
+if os.path.exists(path):
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            content = handle.read().strip()
+            data = json.loads(content) if content else {}
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Grok hook config is not valid JSON; not modifying: {path} ({exc})")
+        sys.exit(0)
+else:
+    data = {}
+
+if not isinstance(data, dict):
+    print(f"Grok hook config root is not an object; not modifying: {path}")
+    sys.exit(0)
+
+hooks = data.setdefault("hooks", {})
+if not isinstance(hooks, dict):
+    print(f"Grok hook config has non-object hooks; not modifying: {path}")
+    sys.exit(0)
+
+def has_handler(event_name):
+    event_hooks = hooks.get(event_name)
+    if not isinstance(event_hooks, list):
+        return False
+    for entry in event_hooks:
+        if not isinstance(entry, dict):
+            continue
+        handlers = entry.get("hooks")
+        if not isinstance(handlers, list):
+            continue
+        for handler in handlers:
+            if not isinstance(handler, dict):
+                continue
+            if handler.get("type") == "command" and handler.get("command") == cmd:
+                return True
+    return False
+
+def add_handler(event_name, matcher=None):
+    event_hooks = hooks.setdefault(event_name, [])
+    if not isinstance(event_hooks, list):
+        raise TypeError(f"hooks.{event_name} is not a list")
+
+    entry = {"hooks": [{"type": "command", "command": cmd}]}
+    if matcher is not None:
+        entry["matcher"] = matcher
+    event_hooks.append(entry)
+
+required = [
+    ("Stop", None),
+    ("Notification", "permission_prompt|idle_prompt"),
+    ("PostToolUseFailure", None),
+]
+
+try:
+    missing = []
+    for event_name, matcher in required:
+        event_hooks = hooks.get(event_name)
+        if event_hooks is not None and not isinstance(event_hooks, list):
+            raise TypeError(f"hooks.{event_name} is not a list")
+        if not has_handler(event_name):
+            missing.append((event_name, matcher))
+except TypeError as exc:
+    print(f"Grok hook config has an incompatible schema; not modifying: {path} ({exc})")
+    sys.exit(0)
+
+if not missing:
+    print(f"Grok Build already configured: {path}")
+    sys.exit(0)
+
+if os.path.exists(path):
+    shutil.copy2(path, f"{path}.bak.{time.strftime('%Y%m%d%H%M%S')}")
+
+for event_name, matcher in missing:
+    add_handler(event_name, matcher)
+
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, ensure_ascii=False, indent=2)
+    handle.write("\n")
+
+print(f"Configured Grok Build hooks in: {path}")
+PY
+}
+
 configure_opencode() {
     local plugin_dir="${OPENCODE_PLUGIN_PATH:-$HOME/.config/opencode/plugins}"
     local plugin_src="$REPO_DIR/opencode-plugin/tmux-notify-jump.ts"
@@ -462,6 +574,9 @@ while [ $# -gt 0 ]; do
         --configure-kimi)
             CONFIGURE_KIMI=1
             ;;
+        --configure-grok)
+            CONFIGURE_GROK=1
+            ;;
         --configure-opencode)
             CONFIGURE_OPENCODE=1
             ;;
@@ -482,6 +597,11 @@ while [ $# -gt 0 ]; do
             shift
             [ $# -gt 0 ] || die "--kimi-config requires a path"
             KIMI_CONFIG_PATH="$1"
+            ;;
+        --grok-hooks-path)
+            shift
+            [ $# -gt 0 ] || die "--grok-hooks-path requires a path"
+            GROK_HOOKS_PATH="$1"
             ;;
         --opencode-plugin-path)
             shift
@@ -522,6 +642,7 @@ FILES=(
     notify-codex.sh
     notify-claude-code.sh
     notify-kimi-code.sh
+    notify-grok.sh
     notify-opencode.sh
     notify-pi.sh
 )
@@ -574,6 +695,10 @@ fi
 
 if [ "$CONFIGURE_KIMI" -eq 1 ]; then
     configure_kimi "$BINDIR/notify-kimi-code.sh"
+fi
+
+if [ "$CONFIGURE_GROK" -eq 1 ]; then
+    configure_grok "$BINDIR/notify-grok.sh"
 fi
 
 if [ "$CONFIGURE_OPENCODE" -eq 1 ]; then

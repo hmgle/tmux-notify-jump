@@ -25,6 +25,7 @@ This repo contains:
 - `notify-codex.sh`: Codex CLI wrapper (reads JSON from `$1`)
 - `notify-claude-code.sh`: Claude Code wrapper (reads JSON from stdin)
 - `notify-kimi-code.sh`: Kimi Code CLI wrapper (reads hook JSON from stdin)
+- `notify-grok.sh`: Grok Build wrapper (reads native hook JSON from stdin)
 - `notify-opencode.sh`: OpenCode wrapper (reads JSON from stdin)
 - `opencode-plugin/tmux-notify-jump.ts`: OpenCode plugin (bridges events to `notify-opencode.sh`)
 - `pi-extension/tmux-notify-jump.ts`: Pi coding agent extension (bridges events to `notify-pi.sh`)
@@ -48,9 +49,9 @@ This repo contains:
 - `xdotool` for focusing the terminal window before jumping (the script auto-disables focusing if missing)
 - `python3` for safer Unicode truncation
 
-### Wrappers (Codex/Claude/Kimi/OpenCode/Pi hooks)
+### Wrappers (Codex/Claude/Kimi/Grok/OpenCode/Pi hooks)
 
-- `jq` (required by the Codex, Claude, Kimi, OpenCode, and Pi wrappers; if missing, the wrappers no-op)
+- `jq` (required by the Codex, Claude, Kimi, Grok, OpenCode, and Pi wrappers; if missing, the wrappers no-op)
 
 ## Install
 
@@ -66,6 +67,7 @@ Optional: configure hooks (makes backups; won’t overwrite existing `notify=` /
 ./install.sh --prefix "$HOME/.local" --symlink --configure-codex
 ./install.sh --prefix "$HOME/.local" --symlink --configure-claude
 ./install.sh --prefix "$HOME/.local" --symlink --configure-kimi
+./install.sh --prefix "$HOME/.local" --symlink --configure-grok
 ./install.sh --prefix "$HOME/.local" --symlink --configure-opencode
 ./install.sh --prefix "$HOME/.local" --symlink --configure-pi
 ```
@@ -79,7 +81,7 @@ Uninstall:
 Or run from the repo (no install):
 
 ```bash
-chmod +x tmux-notify-jump tmux-notify-jump-linux.sh tmux-notify-jump-macos.sh tmux-notify-jump-hook.sh notify-codex.sh notify-claude-code.sh notify-kimi-code.sh notify-opencode.sh notify-pi.sh
+chmod +x tmux-notify-jump tmux-notify-jump-linux.sh tmux-notify-jump-macos.sh tmux-notify-jump-hook.sh notify-codex.sh notify-claude-code.sh notify-kimi-code.sh notify-grok.sh notify-opencode.sh notify-pi.sh
 ```
 
 ## Usage
@@ -364,6 +366,74 @@ Notes:
 - Set `KIMI_NOTIFY_DEBUG=1` to log wrapper diagnostics under `$KIMI_CODE_HOME/logs/notify-kimi-code.log` (default root: `~/.kimi-code`).
 - The wrapper requires `jq` and otherwise exits successfully without affecting Kimi's workflow.
 - See the [official Kimi Hooks documentation](https://www.kimi.com/code/docs/kimi-code-cli/customization/hooks.html) for the event contract and payload format.
+
+## Grok Build integration
+
+Grok Build sends native hook payloads as camelCase JSON on stdin. Use `notify-grok.sh` to translate those payloads into notifications while preserving the shared tmux targeting, SSH suppression, and focus-only fallback behavior.
+
+Recommended installation and configuration:
+
+```bash
+./install.sh --prefix "$HOME/.local" --symlink --configure-grok
+```
+
+The installer creates `tmux-notify-jump.json` under `$GROK_HOME/hooks` or `~/.grok/hooks`. Override the directory with `--grok-hooks-path`. To configure the hooks manually, create `~/.grok/hooks/tmux-notify-jump.json`:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "/path/to/notify-grok.sh" }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt|idle_prompt",
+        "hooks": [
+          { "type": "command", "command": "/path/to/notify-grok.sh" }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          { "type": "command", "command": "/path/to/notify-grok.sh" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The wrapper defaults to completed turns, permission and idle prompts, and failed tool calls. Grok also emits `Stop` while closing a session; the wrapper only notifies when `reason` is `end_turn`, avoiding duplicate notifications for `channel_closed` and `shutdown`.
+
+Optional filtering (comma-separated lists; `*` = all):
+
+- `GROK_NOTIFY_EVENTS`: event whitelist (empty = default: `stop,notification,post_tool_use_failure`)
+- `GROK_NOTIFY_EXCLUDE_EVENTS`: event blacklist (set to `*` to disable all)
+- `GROK_NOTIFY_TYPES`: `notificationType` whitelist (empty = default: `permission_prompt,idle_prompt`)
+- `GROK_NOTIFY_EXCLUDE_TYPES`: notification type blacklist
+- `GROK_NOTIFY_SHOW_EVENT_TYPE`: include the event in the title (`1`/`0`; default: `1`)
+
+Optional behavior:
+
+- `GROK_NOTIFY_UI`: `notification` or `dialog` (falls back to `TMUX_NOTIFY_UI`)
+- `GROK_NOTIFY_TIMEOUT_MS`: timeout in milliseconds (default: `0`, daemon-dependent sticky notification)
+- `GROK_NOTIFY_FALLBACK_TARGET`: allow resolving the most recently active tmux pane when hook environment lacks `TMUX_PANE`
+- `GROK_NOTIFY_FOCUS_ONLY_FALLBACK`: focus the terminal when no tmux target is available (`1` by default)
+- `GROK_NOTIFY_DEBUG`: log diagnostics under `$GROK_HOME/logs/notify-grok.log`; override with `GROK_NOTIFY_DEBUG_LOG`
+
+Notes:
+
+- Grok's native payload uses fields such as `hookEventName`, `notificationType`, `toolName`, and `errorDetails`; the Claude wrapper expects snake_case and should not be used as the native Grok parser.
+- Global hooks under `~/.grok/hooks` are trusted automatically. Project hooks under `.grok/hooks` require `/hooks-trust` or launching Grok with `--trust`.
+- Grok can also discover Claude settings through its compatibility layer. Keep only one Grok notification registration active to avoid duplicate notifications.
+- The wrapper requires `jq` and otherwise exits successfully without affecting Grok.
+- Verify discovery with `grok inspect --json` or open the Hooks tab with `/hooks`.
+- See the [official Grok Build Hooks documentation](https://docs.x.ai/build/features/hooks) for the complete event contract.
 
 ## OpenCode integration
 
