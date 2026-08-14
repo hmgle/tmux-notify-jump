@@ -109,6 +109,7 @@ captured_args() {
     captured="$(captured_args)"
     [[ "$captured" == *"Grok [permission_prompt]: Permission Needed"* ]]
     [[ "$captured" == *"Approve run_terminal_command"* ]]
+    [[ "$captured" == *"--notify-kind"$'\n'"attention"* ]]
 }
 
 @test "notify-grok.sh: notification type filtering suppresses calls" {
@@ -129,6 +130,7 @@ captured_args() {
     captured="$(captured_args)"
     [[ "$captured" == *"Grok [post_tool_use_failure]: run_terminal_command failed"* ]]
     [[ "$captured" == *"exit status 2"* ]]
+    [[ "$captured" == *"--notify-kind"$'\n'"attention"* ]]
 }
 
 @test "notify-grok.sh: wrapper options are forwarded" {

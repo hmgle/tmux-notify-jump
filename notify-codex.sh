@@ -90,6 +90,11 @@ case "$EVENT_TYPE" in
         ;;
 esac
 
+NOTIFY_KIND="complete"
+case "$EVENT_TYPE" in
+    *permission*|*Permission*|*error*|*Error*|*failure*|*Failure*) NOTIFY_KIND="attention" ;;
+esac
+
 # Format title with optional event type
 TITLE="$(format_notify_title "Codex" "$EVENT_TYPE" "$TITLE_MSG" "$CODEX_SHOW_TYPE")"
 
@@ -107,11 +112,6 @@ else
     log_debug "tmux not installed"
 fi
 
-if tmux_notify_should_suppress_remote_client; then
-    log_debug "suppressing notification for remote ssh tmux client"
-    exit 0
-fi
-
 JUMP_SH="$(resolve_tmux_notify_jump_cmd "$SCRIPT_DIR")"
 if ! is_executable_cmd "$JUMP_SH"; then
     log_debug "jump command not found/executable: $JUMP_SH"
@@ -125,6 +125,8 @@ args=(
     --timeout "$TIMEOUT_MS"
     --max-title "$MAX_TITLE"
     --max-body "$MAX_BODY"
+    --notify-kind "$NOTIFY_KIND"
+    --notify-source "Codex"
 )
 
 if [ -n "$TARGET" ]; then

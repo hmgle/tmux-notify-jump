@@ -47,6 +47,8 @@ WRAP_COLS="$DEFAULT_WRAP_COLS"
 DEDUPE_MS="$DEFAULT_DEDUPE_MS"
 DETACH=0
 UI="$DEFAULT_UI"
+NOTIFY_KIND="${TMUX_NOTIFY_KIND:-complete}"
+NOTIFY_SOURCE="${TMUX_NOTIFY_SOURCE:-tmux-notify-jump}"
 SENDER_CLIENT_PID=""
 SENDER_CLIENT_TTY=""
 TMUX_SOCKET=""
@@ -78,6 +80,10 @@ Options:
   --max-body <n>       Max body length (0 = no truncation)
   --wrap-cols <n>      Wrap body text to <n> columns (default: $DEFAULT_WRAP_COLS; 0 = no wrapping)
   --dedupe-ms <ms>     Suppress duplicate notifications within this window (0 = disabled; default: $DEFAULT_DEDUPE_MS)
+  --notify-kind <attention|complete>
+                      Inbox priority (default: complete)
+  --notify-source <name>
+                      Source label shown by tmux clients
   --detach             Detach and return immediately (handles click in background)
   -h, --help           Show help
 
@@ -455,7 +461,13 @@ detect_activation_capability() {
     fi
 }
 
-require_tools() {
+require_tmux_tools() {
+    if [ "$FOCUS_ONLY" -eq 0 ]; then
+        require_tool tmux
+    fi
+}
+
+require_desktop_tools() {
     if [ "$UI" = "dialog" ]; then
         if ! pick_dialog_backend >/dev/null 2>&1; then
             warn "Dialog mode requested but no dialog backend found (zenity/kdialog/yad); falling back to notification"
@@ -466,9 +478,11 @@ require_tools() {
     if [ "$UI" = "notification" ]; then
         require_tool notify-send
     fi
-    if [ "$FOCUS_ONLY" -eq 0 ]; then
-        require_tool tmux
-    fi
+}
+
+require_tools() {
+    require_tmux_tools
+    require_desktop_tools
 }
 
 send_dialog() {
@@ -666,6 +680,14 @@ handle_action() {
         log "Duplicate notification suppressed"
         return
     fi
+
+    if [ "$FOCUS_ONLY" -eq 0 ]; then
+        tmux_notify_route_notification "$TARGET" "$TITLE" "$BODY" "$NOTIFY_KIND" "$NOTIFY_SOURCE"
+        if [ "${TMUX_NOTIFY_ROUTE_DESKTOP:-0}" != "1" ]; then
+            return 0
+        fi
+    fi
+    require_desktop_tools
 
     if [ "$FOCUS_ONLY" -eq 0 ]; then
         if [ -z "$SENDER_CLIENT_TTY" ]; then
@@ -941,7 +963,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
     exit 0
 fi
 
-require_tools
+require_tmux_tools
 if [ "$FOCUS_ONLY" -eq 0 ]; then
     parse_target "$TARGET"
     validate_target_exists
@@ -965,6 +987,7 @@ if [ "$DETACH" -eq 1 ]; then
         child_args+=(--title "$TITLE" --body "$BODY")
         child_args+=(--timeout "$TIMEOUT" --max-title "$MAX_TITLE" --max-body "$MAX_BODY")
         child_args+=(--wrap-cols "$WRAP_COLS" --dedupe-ms "$DEDUPE_MS")
+        child_args+=(--notify-kind "$NOTIFY_KIND" --notify-source "$NOTIFY_SOURCE")
         if [ "$NO_ACTIVATE" -eq 1 ]; then
             child_args+=(--no-activate)
         fi

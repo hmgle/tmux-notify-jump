@@ -11,6 +11,43 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 load_user_config
 
+TMUX_NOTIFY_ENTRYPOINT="$SCRIPT_DIR/tmux-notify-jump"
+export TMUX_NOTIFY_ENTRYPOINT
+
+case "${1:-}" in
+    --tmux-init)
+        if [ -z "${TMUX_NOTIFY_TMUX_KEY:-}" ] && [ -n "${TMUX_NOTIFY_KEY:-}" ]; then
+            TMUX_NOTIFY_TMUX_KEY="$TMUX_NOTIFY_KEY"
+            export TMUX_NOTIFY_TMUX_KEY
+        fi
+        tmux_notify_tmux_init
+        exit 0
+        ;;
+    --inbox-next)
+        shift
+        tmux_notify_inbox_next "${TMUX_NOTIFY_SENDER_TTY:-}"
+        exit $?
+        ;;
+    --inbox-clear-all)
+        tmux_notify_inbox_clear_all
+        exit 0
+        ;;
+    --inbox-list)
+        tmux_notify_inbox_list
+        exit 0
+        ;;
+    --inbox-ack-pane)
+        [ "$#" -ge 2 ] || die "--inbox-ack-pane requires an argument"
+        tmux_notify_inbox_ack_pane "$2"
+        exit 0
+        ;;
+    --inbox-ack-client)
+        [ "$#" -ge 2 ] || die "--inbox-ack-client requires an argument"
+        tmux_notify_inbox_ack_client "$2"
+        exit 0
+        ;;
+esac
+
 if [ -n "${TMUX_NOTIFY_JUMP_SH:-}" ]; then
     exec "${TMUX_NOTIFY_JUMP_SH}" "$@"
 fi

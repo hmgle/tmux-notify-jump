@@ -137,6 +137,11 @@ case "$EVENT_NAME" in
         ;;
 esac
 
+NOTIFY_KIND="complete"
+case "$EVENT_NAME:$NOTIF_TYPE" in
+    PermissionRequest:*|StopFailure:*|Notification:permission_prompt|Notification:idle_prompt) NOTIFY_KIND="attention" ;;
+esac
+
 TITLE="$(format_notify_title "Kimi" "$EVENT_LABEL" "$TITLE_MSG" "$KIMI_SHOW_TYPE")"
 ALLOW_FOCUS_FALLBACK="${KIMI_NOTIFY_FOCUS_ONLY_FALLBACK:-${TMUX_NOTIFY_FOCUS_ONLY_FALLBACK:-1}}"
 ALLOW_FALLBACK="${KIMI_NOTIFY_FALLBACK_TARGET:-${TMUX_NOTIFY_FALLBACK_TARGET:-0}}"
@@ -177,11 +182,6 @@ else
     log_debug "tmux not installed"
 fi
 
-if tmux_notify_should_suppress_remote_client; then
-    log_debug "suppressing notification for remote ssh tmux client"
-    exit 0
-fi
-
 JUMP_SH="$(resolve_tmux_notify_jump_cmd "$SCRIPT_DIR")"
 if ! is_executable_cmd "$JUMP_SH"; then
     log_debug "jump command not found/executable: $JUMP_SH"
@@ -195,6 +195,8 @@ args=(
     --timeout "$TIMEOUT_MS"
     --max-title "$MAX_TITLE"
     --max-body "$MAX_BODY"
+    --notify-kind "$NOTIFY_KIND"
+    --notify-source "Kimi"
 )
 
 UI_OVERRIDE=""

@@ -84,6 +84,7 @@ captured_args() {
     captured="$(captured_args)"
     [[ "$captured" == *"Kimi [PermissionRequest]: Permission Needed"* ]]
     [[ "$captured" == *"Run release command"* ]]
+    [[ "$captured" == *"--notify-kind"$'\n'"attention"* ]]
 }
 
 @test "notify-kimi-code.sh: StopFailure includes the error message" {
@@ -93,6 +94,7 @@ captured_args() {
     captured="$(captured_args)"
     [[ "$captured" == *"Kimi [StopFailure]: Turn Failed"* ]]
     [[ "$captured" == *"rate limit exceeded"* ]]
+    [[ "$captured" == *"--notify-kind"$'\n'"attention"* ]]
 }
 
 @test "notify-kimi-code.sh: Notification uses Kimi title and body fields" {

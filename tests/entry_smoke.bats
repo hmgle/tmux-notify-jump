@@ -692,6 +692,35 @@ FAKE
     [[ "$output" == *"Unknown option"* ]]
 }
 
+@test "install.sh: configure-tmux writes an idempotent marked block" {
+    bindir="$TEST_TEMP_DIR/bin"
+    config="$TEST_TEMP_DIR/tmux.conf"
+    printf '%s\n' 'set -g mouse on' >"$config"
+
+    run "$PROJECT_ROOT/install.sh" --bindir "$bindir" --symlink \
+        --configure-tmux --tmux-config "$config" --tmux-key M
+    [ "$status" -eq 0 ]
+
+    run "$PROJECT_ROOT/install.sh" --bindir "$bindir" --symlink \
+        --configure-tmux --tmux-config "$config" --tmux-key M
+    [ "$status" -eq 0 ]
+
+    run rg -c '^# BEGIN tmux-notify-jump$' "$config"
+    [ "$status" -eq 0 ]
+    [ "$output" = "1" ]
+    run cat "$config"
+    [[ "$output" == *"set -g mouse on"* ]]
+    [[ "$output" == *"set -g @tmux-notify-jump-key M"* ]]
+    [[ "$output" == *"$bindir/tmux-notify-jump --tmux-init"* ]]
+
+    run "$PROJECT_ROOT/install.sh" --bindir "$bindir" --uninstall \
+        --configure-tmux --tmux-config "$config" --tmux-key M
+    [ "$status" -eq 0 ]
+    run cat "$config"
+    [[ "$output" == *"set -g mouse on"* ]]
+    [[ "$output" != *"tmux-notify-jump"* ]]
+}
+
 @test "tmux-notify-jump-macos.sh: execute callback forwards the unattached fallback policy" {
     fake_bin="$TEST_TEMP_DIR/bin"
     mkdir -p "$fake_bin"

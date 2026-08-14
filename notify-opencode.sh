@@ -160,6 +160,11 @@ case "$EVENT_TYPE" in
         ;;
 esac
 
+NOTIFY_KIND="complete"
+case "$EVENT_TYPE" in
+    permission.asked|session.error) NOTIFY_KIND="attention" ;;
+esac
+
 # Format title with optional event type
 TITLE="$(format_notify_title "OpenCode" "$EVENT_TYPE" "$TITLE_MSG" "$OPENCODE_SHOW_TYPE")"
 
@@ -194,11 +199,6 @@ else
     log_debug "tmux not installed"
 fi
 
-if tmux_notify_should_suppress_remote_client; then
-    log_debug "suppressing notification for remote ssh tmux client"
-    exit 0
-fi
-
 JUMP_SH="$(resolve_tmux_notify_jump_cmd "$SCRIPT_DIR")"
 if ! is_executable_cmd "$JUMP_SH"; then
     log_debug "jump command not found/executable: $JUMP_SH"
@@ -212,6 +212,8 @@ args=(
     --timeout "$TIMEOUT_MS"
     --max-title "$MAX_TITLE"
     --max-body "$MAX_BODY"
+    --notify-kind "$NOTIFY_KIND"
+    --notify-source "OpenCode"
 )
 
 # UI routing (optional):

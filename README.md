@@ -5,7 +5,7 @@
 [![Test](https://github.com/hmgle/tmux-notify-jump/actions/workflows/test.yml/badge.svg)](https://github.com/hmgle/tmux-notify-jump/actions/workflows/test.yml)
 [![Quality Gate](https://github.com/hmgle/tmux-notify-jump/actions/workflows/quality-gate.yml/badge.svg)](https://github.com/hmgle/tmux-notify-jump/actions/workflows/quality-gate.yml)
 
-Send a desktop notification on Linux/X11 or macOS.
+Send a tmux-native or desktop notification on Linux and macOS.
 
 - If tmux is available, you can jump to a target tmux pane when you click an action button.
 - If tmux is not available, you can still use it as a notification + “focus my terminal” helper (`--focus-only`).
@@ -37,12 +37,13 @@ This repo contains:
 
 - Linux + X11 (Wayland is not supported by the focusing path)
   - `tmux` (required for `--target`/`--list`; optional for `--focus-only`)
-  - `notify-send` (libnotify) with action support (`notify-send -A ... --wait`)
+  - `notify-send` (libnotify) with action support for desktop routing; it is not
+    needed for the tmux-native SSH path
   - Optional “dialog” UI mode: `zenity` (GNOME/GTK) or `kdialog` (KDE/Qt) or `yad`
 - macOS
   - `tmux` (required for `--target`/`--list`; optional for `--focus-only`)
-  - `terminal-notifier`
-  - `osascript` (built-in)
+  - `terminal-notifier` and `osascript` for desktop routing; neither is needed
+    for the tmux-native SSH path
 
 ### Optional
 
@@ -70,6 +71,7 @@ Optional: configure hooks (makes backups; won’t overwrite existing `notify=` /
 ./install.sh --prefix "$HOME/.local" --symlink --configure-grok
 ./install.sh --prefix "$HOME/.local" --symlink --configure-opencode
 ./install.sh --prefix "$HOME/.local" --symlink --configure-pi
+./install.sh --prefix "$HOME/.local" --symlink --configure-tmux
 ```
 
 Uninstall:
@@ -143,6 +145,28 @@ Common options:
 - `--detach`: run in background (recommended for hook/callback use)
 - `--dry-run`: print what would happen and exit
 - `--wrap-cols <n>`: wrap body text to `<n>` columns (default: `80`; `0` disables wrapping)
+- `--notify-kind <attention|complete>`: classify an Inbox item. Attention items
+  are selected first by the tmux Inbox key.
+- `--notify-source <name>`: source label shown in remote tmux messages and the
+  Inbox metadata.
+
+## tmux Inbox
+
+When `TMUX_NOTIFY_REMOTE_MODE=tmux` (the default), a notification whose target
+pane is not currently visible is recorded in a small persistent Inbox. The
+status-right segment shows `?N` for attention items and `!N` for completed work.
+Run `./install.sh --configure-tmux` once to install the status segment, focus
+hooks, and the `prefix+N` binding, then reload the configured file with
+`tmux source-file ~/.tmux.conf` (or restart the server). Pressing the binding
+selects the oldest attention item first, then the oldest completion, and clears
+that exact pane as soon as it is visited. Repeated events for the same pane and
+priority collapse into one item with an updated count.
+
+The configuration block is marked and idempotent. Use
+`./install.sh --configure-tmux --uninstall` to remove only that block while
+leaving the rest of the tmux configuration intact. If `prefix+N` is already
+bound, initialization warns and preserves the existing binding; pass
+`--tmux-key <key>` to choose another key.
 
 macOS note: in `--ui notification` mode, if the script is detached (or `terminal-notifier` doesn’t support `-wait`), it falls back to `terminal-notifier -execute`, where any click triggers the jump (no separate “Dismiss” action). Use `--ui dialog` for explicit buttons.
 
@@ -156,7 +180,12 @@ CLI flags override environment variables where applicable.
 - `TMUX_NOTIFY_FALLBACK_TARGET`: if not running inside tmux, fall back to the most recently active tmux client pane as the jump target (`0` disables; default: `0`)
 - `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK`: when hooks run without tmux (missing or no server/target), fall back to `--focus-only` instead of no-op (`0` disables; default: `1`)
 - `TMUX_NOTIFY_UNATTACHED_FALLBACK`: policy when the target session has no identifiable ordinary client. The default `single` switches the server's sole ordinary client; it still refuses when there are zero or multiple ordinary clients. Set `none` for strict mode, which reports that the target is not visible instead of moving a terminal. Unknown values warn and fall back to `single`. On macOS the selected policy is forwarded to the notification click callback.
-- `TMUX_NOTIFY_REMOTE`: allow notifications when any attached tmux client in the current session appears to be attached over SSH (`0` suppresses; default: `0`)
+- `TMUX_NOTIFY_REMOTE_MODE`: `tmux` (Inbox/status/remote `display-message`,
+  default), `desktop`, `both`, or `suppress`. The legacy
+  `TMUX_NOTIFY_REMOTE=1` value maps to `desktop` for compatibility.
+- `TMUX_NOTIFY_INBOX_TTL_MS`: remove Inbox items older than this value (default:
+  `604800000`, seven days).
+- `TMUX_NOTIFY_INBOX_MAX`: maximum number of Inbox entries (default: `100`).
 - `TMUX_NOTIFY_CLASS` / `TMUX_NOTIFY_CLASSES`: terminal window class(es) used by `xdotool search --class`
 - `TMUX_NOTIFY_WEZTERM_TAB`: on Linux, after focusing the terminal window, also switch to the wezterm tab/pane that hosts the tmux client (matched via `wezterm cli list` by tty; `0` disables; default: `1`). Requires `python3` or `jq` for JSON parsing; silently skipped when neither is available, when `--no-activate` is set, or when the terminal is not wezterm.
 - `TMUX_NOTIFY_BUNDLE_ID` / `TMUX_NOTIFY_BUNDLE_IDS`: macOS terminal bundle id(s) for `osascript` activation (overrides auto-detection; e.g. kitty is `net.kovidgoyal.kitty`)
@@ -239,7 +268,9 @@ Notes:
 - `notify` must be top-level (i.e. placed before any `[table]` / `[[array-of-tables]]` sections), otherwise TOML will scope it under the last table.
 - Run Codex inside tmux so `TMUX_PANE` is available.
 - If you can’t run Codex inside tmux, set `CODEX_NOTIFY_FALLBACK_TARGET=1` (or `TMUX_NOTIFY_FALLBACK_TARGET=1`) to target the most recently active tmux pane.
-- By default, notifications are suppressed when any attached tmux client in the current session looks like an SSH session. Set `TMUX_NOTIFY_REMOTE=1` to allow remote-attached clients to notify as well.
+- SSH-attached clients use the tmux Inbox by default, so no desktop notification
+  daemon is required on the remote host. Use `TMUX_NOTIFY_REMOTE_MODE` to change
+  the routing policy.
 - If tmux isn’t available/running, the wrapper falls back to `--focus-only` by default (set `CODEX_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0` to restore no-op).
 - Set `--detach` (already enabled by the wrapper) to avoid blocking on `notify-send --wait`.
 - The wrapper sets `--timeout 0` by default (via `CODEX_NOTIFY_TIMEOUT_MS`) so the notification stays until you click an action (daemon-dependent).
@@ -522,7 +553,9 @@ Extension-level options:
 Notes:
 
 - Run Pi inside tmux so `TMUX_PANE` identifies the originating pane.
-- By default, notifications are suppressed when any attached tmux client in the current session looks like an SSH session. Set `TMUX_NOTIFY_REMOTE=1` to allow remote-attached clients to notify as well.
+- SSH-attached clients use the tmux Inbox by default, so no desktop notification
+  daemon is required on the remote host. Use `TMUX_NOTIFY_REMOTE_MODE` to change
+  the routing policy.
 - If the extension runs without tmux env but a tmux server is running, set `PI_NOTIFY_FALLBACK_TARGET=1` (or `TMUX_NOTIFY_FALLBACK_TARGET=1`) to target the most recently active tmux client pane.
 - If tmux isn't available/running, the wrapper falls back to `--focus-only` by default (set `PI_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0` to restore no-op).
 - On macOS (and on Linux if you have `zenity`/`kdialog`/`yad`), set `PI_NOTIFY_UI=dialog` (or `TMUX_NOTIFY_UI=dialog`) to use a modal "Jump/Dismiss" dialog that stays until clicked.

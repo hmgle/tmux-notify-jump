@@ -243,7 +243,8 @@ require_arg() {
 # Common options handled:
 #   --target, --focus-only, --title, --body, --sender-tty, --tmux-socket
 #   --no-activate, --list, --dry-run, --quiet, --timeout, --ui
-#   --max-title, --max-body, --dedupe-ms, --detach
+#   --max-title, --max-body, --dedupe-ms, --detach, --notify-kind,
+#   --notify-source
 #
 # Special return values in _PARSE_CONSUMED:
 #   "help" - caller should print_usage and exit 0
@@ -349,6 +350,19 @@ parse_common_opt() {
             _PARSE_CONSUMED=2
             return 0
             ;;
+        --notify-kind)
+            require_arg "$opt" "$#"
+            NOTIFY_KIND="$1"
+            _PARSE_CONSUMED=2
+            return 0
+            ;;
+        --notify-source)
+            require_arg "$opt" "$#"
+            # shellcheck disable=SC2034 # consumed by platform scripts
+            NOTIFY_SOURCE="$1"
+            _PARSE_CONSUMED=2
+            return 0
+            ;;
         --detach)
             # shellcheck disable=SC2034 # consumed by caller scripts
             DETACH=1
@@ -414,11 +428,19 @@ validate_ui_mode() {
     fi
 }
 
+validate_notify_kind() {
+    case "${NOTIFY_KIND:-complete}" in
+        attention|complete) ;;
+        *) die "--notify-kind must be one of: attention, complete" ;;
+    esac
+}
+
 # Validate common options shared by both platform scripts
 # Call this after parse_args()
 validate_common_options() {
     validate_timeout
     validate_ui_mode
+    validate_notify_kind
     validate_nonneg_int "$MAX_TITLE" "--max-title"
     validate_nonneg_int "$MAX_BODY" "--max-body"
     validate_nonneg_int "$DEDUPE_MS" "--dedupe-ms"
@@ -449,6 +471,8 @@ print_dry_run_target() {
 print_dry_run_common() {
     log "Title: $TITLE"
     log "Body: $BODY"
+    log "Notification kind: ${NOTIFY_KIND:-complete}"
+    log "Notification source: ${NOTIFY_SOURCE:-tmux-notify-jump}"
     if [ -n "${SENDER_CLIENT_TTY:-}" ]; then
         log "Sender tmux client tty: $SENDER_CLIENT_TTY"
     fi
@@ -1180,6 +1204,7 @@ jump_to_pane() {
         log_debug "client switch postcondition failed: client=$JUMP_CLIENT_NAME target_session=$JUMP_TARGET_SESSION_ID target_pane=$JUMP_TARGET_PANE_ID rows=$rows"
         die "tmux client switch did not make $SESSION:$WINDOW.$PANE visible"
     fi
+    tmux_notify_inbox_ack_pane "$JUMP_TARGET_PANE_ID"
     log "Jumped to $SESSION:$WINDOW.$PANE via $JUMP_CLIENT_NAME"
 }
 
@@ -1283,6 +1308,354 @@ tmux_notify_should_suppress_remote_client() {
     fi
 
     tmux_session_has_remote_ssh_client "$session"
+}
+
+# =============================================================================
+# tmux-native notification Inbox
+# =============================================================================
+
+tmux_notify_remote_mode() {
+    local mode="${TMUX_NOTIFY_REMOTE_MODE:-}"
+    if [ -z "$mode" ] && is_truthy "${TMUX_NOTIFY_REMOTE:-0}"; then
+        mode="desktop"
+    fi
+    case "$mode" in
+        tmux|desktop|both|suppress) printf '%s' "$mode" ;;
+        *) printf '%s' "tmux" ;;
+    esac
+}
+
+tmux_notify_inbox_root() {
+    local server_id=""
+    server_id="$(tmux_cmd display-message -p '#{pid}' 2>/dev/null || true)"
+    [ -n "$server_id" ] || server_id="default"
+    local socket="${TMUX_NOTIFY_TMUX_SOCKET:-default}"
+    local id=""
+    id="$(printf '%s|%s' "$socket" "$server_id" | sha256_hex_stdin)"
+    printf '%s/tmux-notify-jump/inbox/%s' "$(cache_root_dir)" "$id"
+}
+
+tmux_notify_compact_text() {
+    local text="${1:-}"
+    text="${text//$'\n'/ }"
+    text="${text//$'\r'/ }"
+    text="${text//$'\t'/ }"
+    text="$(trim_ws "$text")"
+    truncate_text 512 "$text"
+}
+
+tmux_notify_inbox_entry_read() {
+    local dir="$1"
+    INBOX_KIND="$(cat "$dir/kind" 2>/dev/null || true)"
+    INBOX_COUNT="$(cat "$dir/count" 2>/dev/null || true)"
+    INBOX_FIRST_MS="$(cat "$dir/first_ms" 2>/dev/null || true)"
+    # shellcheck disable=SC2034
+    INBOX_LAST_MS="$(cat "$dir/last_ms" 2>/dev/null || true)"
+    INBOX_PANE_ID="$(cat "$dir/pane_id" 2>/dev/null || true)"
+    INBOX_WINDOW_ID="$(cat "$dir/window_id" 2>/dev/null || true)"
+    INBOX_SESSION_ID="$(cat "$dir/session_id" 2>/dev/null || true)"
+    # shellcheck disable=SC2034
+    INBOX_SESSION_NAME="$(cat "$dir/session_name" 2>/dev/null || true)"
+    # shellcheck disable=SC2034
+    INBOX_WINDOW_INDEX="$(cat "$dir/window_index" 2>/dev/null || true)"
+    # shellcheck disable=SC2034
+    INBOX_SOURCE="$(cat "$dir/source" 2>/dev/null || true)"
+    # shellcheck disable=SC2034
+    INBOX_TITLE="$(cat "$dir/title" 2>/dev/null || true)"
+    # shellcheck disable=SC2034
+    INBOX_BODY="$(cat "$dir/body" 2>/dev/null || true)"
+}
+
+tmux_notify_inbox_write_field() {
+    local dir="$1" name="$2" value="$3"
+    local tmp="$dir/$name.$$.$RANDOM"
+    printf '%s\n' "$value" >"$tmp" 2>/dev/null || return 1
+    mv -f "$tmp" "$dir/$name" 2>/dev/null || { rm -f "$tmp" 2>/dev/null || true; return 1; }
+}
+
+tmux_notify_inbox_sync_counts() {
+    local root=""
+    root="$(tmux_notify_inbox_root)"
+    local attention=0 complete=0 dir=""
+    for dir in "$root"/*; do
+        [ -d "$dir" ] || continue
+        [ -f "$dir/kind" ] || continue
+        tmux_notify_inbox_entry_read "$dir"
+        local count="${INBOX_COUNT:-0}"
+        [[ "$count" =~ ^[0-9]+$ ]] || count=1
+        if [ "${INBOX_KIND:-complete}" = "attention" ]; then
+            attention=$((attention + count))
+        else
+            complete=$((complete + count))
+        fi
+    done
+    tmux_cmd set-option -gq @tmux-notify-jump-attention "$attention" 2>/dev/null || true
+    tmux_cmd set-option -gq @tmux-notify-jump-complete "$complete" 2>/dev/null || true
+    tmux_cmd refresh-client -S 2>/dev/null || true
+    TMUX_NOTIFY_INBOX_ATTENTION="$attention"
+    TMUX_NOTIFY_INBOX_COMPLETE="$complete"
+    export TMUX_NOTIFY_INBOX_ATTENTION TMUX_NOTIFY_INBOX_COMPLETE
+}
+
+tmux_notify_inbox_gc() {
+    local root="$1" now="$2"
+    local ttl="${TMUX_NOTIFY_INBOX_TTL_MS:-604800000}"
+    local max="${TMUX_NOTIFY_INBOX_MAX:-100}"
+    [[ "$ttl" =~ ^[0-9]+$ ]] || ttl=604800000
+    [[ "$max" =~ ^[0-9]+$ ]] || max=100
+    local dir last
+    for dir in "$root"/*; do
+        [ -d "$dir" ] || continue
+        [ -f "$dir/kind" ] || continue
+        last="$(cat "$dir/last_ms" 2>/dev/null || true)"
+        if [[ "$last" =~ ^[0-9]+$ ]] && [ "$ttl" -gt 0 ] && [ "$now" -gt "$last" ] && [ $((now - last)) -ge "$ttl" ]; then
+            rm -rf "$dir" 2>/dev/null || true
+        fi
+    done
+    if [[ "$max" =~ ^[0-9]+$ ]] && [ "$max" -gt 0 ]; then
+        local count=0 list=""
+        for dir in "$root"/*; do
+            [ -d "$dir" ] || continue
+            [ -f "$dir/kind" ] || continue
+            last="$(cat "$dir/last_ms" 2>/dev/null || echo 0)"
+            list+="$last|$dir\n"
+            count=$((count + 1))
+        done
+        if [ "$count" -gt "$max" ]; then
+            printf '%b' "$list" | sort -n -t '|' -k1,1 | head -n $((count - max)) | cut -d '|' -f2- | while IFS= read -r dir; do
+                if [ -n "$dir" ]; then rm -rf "$dir" 2>/dev/null || true; fi
+            done
+        fi
+    fi
+}
+
+tmux_notify_inbox_target_info() {
+    local target="$1"
+    tmux_cmd display-message -p -t "$target" '#{session_id}|#{window_id}|#{pane_id}|#{session_name}|#{window_index}' 2>/dev/null || true
+}
+
+tmux_notify_inbox_enqueue() {
+    local target="$1" kind="$2" source="$3" title="$4" body="$5"
+    local info=""
+    info="$(tmux_notify_inbox_target_info "$target")"
+    [ -n "$info" ] || return 1
+    local session_id window_id pane_id session_name window_index
+    IFS='|' read -r session_id window_id pane_id session_name window_index <<<"$info"
+    [ -n "$pane_id" ] || return 1
+    local root="" now=""
+    root="$(tmux_notify_inbox_root)"
+    now="$(now_ms)"
+    mkdir -p "$root" || return 1
+    tmux_notify_inbox_gc "$root" "$now"
+    local key=""
+    key="$(printf '%s|%s' "$pane_id" "$kind" | sha256_hex_stdin)"
+    local dir="$root/$key" lock="$root/$key.lock"
+    acquire_lock "$lock" || return 0
+    mkdir -p "$dir"
+    tmux_notify_inbox_entry_read "$dir"
+    local count="${INBOX_COUNT:-0}"
+    [[ "$count" =~ ^[0-9]+$ ]] || count=0
+    count=$((count + 1))
+    local first="${INBOX_FIRST_MS:-$now}"
+    tmux_notify_inbox_write_field "$dir" kind "$kind"
+    tmux_notify_inbox_write_field "$dir" count "$count"
+    tmux_notify_inbox_write_field "$dir" first_ms "$first"
+    tmux_notify_inbox_write_field "$dir" last_ms "$now"
+    tmux_notify_inbox_write_field "$dir" pane_id "$pane_id"
+    tmux_notify_inbox_write_field "$dir" window_id "$window_id"
+    tmux_notify_inbox_write_field "$dir" session_id "$session_id"
+    tmux_notify_inbox_write_field "$dir" session_name "$session_name"
+    tmux_notify_inbox_write_field "$dir" window_index "$window_index"
+    tmux_notify_inbox_write_field "$dir" source "$(tmux_notify_compact_text "$source")"
+    tmux_notify_inbox_write_field "$dir" title "$(tmux_notify_compact_text "$title")"
+    tmux_notify_inbox_write_field "$dir" body "$(tmux_notify_compact_text "$body")"
+    release_lock "$lock"
+    tmux_notify_inbox_gc "$root" "$now"
+    tmux_notify_inbox_sync_counts
+    return 0
+}
+
+tmux_notify_inbox_ack_pane() {
+    local pane_id="$1" root="" dir
+    root="$(tmux_notify_inbox_root)"
+    for dir in "$root"/*; do
+        [ -d "$dir" ] || continue
+        [ -f "$dir/kind" ] || continue
+        [ "$(cat "$dir/pane_id" 2>/dev/null || true)" = "$pane_id" ] || continue
+        rm -rf "$dir" 2>/dev/null || true
+    done
+    tmux_notify_inbox_sync_counts
+}
+
+tmux_notify_inbox_clear_all() {
+    local root="" dir
+    root="$(tmux_notify_inbox_root)"
+    for dir in "$root"/*; do
+        [ -d "$dir" ] || continue
+        [ -f "$dir/kind" ] || continue
+        rm -rf "$dir" 2>/dev/null || true
+    done
+    tmux_notify_inbox_sync_counts
+}
+
+tmux_notify_inbox_target_visible() {
+    local target="$1" info=""
+    info="$(tmux_notify_inbox_target_info "$target")"
+    [ -n "$info" ] || return 1
+    local session_id window_id pane_id session_name window_index
+    IFS='|' read -r session_id window_id pane_id session_name window_index <<<"$info"
+    local row=""
+    while IFS= read -r row; do
+        [ -n "$row" ] || continue
+        read_tmux_client_row "$row"
+        [ "$CLIENT_PANE_ID" = "$pane_id" ] && return 0
+    done <<<"$(tmux_terminal_client_rows)"
+    return 1
+}
+
+tmux_notify_route_notification() {
+    local target="$1" title="$2" body="$3" kind="${4:-complete}" source="${5:-tmux-notify-jump}"
+    TMUX_NOTIFY_ROUTE_DESKTOP=0
+    local mode="" rows="" info=""
+    mode="$(tmux_notify_remote_mode)"
+    rows="$(tmux_terminal_client_rows 2>/dev/null || true)"
+    info="$(tmux_notify_inbox_target_info "$target")"
+    if [ -z "$info" ]; then
+        # Legacy tmux and restricted command stubs may not expand the complete
+        # metadata format. Preserve the pre-Inbox desktop path in that case.
+        TMUX_NOTIFY_ROUTE_DESKTOP=1
+        export TMUX_NOTIFY_ROUTE_DESKTOP
+        return 0
+    fi
+    local session_id="" window_id="" pane_id="" session_name="" window_index=""
+    IFS='|' read -r session_id window_id pane_id session_name window_index <<<"$info"
+    local visible=0 local_client=0 row message
+    while IFS= read -r row; do
+        [ -n "$row" ] || continue
+        read_tmux_client_row "$row"
+        [ "$CLIENT_SESSION_ID" = "$session_id" ] || continue
+        if [ "$CLIENT_PANE_ID" = "$pane_id" ]; then visible=1; fi
+        if tmux_client_pid_is_remote_ssh "${CLIENT_PID:-}"; then
+            if [ "$mode" = "tmux" ] || [ "$mode" = "both" ]; then
+                message="[$(tmux_notify_compact_text "$source")] $(tmux_notify_compact_text "$title")"
+                tmux_cmd display-message -c "$CLIENT_NAME" \
+                    "${message}: $(tmux_notify_compact_text "$body")" >/dev/null 2>&1 || true
+            fi
+        else
+            local_client=1
+        fi
+    done <<<"$rows"
+    if [ "$mode" = "tmux" ] || [ "$mode" = "both" ]; then
+        if [ "$visible" -eq 0 ]; then
+            tmux_notify_inbox_enqueue "$target" "$kind" "$source" "$title" "$body" || true
+        else
+            tmux_notify_inbox_ack_pane "$pane_id"
+        fi
+    fi
+    if [ "$mode" = "desktop" ] || [ "$mode" = "both" ] || { [ "$mode" = "tmux" ] && [ "$local_client" -eq 1 ]; }; then
+        TMUX_NOTIFY_ROUTE_DESKTOP=1
+    fi
+    export TMUX_NOTIFY_ROUTE_DESKTOP
+}
+
+tmux_notify_inbox_ack_client() {
+    local client="$1" pane=""
+    pane="$(tmux_cmd display-message -p -c "$client" '#{pane_id}' 2>/dev/null || true)"
+    [ -n "$pane" ] && tmux_notify_inbox_ack_pane "$pane"
+}
+
+tmux_notify_inbox_next() {
+    local sender_tty="${1:-}" root="" list="" dir
+    root="$(tmux_notify_inbox_root)"
+    local now=""
+    now="$(now_ms)"
+    mkdir -p "$root"
+    tmux_notify_inbox_gc "$root" "$now"
+    for dir in "$root"/*; do
+        [ -d "$dir" ] || continue
+        [ -f "$dir/kind" ] || continue
+        tmux_notify_inbox_entry_read "$dir"
+        local rank=1
+        [ "${INBOX_KIND:-complete}" = "attention" ] && rank=0
+        list+="$rank|${INBOX_FIRST_MS:-0}|$dir\n"
+    done
+    local selected=""
+    selected="$(printf '%b' "$list" | sort -n -t '|' -k1,1 -k2,2 | head -n 1 | cut -d '|' -f3- || true)"
+    [ -n "$selected" ] || { tmux_notify_inbox_sync_counts; return 0; }
+    tmux_notify_inbox_entry_read "$selected"
+    local client="" row
+    while IFS= read -r row; do
+        [ -n "$row" ] || continue
+        read_tmux_client_row "$row"
+        [ "$CLIENT_SESSION_ID" = "$INBOX_SESSION_ID" ] || continue
+        if [ -n "$sender_tty" ] && [ "$CLIENT_TTY" = "$sender_tty" ]; then client="$CLIENT_NAME"; break; fi
+        [ -n "$client" ] || client="$CLIENT_NAME"
+    done <<<"$(tmux_terminal_client_rows)"
+    [ -n "$client" ] || client="$(tmux_cmd display-message -p '#{client_name}' 2>/dev/null || true)"
+    [ -n "$client" ] || return 1
+    if tmux_cmd switch-client -c "$client" -t "$INBOX_SESSION_ID" ';' \
+        select-window -t "$INBOX_WINDOW_ID" ';' \
+        select-pane -t "$INBOX_PANE_ID" >/dev/null 2>&1; then
+        :
+    elif tmux_cmd switch-client -c "$client" -t "$INBOX_SESSION_ID" ';' \
+        select-window -t "$INBOX_WINDOW_ID" >/dev/null 2>&1; then
+        :
+    elif tmux_cmd switch-client -c "$client" -t "$INBOX_SESSION_ID" >/dev/null 2>&1; then
+        :
+    else
+        rm -rf "$selected" 2>/dev/null || true
+        tmux_notify_inbox_sync_counts
+        return 1
+    fi
+    rm -rf "$selected" 2>/dev/null || true
+    tmux_notify_inbox_sync_counts
+}
+
+tmux_notify_inbox_list() {
+    local root="" dir
+    root="$(tmux_notify_inbox_root)"
+    for dir in "$root"/*; do
+        [ -d "$dir" ] || continue
+        [ -f "$dir/kind" ] || continue
+        tmux_notify_inbox_entry_read "$dir"
+        printf '%s\t%s\t%s\t%s\t%s\n' \
+            "${INBOX_KIND:-complete}" "${INBOX_COUNT:-1}" \
+            "$INBOX_PANE_ID" "$INBOX_SOURCE" "$INBOX_TITLE"
+    done
+}
+
+tmux_notify_tmux_init() {
+    local path="${TMUX_NOTIFY_ENTRYPOINT:-tmux-notify-jump}" key="" configured_key=""
+    configured_key="$(tmux_cmd show-option -gqv @tmux-notify-jump-key 2>/dev/null || true)"
+    key="${TMUX_NOTIFY_TMUX_KEY:-${configured_key:-N}}"
+    case "$key" in [A-Za-z0-9]) ;; *) key=N ;; esac
+    local status=""
+    status="$(tmux_cmd show-option -gqv status-right 2>/dev/null || true)"
+    local marker="tmux-notify-jump"
+    if [[ "$status" != *"$marker"* ]]; then
+        status="${status} #[fg=yellow]#{?@tmux-notify-jump-attention,?#{@tmux-notify-jump-attention} ,}#[fg=cyan]#{?@tmux-notify-jump-complete,!#{@tmux-notify-jump-complete} ,}"
+        tmux_cmd set-option -g status-right "$status"
+    fi
+    local hook
+    for hook in client-attached client-session-changed after-select-pane after-select-window after-switch-client client-focus-in; do
+        tmux_cmd set-hook -g "${hook}[900]" "run-shell -b '$path --inbox-ack-client \"#{hook_client}\"'" 2>/dev/null || true
+    done
+    local existing_binding=""
+    existing_binding="$(tmux_cmd list-keys -T prefix 2>/dev/null | awk -v key="$key" '
+        {
+            for (i = 1; i <= NF - 2; i++) {
+                if ($i == "-T" && $(i + 1) == "prefix" && $(i + 2) == key) print
+            }
+        }
+    ' || true)"
+    if [ -n "$existing_binding" ]; then
+        if [[ "$existing_binding" != *"$path --inbox-next"* ]]; then
+            warn "tmux prefix+$key is already bound; leaving it unchanged"
+        fi
+    else
+        tmux_cmd bind-key "$key" "run-shell -b 'TMUX_NOTIFY_SENDER_TTY=\"#{client_tty}\" $path --inbox-next'"
+    fi
+    tmux_notify_inbox_sync_counts
 }
 
 cache_root_dir() {

@@ -11,12 +11,15 @@ CONFIGURE_KIMI=0
 CONFIGURE_GROK=0
 CONFIGURE_OPENCODE=0
 CONFIGURE_PI=0
+CONFIGURE_TMUX=0
 CODEX_CONFIG_PATH="${CODEX_CONFIG_PATH:-}"
 CLAUDE_CONFIG_PATH="${CLAUDE_CONFIG_PATH:-}"
 KIMI_CONFIG_PATH="${KIMI_CONFIG_PATH:-}"
 GROK_HOOKS_PATH="${GROK_HOOKS_PATH:-}"
 OPENCODE_PLUGIN_PATH="${OPENCODE_PLUGIN_PATH:-}"
 PI_EXTENSION_PATH="${PI_EXTENSION_PATH:-}"
+TMUX_CONFIG_PATH="${TMUX_CONFIG_PATH:-$HOME/.tmux.conf}"
+TMUX_KEY="${TMUX_KEY:-N}"
 
 usage() {
     cat <<EOF
@@ -33,12 +36,15 @@ Options:
   --configure-grok  Configure Grok Build hooks (opt-in)
   --configure-opencode Configure OpenCode plugin (opt-in)
   --configure-pi    Configure Pi coding agent extension (opt-in)
+  --configure-tmux  Configure tmux status, hooks, and prefix key (opt-in)
   --codex-config <path>  Codex config.toml path (default: ~/.codex/config.toml)
   --claude-config <path> Claude settings.json path (default: ~/.claude/settings.json)
   --kimi-config <path>   Kimi config.toml path (default: ~/.kimi-code/config.toml)
   --grok-hooks-path <path> Grok hooks dir (default: \$GROK_HOME/hooks or ~/.grok/hooks)
   --opencode-plugin-path <path> OpenCode plugins dir (default: ~/.config/opencode/plugins)
   --pi-extension-path <path> Pi extensions dir (default: ~/.pi/agent/extensions)
+  --tmux-config <path> tmux config path (default: ~/.tmux.conf)
+  --tmux-key <key>  Prefix key for Inbox next (default: N)
   --uninstall       Remove installed files
   -h, --help        Show help
 
@@ -69,6 +75,45 @@ backup_file() {
     local ts
     ts="$(timestamp)"
     cp -p "$path" "$path.bak.$ts"
+}
+
+configure_tmux() {
+    local notify_cmd="$1"
+    local cfg="$TMUX_CONFIG_PATH"
+    ensure_parent_dir "$cfg"
+    if [ -f "$cfg" ]; then
+        backup_file "$cfg"
+    fi
+    local tmp=""
+    tmp="$(mktemp "${cfg}.tmp.XXXXXX")"
+    awk '
+        /^# BEGIN tmux-notify-jump$/ { skip=1; next }
+        /^# END tmux-notify-jump$/ { skip=0; next }
+        !skip { print }
+    ' "$cfg" 2>/dev/null >"$tmp" || :
+    {
+        printf '%s\n' '# BEGIN tmux-notify-jump'
+        printf 'set -g @tmux-notify-jump-key %s\n' "$TMUX_KEY"
+        printf "run-shell -b '%s --tmux-init'\n" "$notify_cmd"
+        printf '%s\n' '# END tmux-notify-jump'
+    } >>"$tmp"
+    mv -f "$tmp" "$cfg"
+    echo "Configured tmux: $cfg (prefix+$TMUX_KEY)"
+}
+
+unconfigure_tmux() {
+    local cfg="$TMUX_CONFIG_PATH"
+    [ -f "$cfg" ] || return 0
+    backup_file "$cfg"
+    local tmp=""
+    tmp="$(mktemp "${cfg}.tmp.XXXXXX")"
+    awk '
+        /^# BEGIN tmux-notify-jump$/ { skip=1; next }
+        /^# END tmux-notify-jump$/ { skip=0; next }
+        !skip { print }
+    ' "$cfg" >"$tmp"
+    mv -f "$tmp" "$cfg"
+    echo "Removed tmux configuration: $cfg"
 }
 
 ensure_parent_dir() {
@@ -583,6 +628,9 @@ while [ $# -gt 0 ]; do
         --configure-pi)
             CONFIGURE_PI=1
             ;;
+        --configure-tmux)
+            CONFIGURE_TMUX=1
+            ;;
         --codex-config)
             shift
             [ $# -gt 0 ] || die "--codex-config requires a path"
@@ -613,6 +661,16 @@ while [ $# -gt 0 ]; do
             [ $# -gt 0 ] || die "--pi-extension-path requires a path"
             PI_EXTENSION_PATH="$1"
             ;;
+        --tmux-config)
+            shift
+            [ $# -gt 0 ] || die "--tmux-config requires a path"
+            TMUX_CONFIG_PATH="$1"
+            ;;
+        --tmux-key)
+            shift
+            [ $# -gt 0 ] || die "--tmux-key requires a key"
+            TMUX_KEY="$1"
+            ;;
         --uninstall)
             UNINSTALL=1
             ;;
@@ -626,6 +684,10 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
+
+if ! [[ "$TMUX_KEY" =~ ^[A-Za-z0-9]$ ]]; then
+    die "--tmux-key must be one alphanumeric character"
+fi
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -651,6 +713,9 @@ if [ "$UNINSTALL" -eq 1 ]; then
     for f in "${FILES[@]}"; do
         rm -f "$BINDIR/$f" 2>/dev/null || true
     done
+    if [ "$CONFIGURE_TMUX" -eq 1 ]; then
+        unconfigure_tmux
+    fi
     echo "Uninstalled from: $BINDIR"
     exit 0
 fi
@@ -707,4 +772,8 @@ fi
 
 if [ "$CONFIGURE_PI" -eq 1 ]; then
     configure_pi
+fi
+
+if [ "$CONFIGURE_TMUX" -eq 1 ]; then
+    configure_tmux "$BINDIR/tmux-notify-jump"
 fi

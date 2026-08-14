@@ -160,7 +160,7 @@ FAKE
     [[ "$captured" == *"12345"* ]]
 }
 
-@test "notify-pi.sh: remote ssh tmux client suppresses notification by default" {
+@test "notify-pi.sh: remote ssh tmux client routes through tmux by default" {
     fake_bin="$TEST_TEMP_DIR/bin"
     mkdir -p "$fake_bin"
 
@@ -242,7 +242,11 @@ FAKE
     '
 
     [ "$status" -eq 0 ]
-    [ ! -f "$CAPTURE_FILE" ]
+    [ -f "$CAPTURE_FILE" ]
+    run cat "$CAPTURE_FILE"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"--notify-kind"* ]]
+    [[ "$output" == *"complete"* ]]
 }
 
 @test "notify-pi.sh: TMUX_NOTIFY_REMOTE allows remote ssh tmux notification" {

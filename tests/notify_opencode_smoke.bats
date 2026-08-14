@@ -120,6 +120,7 @@ FAKE
     captured="$(cat "$CAPTURE_FILE")"
     [[ "$captured" == *"Session Error"* ]]
     [[ "$captured" == *"rate limit exceeded"* ]]
+    [[ "$captured" == *"--notify-kind"$'\n'"attention"* ]]
 }
 
 @test "notify-opencode.sh: session.deleted extracts properties.reason" {
@@ -159,7 +160,7 @@ FAKE
     [[ "$captured" == *"user requested"* ]]
 }
 
-@test "notify-opencode.sh: remote ssh tmux client suppresses notification by default" {
+@test "notify-opencode.sh: remote ssh tmux client routes through tmux by default" {
     fake_bin="$TEST_TEMP_DIR/bin"
     mkdir -p "$fake_bin"
 
@@ -241,7 +242,11 @@ FAKE
     '
 
     [ "$status" -eq 0 ]
-    [ ! -f "$CAPTURE_FILE" ]
+    [ -f "$CAPTURE_FILE" ]
+    run cat "$CAPTURE_FILE"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"--notify-kind"* ]]
+    [[ "$output" == *"complete"* ]]
 }
 
 @test "notify-opencode.sh: TMUX_NOTIFY_REMOTE allows remote ssh tmux notification" {

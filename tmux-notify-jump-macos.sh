@@ -53,6 +53,8 @@ MAX_TITLE="$DEFAULT_MAX_TITLE"
 MAX_BODY="$DEFAULT_MAX_BODY"
 DEDUPE_MS="$DEFAULT_DEDUPE_MS"
 UI="$DEFAULT_UI"
+NOTIFY_KIND="${TMUX_NOTIFY_KIND:-complete}"
+NOTIFY_SOURCE="${TMUX_NOTIFY_SOURCE:-tmux-notify-jump}"
 DETACH=0
 SENDER_PID=""
 SENDER_CLIENT_PID=""
@@ -98,6 +100,10 @@ Options:
   --max-title <n>      Max title length (0 = no truncation)
   --max-body <n>       Max body length (0 = no truncation)
   --dedupe-ms <ms>     Suppress duplicate notifications within this window (0 = disabled; default: $DEFAULT_DEDUPE_MS)
+  --notify-kind <attention|complete>
+                      Inbox priority (default: complete)
+  --notify-source <name>
+                      Source label shown by tmux clients
   --detach             Detach and return immediately (handles click in background)
   -h, --help           Show help
 
@@ -107,10 +113,13 @@ Examples:
 EOF
 }
 
-require_tools() {
+require_tmux_tools() {
     if [ "$FOCUS_ONLY" -eq 0 ]; then
         require_tool tmux
     fi
+}
+
+require_desktop_tools() {
     if [ "$UI" = "dialog" ]; then
         require_tool osascript
         return
@@ -119,6 +128,11 @@ require_tools() {
     if [ "$NO_ACTIVATE" -eq 0 ]; then
         require_tool osascript
     fi
+}
+
+require_tools() {
+    require_tmux_tools
+    require_desktop_tools
 }
 
 bundle_id_from_process_name() {
@@ -613,6 +627,14 @@ handle_action() {
     fi
 
     if [ "$FOCUS_ONLY" -eq 0 ]; then
+        tmux_notify_route_notification "$TARGET" "$TITLE" "$BODY" "$NOTIFY_KIND" "$NOTIFY_SOURCE"
+        if [ "${TMUX_NOTIFY_ROUTE_DESKTOP:-0}" != "1" ]; then
+            return 0
+        fi
+    fi
+    require_desktop_tools
+
+    if [ "$FOCUS_ONLY" -eq 0 ]; then
         if [ -z "$SENDER_CLIENT_TTY" ]; then
             SENDER_CLIENT_TTY="$(get_sender_tmux_client_tty 2>/dev/null || true)"
         fi
@@ -853,7 +875,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
     exit 0
 fi
 
-require_tools
+require_tmux_tools
 if [ "$FOCUS_ONLY" -eq 0 ]; then
     parse_target "$TARGET"
     validate_target_exists
@@ -871,6 +893,7 @@ if [ "$DETACH" -eq 1 ]; then
         fi
         child_args+=(--title "$TITLE" --body "$BODY")
         child_args+=(--timeout "$TIMEOUT" --max-title "$MAX_TITLE" --max-body "$MAX_BODY" --dedupe-ms "$DEDUPE_MS")
+        child_args+=(--notify-kind "$NOTIFY_KIND" --notify-source "$NOTIFY_SOURCE")
         child_args+=(--ui "$UI" --detach)
         if [ "$NO_ACTIVATE" -eq 1 ]; then
             child_args+=(--no-activate)
