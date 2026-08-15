@@ -153,14 +153,52 @@ tmux_cmd() {
     [ "$(tmux_notify_inbox_root)" = "$expected_root" ]
 }
 
-@test "Inbox root rejects a non-absolute pinned option" {
+@test "Inbox root accepts only the owned namespace" {
     expected_root="$(tmux_notify_inbox_default_root)"
+    server_id="${expected_root##*/}"
 
     FAKE_INBOX_ROOT="relative/inbox"
     [ "$(tmux_notify_inbox_root)" = "$expected_root" ]
 
     FAKE_INBOX_ROOT="$TEST_TEMP_DIR/absolute-inbox"
-    [ "$(tmux_notify_inbox_root)" = "$TEST_TEMP_DIR/absolute-inbox" ]
+    [ "$(tmux_notify_inbox_root)" = "$expected_root" ]
+
+    FAKE_INBOX_ROOT="$TEST_TEMP_DIR/tmux-notify-jump/inbox/wrong-server"
+    [ "$(tmux_notify_inbox_root)" = "$expected_root" ]
+
+    FAKE_INBOX_ROOT="$TEST_TEMP_DIR/custom/tmux-notify-jump/inbox/$server_id"
+    [ "$(tmux_notify_inbox_root)" = "$FAKE_INBOX_ROOT" ]
+}
+
+@test "Inbox root rejects traversal and symbolic links" {
+    expected_root="$(tmux_notify_inbox_default_root)"
+    server_id="${expected_root##*/}"
+    foreign_root="$TEST_TEMP_DIR/foreign"
+    linked_root="$TEST_TEMP_DIR/linked/tmux-notify-jump/inbox/$server_id"
+    linked_parent="$TEST_TEMP_DIR/linked-parent/tmux-notify-jump/inbox"
+    mkdir -p "$foreign_root" "$(dirname "$linked_root")" \
+        "$(dirname "$linked_parent")"
+    ln -s "$foreign_root" "$linked_root"
+
+    FAKE_INBOX_ROOT="$TEST_TEMP_DIR/tmux-notify-jump/inbox/../inbox/$server_id"
+    [ "$(tmux_notify_inbox_root)" = "$expected_root" ]
+
+    FAKE_INBOX_ROOT="$linked_root"
+    [ "$(tmux_notify_inbox_root)" = "$expected_root" ]
+
+    ln -s "$foreign_root" "$linked_parent"
+    mkdir -p "$foreign_root/$server_id"
+    FAKE_INBOX_ROOT="$linked_parent/$server_id"
+    [ "$(tmux_notify_inbox_root)" = "$expected_root" ]
+}
+
+@test "Inbox default root ignores a relative cache base" {
+    export HOME="$TEST_TEMP_DIR/home"
+    export XDG_CACHE_HOME="relative/cache"
+
+    root="$(tmux_notify_inbox_default_root)"
+
+    [[ "$root" == "$HOME/.cache/tmux-notify-jump/inbox/"* ]]
 }
 
 @test "Inbox cache is private and omits notification bodies" {
@@ -324,6 +362,19 @@ tmux_cmd() {
     [ "$status" -eq 0 ]
 }
 
+@test "Inbox clear removes only owned entry directories" {
+    root="$(tmux_notify_inbox_root)"
+    entry_key="$(printf '%s' 'owned entry' | sha256_hex_stdin)"
+    mkdir -p "$root/$entry_key" "$root/project"
+    : >"$root/$entry_key/kind"
+    : >"$root/project/kind"
+
+    tmux_notify_inbox_clear_all
+
+    [ ! -e "$root/$entry_key" ]
+    [ -d "$root/project" ]
+}
+
 @test "ack client ignores an empty hook client" {
     : >"$TMUX_LOG"
 
@@ -445,9 +496,10 @@ tmux_cmd() {
     FAKE_KEY_OPTION=M
     FAKE_BINDING='bind-key -T prefix M run-shell -b "tmux-notify-jump --inbox-next"'
     FAKE_HOOK_COMMAND='if-shell -F 1 { run-shell -b "tmux-notify-jump --inbox-ack-client client" }'
-    FAKE_INBOX_ROOT="$TEST_TEMP_DIR/pinned-inbox"
-    mkdir -p "$FAKE_INBOX_ROOT/item"
-    : >"$FAKE_INBOX_ROOT/item/kind"
+    FAKE_INBOX_ROOT="$(tmux_notify_inbox_default_root)"
+    entry_key="$(printf '%s' 'uninstall entry' | sha256_hex_stdin)"
+    mkdir -p "$FAKE_INBOX_ROOT/$entry_key"
+    : >"$FAKE_INBOX_ROOT/$entry_key/kind"
 
     tmux_notify_tmux_uninit
 

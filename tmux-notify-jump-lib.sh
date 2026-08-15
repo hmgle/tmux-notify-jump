@@ -1270,9 +1270,33 @@ tmux_notify_process_is_remote_ssh() {
     [ -n "${SSH_CONNECTION:-}" ] || [ -n "${SSH_CLIENT:-}" ] || [ -n "${SSH_TTY:-}" ]
 }
 
+tmux_notify_normalized_absolute_path() {
+    local path="$1"
+    [[ "$path" == /* ]] || return 1
+    [ "$path" = "/" ] && return 0
+    case "$path/" in
+        *'/../'*|*'/./'*|*'//'*) return 1 ;;
+    esac
+}
+
+tmux_notify_inbox_cache_root() {
+    local root="" home="${HOME:-}"
+    root="$(cache_root_dir)"
+    while [ "$root" != "/" ] && [[ "$root" == */ ]]; do
+        root="${root%/}"
+    done
+    if ! tmux_notify_normalized_absolute_path "$root"; then
+        root="$home/.cache"
+    fi
+    if ! tmux_notify_normalized_absolute_path "$root"; then
+        root="/tmp"
+    fi
+    printf '%s' "$root"
+}
+
 tmux_notify_inbox_default_root() {
     local requested_socket="${TMUX_NOTIFY_TMUX_SOCKET:-}"
-    local socket="" server_id=""
+    local socket="" server_id="" cache_root=""
     if [ -n "${TMUX:-}" ]; then
         local current_socket="${TMUX%%,*}" remainder="${TMUX#*,}" current_pid=""
         current_pid="${remainder%%,*}"
@@ -1293,7 +1317,41 @@ tmux_notify_inbox_default_root() {
     [ -n "$server_id" ] || server_id="default"
     local id=""
     id="$(printf '%s|%s' "$socket" "$server_id" | sha256_hex_stdin)"
-    printf '%s/tmux-notify-jump/inbox/%s' "$(cache_root_dir)" "$id"
+    cache_root="$(tmux_notify_inbox_cache_root)"
+    printf '%s/tmux-notify-jump/inbox/%s' "${cache_root%/}" "$id"
+}
+
+tmux_notify_inbox_canonical_path() {
+    local path="$1" current="$1" suffix="" part="" resolved=""
+    while [ ! -e "$current" ]; do
+        [ "$current" != "/" ] || break
+        part="${current##*/}"
+        [ -n "$part" ] || return 1
+        suffix="/$part$suffix"
+        current="${current%/*}"
+        [ -n "$current" ] || current="/"
+    done
+    [ -d "$current" ] || return 1
+    resolved="$(cd -P "$current" 2>/dev/null && pwd -P)" || return 1
+    printf '%s%s' "${resolved%/}" "$suffix"
+}
+
+tmux_notify_inbox_id_is_valid() {
+    local value="$1"
+    [[ "$value" =~ ^[0-9a-f]{64}$ || "$value" =~ ^[0-9]{1,10}$ ]]
+}
+
+tmux_notify_inbox_root_is_valid() {
+    local root="$1" canonical="" parent=""
+    tmux_notify_normalized_absolute_path "$root" || return 1
+    [ ! -L "$root" ] || return 1
+    tmux_notify_inbox_id_is_valid "${root##*/}" || return 1
+    canonical="$(tmux_notify_inbox_canonical_path "$root")" || return 1
+    tmux_notify_inbox_id_is_valid "${canonical##*/}" || return 1
+    parent="${canonical%/*}"
+    [ "${parent##*/}" = "inbox" ] || return 1
+    parent="${parent%/*}"
+    [ "${parent##*/}" = "tmux-notify-jump" ]
 }
 
 tmux_notify_inbox_root() {
@@ -1301,9 +1359,8 @@ tmux_notify_inbox_root() {
     configured_root="$(
         tmux_cmd show-option -gqv @tmux-notify-jump-inbox-root 2>/dev/null || true
     )"
-    # The option is user-writable and this path drives mkdir and rm, so only
-    # honor an absolute path and fall back to the derived root otherwise.
-    if [ -n "$configured_root" ] && [[ "$configured_root" == /* ]]; then
+    if [ -n "$configured_root" ] \
+        && tmux_notify_inbox_root_is_valid "$configured_root"; then
         printf '%s' "$configured_root"
         return 0
     fi
@@ -1341,6 +1398,7 @@ tmux_notify_inbox_entry_read() {
 
 tmux_notify_inbox_secure_dir() {
     local dir="$1" create="${2:-0}"
+    [ ! -L "$dir" ] || return 1
     if [ -e "$dir" ] && [ ! -d "$dir" ]; then
         return 1
     fi
@@ -1348,7 +1406,15 @@ tmux_notify_inbox_secure_dir() {
         [ "$create" -eq 1 ] || return 0
         mkdir -p "$dir" || return 1
     fi
+    [ ! -L "$dir" ] || return 1
     chmod 700 "$dir" 2>/dev/null
+}
+
+tmux_notify_inbox_entry_dir_is_valid() {
+    local dir="$1" name="${1##*/}"
+    [ -d "$dir" ] && [ ! -L "$dir" ] || return 1
+    tmux_notify_inbox_id_is_valid "$name" || return 1
+    [ -f "$dir/kind" ]
 }
 
 tmux_notify_inbox_write_field() {
@@ -1368,8 +1434,7 @@ tmux_notify_inbox_sync_counts() {
     tmux_notify_inbox_secure_dir "$root" || return 1
     local attention=0 complete=0 dir=""
     for dir in "$root"/*; do
-        [ -d "$dir" ] || continue
-        [ -f "$dir/kind" ] || continue
+        tmux_notify_inbox_entry_dir_is_valid "$dir" || continue
         local kind="" count=""
         kind="$(cat "$dir/kind" 2>/dev/null || true)"
         count="$(cat "$dir/count" 2>/dev/null || true)"
@@ -1396,8 +1461,7 @@ tmux_notify_inbox_gc() {
     [[ "$max" =~ ^[0-9]+$ ]] || max=100
     local dir last
     for dir in "$root"/*; do
-        [ -d "$dir" ] || continue
-        [ -f "$dir/kind" ] || continue
+        tmux_notify_inbox_entry_dir_is_valid "$dir" || continue
         last="$(cat "$dir/last_ms" 2>/dev/null || true)"
         if [[ "$last" =~ ^[0-9]+$ ]] && [ "$ttl" -gt 0 ] && [ "$now" -gt "$last" ] && [ $((now - last)) -ge "$ttl" ]; then
             rm -rf "$dir" 2>/dev/null || true
@@ -1406,8 +1470,7 @@ tmux_notify_inbox_gc() {
     if [[ "$max" =~ ^[0-9]+$ ]] && [ "$max" -gt 0 ]; then
         local count=0 list=""
         for dir in "$root"/*; do
-            [ -d "$dir" ] || continue
-            [ -f "$dir/kind" ] || continue
+            tmux_notify_inbox_entry_dir_is_valid "$dir" || continue
             last="$(cat "$dir/last_ms" 2>/dev/null || echo 0)"
             list+="$last|$dir\n"
             count=$((count + 1))
@@ -1507,8 +1570,7 @@ tmux_notify_inbox_clear_all() {
     root="$(tmux_notify_inbox_root)"
     tmux_notify_inbox_secure_dir "$root" || return 1
     for dir in "$root"/*; do
-        [ -d "$dir" ] || continue
-        [ -f "$dir/kind" ] || continue
+        tmux_notify_inbox_entry_dir_is_valid "$dir" || continue
         rm -rf "$dir" 2>/dev/null || true
     done
     tmux_notify_inbox_sync_counts
@@ -1593,8 +1655,7 @@ tmux_notify_inbox_next() {
     tmux_notify_inbox_secure_dir "$root" 1 || return 1
     tmux_notify_inbox_gc "$root" "$now"
     for dir in "$root"/*; do
-        [ -d "$dir" ] || continue
-        [ -f "$dir/kind" ] || continue
+        tmux_notify_inbox_entry_dir_is_valid "$dir" || continue
         tmux_notify_inbox_entry_read "$dir"
         local rank=1
         [ "${INBOX_KIND:-complete}" = "attention" ] && rank=0
@@ -1643,8 +1704,7 @@ tmux_notify_inbox_list() {
     root="$(tmux_notify_inbox_root)"
     tmux_notify_inbox_secure_dir "$root" || return 1
     for dir in "$root"/*; do
-        [ -d "$dir" ] || continue
-        [ -f "$dir/kind" ] || continue
+        tmux_notify_inbox_entry_dir_is_valid "$dir" || continue
         tmux_notify_inbox_entry_read "$dir"
         printf '%s\t%s\t%s\t%s\t%s\n' \
             "${INBOX_KIND:-complete}" "${INBOX_COUNT:-1}" \
