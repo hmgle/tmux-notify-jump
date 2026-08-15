@@ -161,6 +161,8 @@ hooks, and the `prefix+N` binding, then reload the configured file with
 selects the oldest attention item first, then the oldest completion, and clears
 that exact pane as soon as it is visited. Repeated events for the same pane and
 priority collapse into one item with an updated count.
+Inbox cache directories and metadata files are restricted to the current user.
+Notification bodies are used for immediate delivery but are not persisted.
 
 The default mode still sends desktop notifications when any ordinary local
 client is attached to the tmux server, even if that client is viewing another

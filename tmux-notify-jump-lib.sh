@@ -1330,21 +1330,26 @@ tmux_notify_process_is_remote_ssh() {
 }
 
 tmux_notify_inbox_root() {
-    local server_id=""
+    local requested_socket="${TMUX_NOTIFY_TMUX_SOCKET:-}"
+    local socket="" server_id=""
     if [ -n "${TMUX:-}" ]; then
         local current_socket="${TMUX%%,*}" remainder="${TMUX#*,}" current_pid=""
         current_pid="${remainder%%,*}"
-        if { [ -z "${TMUX_NOTIFY_TMUX_SOCKET:-}" ] \
-            || [ "$current_socket" = "$TMUX_NOTIFY_TMUX_SOCKET" ]; } \
-            && is_integer "$current_pid"; then
-            server_id="$current_pid"
+        if [ -z "$requested_socket" ] || [ "$current_socket" = "$requested_socket" ]; then
+            socket="$current_socket"
+            if is_integer "$current_pid"; then
+                server_id="$current_pid"
+            fi
         fi
+    fi
+    if [ -z "$socket" ]; then
+        socket="$(tmux_cmd display-message -p '#{socket_path}' 2>/dev/null || true)"
     fi
     if [ -z "$server_id" ]; then
         server_id="$(tmux_cmd display-message -p '#{pid}' 2>/dev/null || true)"
     fi
+    [ -n "$socket" ] || socket="${requested_socket:-default}"
     [ -n "$server_id" ] || server_id="default"
-    local socket="${TMUX_NOTIFY_TMUX_SOCKET:-default}"
     local id=""
     id="$(printf '%s|%s' "$socket" "$server_id" | sha256_hex_stdin)"
     printf '%s/tmux-notify-jump/inbox/%s' "$(cache_root_dir)" "$id"
@@ -1377,20 +1382,35 @@ tmux_notify_inbox_entry_read() {
     INBOX_SOURCE="$(cat "$dir/source" 2>/dev/null || true)"
     # shellcheck disable=SC2034
     INBOX_TITLE="$(cat "$dir/title" 2>/dev/null || true)"
-    # shellcheck disable=SC2034
-    INBOX_BODY="$(cat "$dir/body" 2>/dev/null || true)"
+}
+
+tmux_notify_inbox_secure_dir() {
+    local dir="$1" create="${2:-0}"
+    if [ -e "$dir" ] && [ ! -d "$dir" ]; then
+        return 1
+    fi
+    if [ ! -d "$dir" ]; then
+        [ "$create" -eq 1 ] || return 0
+        mkdir -p "$dir" || return 1
+    fi
+    chmod 700 "$dir" 2>/dev/null
 }
 
 tmux_notify_inbox_write_field() {
     local dir="$1" name="$2" value="$3"
     local tmp="$dir/$name.$$.$RANDOM"
-    printf '%s\n' "$value" >"$tmp" 2>/dev/null || return 1
+    (umask 077; printf '%s\n' "$value" >"$tmp") 2>/dev/null || return 1
+    if ! chmod 600 "$tmp" 2>/dev/null; then
+        rm -f "$tmp" 2>/dev/null || true
+        return 1
+    fi
     mv -f "$tmp" "$dir/$name" 2>/dev/null || { rm -f "$tmp" 2>/dev/null || true; return 1; }
 }
 
 tmux_notify_inbox_sync_counts() {
     local root=""
     root="$(tmux_notify_inbox_root)"
+    tmux_notify_inbox_secure_dir "$root" || return 1
     local attention=0 complete=0 dir=""
     for dir in "$root"/*; do
         [ -d "$dir" ] || continue
@@ -1465,7 +1485,7 @@ tmux_notify_inbox_acquire_lock() {
 }
 
 tmux_notify_inbox_enqueue() {
-    local target="$1" kind="$2" source="$3" title="$4" body="$5"
+    local target="$1" kind="$2" source="$3" title="$4"
     local info=""
     info="$(tmux_notify_inbox_target_info "$target")"
     [ -n "$info" ] || return 1
@@ -1475,7 +1495,7 @@ tmux_notify_inbox_enqueue() {
     local root="" now=""
     root="$(tmux_notify_inbox_root)"
     now="$(now_ms)"
-    mkdir -p "$root" || return 1
+    tmux_notify_inbox_secure_dir "$root" 1 || return 1
     tmux_notify_inbox_gc "$root" "$now"
     local key=""
     key="$(printf '%s|%s' "$pane_id" "$kind" | sha256_hex_stdin)"
@@ -1484,7 +1504,10 @@ tmux_notify_inbox_enqueue() {
         log_debug "Inbox update skipped after lock contention: pane=$pane_id kind=$kind"
         return 0
     fi
-    mkdir -p "$dir"
+    if ! tmux_notify_inbox_secure_dir "$dir" 1; then
+        release_lock "$lock"
+        return 1
+    fi
     tmux_notify_inbox_entry_read "$dir"
     local count="${INBOX_COUNT:-0}"
     [[ "$count" =~ ^[0-9]+$ ]] || count=0
@@ -1501,7 +1524,6 @@ tmux_notify_inbox_enqueue() {
     tmux_notify_inbox_write_field "$dir" window_index "$window_index"
     tmux_notify_inbox_write_field "$dir" source "$(tmux_notify_compact_text "$source")"
     tmux_notify_inbox_write_field "$dir" title "$(tmux_notify_compact_text "$title")"
-    tmux_notify_inbox_write_field "$dir" body "$(tmux_notify_compact_text "$body")"
     release_lock "$lock"
     tmux_notify_inbox_gc "$root" "$now"
     tmux_notify_inbox_sync_counts
@@ -1511,6 +1533,7 @@ tmux_notify_inbox_enqueue() {
 tmux_notify_inbox_ack_pane() {
     local pane_id="$1" root="" kind="" key="" dir="" changed=0
     root="$(tmux_notify_inbox_root)"
+    tmux_notify_inbox_secure_dir "$root" || return 1
     for kind in attention complete; do
         key="$(printf '%s|%s' "$pane_id" "$kind" | sha256_hex_stdin)"
         dir="$root/$key"
@@ -1526,6 +1549,7 @@ tmux_notify_inbox_ack_pane() {
 tmux_notify_inbox_clear_all() {
     local root="" dir
     root="$(tmux_notify_inbox_root)"
+    tmux_notify_inbox_secure_dir "$root" || return 1
     for dir in "$root"/*; do
         [ -d "$dir" ] || continue
         [ -f "$dir/kind" ] || continue
@@ -1588,7 +1612,7 @@ tmux_notify_route_notification() {
     done <<<"$rows"
     if [ "$mode" = "tmux" ] || [ "$mode" = "both" ]; then
         if [ "$visible" -eq 0 ]; then
-            tmux_notify_inbox_enqueue "$target" "$kind" "$source" "$title" "$body" || true
+            tmux_notify_inbox_enqueue "$target" "$kind" "$source" "$title" || true
         else
             tmux_notify_inbox_ack_pane "$pane_id"
         fi
@@ -1624,7 +1648,7 @@ tmux_notify_inbox_next() {
     root="$(tmux_notify_inbox_root)"
     local now=""
     now="$(now_ms)"
-    mkdir -p "$root"
+    tmux_notify_inbox_secure_dir "$root" 1 || return 1
     tmux_notify_inbox_gc "$root" "$now"
     for dir in "$root"/*; do
         [ -d "$dir" ] || continue
@@ -1675,6 +1699,7 @@ tmux_notify_inbox_next() {
 tmux_notify_inbox_list() {
     local root="" dir
     root="$(tmux_notify_inbox_root)"
+    tmux_notify_inbox_secure_dir "$root" || return 1
     for dir in "$root"/*; do
         [ -d "$dir" ] || continue
         [ -f "$dir/kind" ] || continue

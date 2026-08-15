@@ -6,6 +6,7 @@ setup() {
     setup_temp_dir
     export XDG_CACHE_HOME="$TEST_TEMP_DIR/cache"
     export TMUX_NOTIFY_TMUX_SOCKET="$TEST_TEMP_DIR/tmux.sock"
+    unset TMUX
     export TMUX_NOTIFY_INBOX_TTL_MS=604800000
     export TMUX_NOTIFY_INBOX_MAX=100
     TMUX_LOG="$TEST_TEMP_DIR/tmux.log"
@@ -17,6 +18,7 @@ setup() {
     FAKE_TARGET_WINDOW_INDEX='3'
     FAKE_CLIENT_ROWS='0|10|/dev/pts/2|/dev/pts/2|222|$1|%1|work'
     FAKE_TMUX_VERSION='tmux 3.7'
+    FAKE_SOCKET_PATH="$TMUX_NOTIFY_TMUX_SOCKET"
     FAKE_SWITCH_FAIL=0
     FAKE_PANE_EXISTS=1
     FAKE_WINDOW_EXISTS=1
@@ -37,6 +39,8 @@ tmux_cmd() {
         display-message)
             if [ "${2:-}" = "-p" ] && [ "${3:-}" = '#{pid}' ]; then
                 printf '4242\n'
+            elif [ "${2:-}" = "-p" ] && [ "${3:-}" = '#{socket_path}' ]; then
+                printf '%s\n' "$FAKE_SOCKET_PATH"
             elif [ "${2:-}" = "-p" ] && [ "${3:-}" = "-t" ]; then
                 case "${5:-}" in
                     '#{session_id}|#{window_id}|#{pane_id}|#{session_name}|#{window_index}')
@@ -79,6 +83,44 @@ tmux_cmd() {
     [ "$(cat "${entries[0]}/count")" = "2" ]
     [ "$(cat "${entries[0]}/title")" = "Done again" ]
     [ "$TMUX_NOTIFY_INBOX_COMPLETE" = "2" ]
+}
+
+@test "Inbox commands share state across explicit and TMUX sockets" {
+    export TMUX="$TMUX_NOTIFY_TMUX_SOCKET,4242,0"
+    tmux_notify_inbox_enqueue "%9" attention Codex "Needs input" "Private body"
+    explicit_root="$(tmux_notify_inbox_root)"
+
+    unset TMUX_NOTIFY_TMUX_SOCKET
+
+    [ "$(tmux_notify_inbox_root)" = "$explicit_root" ]
+    output="$(tmux_notify_inbox_list)"
+    [[ "$output" == *$'attention\t1\t%9\tCodex\tNeeds input'* ]]
+}
+
+@test "Inbox root queries the socket outside tmux" {
+    explicit_root="$(tmux_notify_inbox_root)"
+
+    unset TMUX_NOTIFY_TMUX_SOCKET
+
+    [ "$(tmux_notify_inbox_root)" = "$explicit_root" ]
+}
+
+@test "Inbox cache is private and omits notification bodies" {
+    previous_umask="$(umask)"
+    umask 022
+    tmux_notify_inbox_enqueue "%9" complete Codex "Private title" "Private body"
+    umask "$previous_umask"
+
+    root="$(tmux_notify_inbox_root)"
+    entry="$(find "$root" -mindepth 1 -maxdepth 1 -type d ! -name '*.lock' -print -quit)"
+    root_mode="$(stat -c '%a' "$root" 2>/dev/null || stat -f '%Lp' "$root")"
+    entry_mode="$(stat -c '%a' "$entry" 2>/dev/null || stat -f '%Lp' "$entry")"
+    title_mode="$(stat -c '%a' "$entry/title" 2>/dev/null || stat -f '%Lp' "$entry/title")"
+
+    [ "$root_mode" = "700" ]
+    [ "$entry_mode" = "700" ]
+    [ "$title_mode" = "600" ]
+    [ ! -e "$entry/body" ]
 }
 
 @test "acknowledging a pane removes both priorities" {
