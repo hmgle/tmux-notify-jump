@@ -695,7 +695,15 @@ FAKE
 @test "install.sh: configure-tmux writes an idempotent marked block" {
     bindir="$TEST_TEMP_DIR/bin"
     config="$TEST_TEMP_DIR/tmux.conf"
-    printf '%s\n' 'set -g mouse on' >"$config"
+    {
+        printf '%s\n' 'set -g mouse on'
+        printf '%s\n' '# BEGIN tmux-notify-jump'
+        printf '%s\n' 'set -g @tmux-notify-jump-key X'
+        printf '%s\n' "run-shell -b 'old-command --tmux-init'"
+        printf '%s\n' '# END tmux-notify-jump'
+        printf '%s\n' 'bind-key N next-window'
+    } >"$config"
+    chmod 640 "$config"
 
     run "$PROJECT_ROOT/install.sh" --bindir "$bindir" --symlink \
         --configure-tmux --tmux-config "$config" --tmux-key M
@@ -712,6 +720,12 @@ FAKE
     [[ "$output" == *"set -g mouse on"* ]]
     [[ "$output" == *"set -g @tmux-notify-jump-key M"* ]]
     [[ "$output" == *"$bindir/tmux-notify-jump --tmux-init"* ]]
+    [[ "$output" == *"bind-key N next-window"* ]]
+    begin_line="$(rg -n '^# BEGIN tmux-notify-jump$' "$config" | cut -d: -f1)"
+    bind_line="$(rg -n '^bind-key N next-window$' "$config" | cut -d: -f1)"
+    [ "$begin_line" -lt "$bind_line" ]
+    config_mode="$(stat -c '%a' "$config" 2>/dev/null || stat -f '%Lp' "$config")"
+    [ "$config_mode" = "640" ]
 
     run "$PROJECT_ROOT/install.sh" --bindir "$bindir" --uninstall \
         --configure-tmux --tmux-config "$config" --tmux-key M
@@ -719,6 +733,20 @@ FAKE
     run cat "$config"
     [[ "$output" == *"set -g mouse on"* ]]
     [[ "$output" != *"tmux-notify-jump"* ]]
+    config_mode="$(stat -c '%a' "$config" 2>/dev/null || stat -f '%Lp' "$config")"
+    [ "$config_mode" = "640" ]
+}
+
+@test "install.sh: configure-tmux quotes install paths with spaces" {
+    bindir="$TEST_TEMP_DIR/bin with spaces"
+    config="$TEST_TEMP_DIR/tmux.conf"
+
+    run "$PROJECT_ROOT/install.sh" --bindir "$bindir" --symlink \
+        --configure-tmux --tmux-config "$config"
+    [ "$status" -eq 0 ]
+
+    run cat "$config"
+    [[ "$output" == *'bin\\ with\\ spaces/tmux-notify-jump --tmux-init'* ]]
 }
 
 @test "tmux-notify-jump-macos.sh: execute callback forwards the unattached fallback policy" {

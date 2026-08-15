@@ -77,6 +77,28 @@ backup_file() {
     cp -p "$path" "$path.bak.$ts"
 }
 
+file_mode() {
+    local path="$1" mode=""
+    mode="$(stat -c '%a' "$path" 2>/dev/null || true)"
+    if [ -z "$mode" ]; then
+        mode="$(stat -f '%Lp' "$path" 2>/dev/null || true)"
+    fi
+    printf '%s' "$mode"
+}
+
+write_tmux_config_block() {
+    local notify_cmd="$1" key="$2" shell_cmd=""
+    printf -v shell_cmd '%q --tmux-init' "$notify_cmd"
+    shell_cmd="${shell_cmd//\\/\\\\}"
+    shell_cmd="${shell_cmd//\"/\\\"}"
+    shell_cmd="${shell_cmd//\$/\\$}"
+    shell_cmd="${shell_cmd//\`/\\\`}"
+    printf '%s\n' '# BEGIN tmux-notify-jump'
+    printf 'set -g @tmux-notify-jump-key %s\n' "$key"
+    printf 'run-shell -b "%s"\n' "$shell_cmd"
+    printf '%s\n' '# END tmux-notify-jump'
+}
+
 configure_tmux() {
     local notify_cmd="$1"
     local cfg="$TMUX_CONFIG_PATH"
@@ -84,19 +106,30 @@ configure_tmux() {
     if [ -f "$cfg" ]; then
         backup_file "$cfg"
     fi
-    local tmp=""
+    local tmp="" mode="" found=0 skip=0 line=""
     tmp="$(mktemp "${cfg}.tmp.XXXXXX")"
-    awk '
-        /^# BEGIN tmux-notify-jump$/ { skip=1; next }
-        /^# END tmux-notify-jump$/ { skip=0; next }
-        !skip { print }
-    ' "$cfg" 2>/dev/null >"$tmp" || :
-    {
-        printf '%s\n' '# BEGIN tmux-notify-jump'
-        printf 'set -g @tmux-notify-jump-key %s\n' "$TMUX_KEY"
-        printf "run-shell -b '%s --tmux-init'\n" "$notify_cmd"
-        printf '%s\n' '# END tmux-notify-jump'
-    } >>"$tmp"
+    if [ -f "$cfg" ]; then
+        mode="$(file_mode "$cfg")"
+        while IFS= read -r line || [ -n "$line" ]; do
+            if [ "$line" = "# BEGIN tmux-notify-jump" ]; then
+                if [ "$found" -eq 0 ]; then
+                    write_tmux_config_block "$notify_cmd" "$TMUX_KEY" >>"$tmp"
+                    found=1
+                fi
+                skip=1
+                continue
+            fi
+            if [ "$line" = "# END tmux-notify-jump" ] && [ "$skip" -eq 1 ]; then
+                skip=0
+                continue
+            fi
+            [ "$skip" -eq 1 ] || printf '%s\n' "$line" >>"$tmp"
+        done <"$cfg"
+    fi
+    if [ "$found" -eq 0 ]; then
+        write_tmux_config_block "$notify_cmd" "$TMUX_KEY" >>"$tmp"
+    fi
+    [ -z "$mode" ] || chmod "$mode" "$tmp"
     mv -f "$tmp" "$cfg"
     echo "Configured tmux: $cfg (prefix+$TMUX_KEY)"
 }
@@ -105,13 +138,21 @@ unconfigure_tmux() {
     local cfg="$TMUX_CONFIG_PATH"
     [ -f "$cfg" ] || return 0
     backup_file "$cfg"
-    local tmp=""
+    local tmp="" mode="" skip=0 line=""
     tmp="$(mktemp "${cfg}.tmp.XXXXXX")"
-    awk '
-        /^# BEGIN tmux-notify-jump$/ { skip=1; next }
-        /^# END tmux-notify-jump$/ { skip=0; next }
-        !skip { print }
-    ' "$cfg" >"$tmp"
+    mode="$(file_mode "$cfg")"
+    while IFS= read -r line || [ -n "$line" ]; do
+        if [ "$line" = "# BEGIN tmux-notify-jump" ]; then
+            skip=1
+            continue
+        fi
+        if [ "$line" = "# END tmux-notify-jump" ] && [ "$skip" -eq 1 ]; then
+            skip=0
+            continue
+        fi
+        [ "$skip" -eq 1 ] || printf '%s\n' "$line" >>"$tmp"
+    done <"$cfg"
+    [ -z "$mode" ] || chmod "$mode" "$tmp"
     mv -f "$tmp" "$cfg"
     echo "Removed tmux configuration: $cfg"
 }
