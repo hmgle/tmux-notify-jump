@@ -20,6 +20,8 @@ setup() {
     FAKE_TMUX_VERSION='tmux 3.7'
     FAKE_SOCKET_PATH="$TMUX_NOTIFY_TMUX_SOCKET"
     FAKE_INBOX_ROOT=""
+    FAKE_ATTENTION_COUNT=""
+    FAKE_COMPLETE_COUNT=""
     FAKE_STATUS_RIGHT=""
     FAKE_KEY_OPTION=""
     FAKE_BINDING=""
@@ -93,6 +95,8 @@ tmux_cmd() {
         show-option)
             case "${3:-}" in
                 @tmux-notify-jump-inbox-root) printf '%s' "$FAKE_INBOX_ROOT" ;;
+                @tmux-notify-jump-attention) printf '%s' "$FAKE_ATTENTION_COUNT" ;;
+                @tmux-notify-jump-complete) printf '%s' "$FAKE_COMPLETE_COUNT" ;;
                 @tmux-notify-jump-key) printf '%s' "$FAKE_KEY_OPTION" ;;
                 status-right) printf '%s' "$FAKE_STATUS_RIGHT" ;;
             esac
@@ -100,6 +104,8 @@ tmux_cmd() {
         set-option)
             case "${3:-}" in
                 @tmux-notify-jump-inbox-root) FAKE_INBOX_ROOT="${4:-}" ;;
+                @tmux-notify-jump-attention) FAKE_ATTENTION_COUNT="${4:-}" ;;
+                @tmux-notify-jump-complete) FAKE_COMPLETE_COUNT="${4:-}" ;;
                 @tmux-notify-jump-key) FAKE_KEY_OPTION="${4:-}" ;;
                 status-right) FAKE_STATUS_RIGHT="${4:-}" ;;
             esac
@@ -343,6 +349,17 @@ tmux_cmd() {
     [ "$status" -eq 0 ]
     run rg 'set-option -gq @tmux-notify-jump-complete 0' "$TMUX_LOG"
     [ "$status" -eq 0 ]
+}
+
+@test "ack miss avoids refreshing unchanged counts" {
+    tmux_notify_inbox_enqueue "%9" complete Codex "Done"
+    : >"$TMUX_LOG"
+
+    tmux_notify_inbox_ack_pane "%99"
+
+    run rg '^(set-option -gq @tmux-notify-jump-(attention|complete)|refresh-client)' \
+        "$TMUX_LOG"
+    [ "$status" -eq 1 ]
 }
 
 @test "ack converges counts after entries vanish outside the Inbox flow" {

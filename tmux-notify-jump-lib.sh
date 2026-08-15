@@ -1432,7 +1432,8 @@ tmux_notify_inbox_sync_counts() {
     local root=""
     root="$(tmux_notify_inbox_root)"
     tmux_notify_inbox_secure_dir "$root" || return 1
-    local attention=0 complete=0 dir=""
+    local attention=0 complete=0 dir="" changed=0
+    local current_attention="" current_complete=""
     for dir in "$root"/*; do
         tmux_notify_inbox_entry_dir_is_valid "$dir" || continue
         local kind="" count=""
@@ -1445,9 +1446,23 @@ tmux_notify_inbox_sync_counts() {
             complete=$((complete + count))
         fi
     done
-    tmux_cmd set-option -gq @tmux-notify-jump-attention "$attention" 2>/dev/null || true
-    tmux_cmd set-option -gq @tmux-notify-jump-complete "$complete" 2>/dev/null || true
-    tmux_cmd refresh-client -S 2>/dev/null || true
+    current_attention="$(
+        tmux_cmd show-option -gqv @tmux-notify-jump-attention 2>/dev/null || true
+    )"
+    current_complete="$(
+        tmux_cmd show-option -gqv @tmux-notify-jump-complete 2>/dev/null || true
+    )"
+    if [ "$current_attention" != "$attention" ]; then
+        tmux_cmd set-option -gq @tmux-notify-jump-attention "$attention" 2>/dev/null || true
+        changed=1
+    fi
+    if [ "$current_complete" != "$complete" ]; then
+        tmux_cmd set-option -gq @tmux-notify-jump-complete "$complete" 2>/dev/null || true
+        changed=1
+    fi
+    if [ "$changed" -eq 1 ]; then
+        tmux_cmd refresh-client -S 2>/dev/null || true
+    fi
     TMUX_NOTIFY_INBOX_ATTENTION="$attention"
     TMUX_NOTIFY_INBOX_COMPLETE="$complete"
     export TMUX_NOTIFY_INBOX_ATTENTION TMUX_NOTIFY_INBOX_COMPLETE
