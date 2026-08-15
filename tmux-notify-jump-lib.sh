@@ -1556,6 +1556,7 @@ tmux_notify_route_notification() {
 
 tmux_notify_inbox_ack_client() {
     local client="$1" pane=""
+    [ -n "$client" ] || return 0
     pane="$(tmux_cmd display-message -p -c "$client" '#{pane_id}' 2>/dev/null || true)"
     [ -n "$pane" ] && tmux_notify_inbox_ack_pane "$pane"
 }
@@ -1656,14 +1657,16 @@ tmux_notify_tmux_init() {
         status="${status} #[fg=yellow]#{?@tmux-notify-jump-attention,?#{@tmux-notify-jump-attention} ,}#[fg=cyan]#{?@tmux-notify-jump-complete,!#{@tmux-notify-jump-complete} ,}"
         tmux_cmd set-option -g status-right "$status"
     fi
-    local hook major="" hook_failed=0
+    local hook major="" hook_failed=0 hook_command=""
+    local ack_guard='#{&&:#{||:#{@tmux-notify-jump-attention},#{@tmux-notify-jump-complete}},#{hook_client}}'
+    hook_command="if-shell -F '$ack_guard' { run-shell -b '$quoted_path --inbox-ack-client \"#{hook_client}\"' }"
     major="$(tmux_notify_tmux_major_version)"
     if [ -n "$major" ] && [ "$major" -lt 3 ]; then
         warn "tmux 3.0 or newer is required for automatic Inbox acknowledgement hooks"
     else
         for hook in client-attached client-session-changed after-select-pane after-select-window client-focus-in; do
             if ! tmux_cmd set-hook -g "${hook}[900]" \
-                "run-shell -b '$quoted_path --inbox-ack-client \"#{hook_client}\"'" 2>/dev/null; then
+                "$hook_command" 2>/dev/null; then
                 hook_failed=1
             fi
         done

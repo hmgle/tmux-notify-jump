@@ -247,6 +247,14 @@ tmux_cmd() {
     [ "$status" -eq 1 ]
 }
 
+@test "ack client ignores an empty hook client" {
+    : >"$TMUX_LOG"
+
+    tmux_notify_inbox_ack_client ""
+
+    [ ! -s "$TMUX_LOG" ]
+}
+
 @test "Inbox GC enforces maximum entries and TTL" {
     export TMUX_NOTIFY_INBOX_MAX=1
     export TMUX_NOTIFY_INBOX_TTL_MS=0
@@ -335,6 +343,8 @@ tmux_cmd() {
     tmux_notify_tmux_init
 
     run rg -F 'bin\ with\ spaces/tmux-notify-jump --inbox-ack-client' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+    run rg -F '#{&&:#{||:#{@tmux-notify-jump-attention},#{@tmux-notify-jump-complete}},#{hook_client}}' "$TMUX_LOG"
     [ "$status" -eq 0 ]
     run rg -F 'after-switch-client' "$TMUX_LOG"
     [ "$status" -eq 1 ]
