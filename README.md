@@ -185,11 +185,14 @@ initialization that acknowledgement hooks are unavailable.
 The configuration block is marked and idempotent. Use
 `./install.sh --configure-tmux --uninstall` to remove only that block while
 leaving the rest of the tmux configuration intact. The same command also clears
-the selected running server's Inbox, status segment, hooks, and tool-owned key
-binding before removing the executable. If `prefix+N` is already bound,
-initialization warns and preserves the existing binding; pass `--tmux-key
-<key>` to choose another key. Set `TMUX_NOTIFY_TMUX_STATUS=0` to keep the hooks
-and binding without appending the Inbox counts to `status-right`.
+a running server's Inbox, status segment, hooks, and tool-owned key binding
+before removing the executable, and reports which socket it changed. That
+server is the one `$TMUX` points at, otherwise the default socket; pass
+`--tmux-socket <path>` to name a different one when you run several servers. If
+`prefix+N` is already bound, initialization warns and preserves the existing
+binding; pass `--tmux-key <key>` to choose another key. Set
+`TMUX_NOTIFY_TMUX_STATUS=0` to keep the hooks and binding without appending the
+Inbox counts to `status-right`.
 
 macOS note: in `--ui notification` mode, if the script is detached (or `terminal-notifier` doesn’t support `-wait`), it falls back to `terminal-notifier -execute`, where any click triggers the jump (no separate “Dismiss” action). Use `--ui dialog` for explicit buttons.
 

@@ -20,6 +20,7 @@ OPENCODE_PLUGIN_PATH="${OPENCODE_PLUGIN_PATH:-}"
 PI_EXTENSION_PATH="${PI_EXTENSION_PATH:-}"
 TMUX_CONFIG_PATH="${TMUX_CONFIG_PATH:-$HOME/.tmux.conf}"
 TMUX_KEY="${TMUX_KEY:-N}"
+TMUX_SOCKET_PATH="${TMUX_SOCKET_PATH:-}"
 
 usage() {
     cat <<EOF
@@ -45,6 +46,8 @@ Options:
   --pi-extension-path <path> Pi extensions dir (default: ~/.pi/agent/extensions)
   --tmux-config <path> tmux config path (default: ~/.tmux.conf)
   --tmux-key <key>  Prefix key for Inbox next (default: N)
+  --tmux-socket <path> tmux server socket cleaned by --uninstall (default: the
+                    server \$TMUX points at, otherwise the default socket)
   --uninstall       Remove installed files
   -h, --help        Show help
 
@@ -712,6 +715,11 @@ while [ $# -gt 0 ]; do
             [ $# -gt 0 ] || die "--tmux-key requires a key"
             TMUX_KEY="$1"
             ;;
+        --tmux-socket)
+            shift
+            [ $# -gt 0 ] || die "--tmux-socket requires a path"
+            TMUX_SOCKET_PATH="$1"
+            ;;
         --uninstall)
             UNINSTALL=1
             ;;
@@ -752,7 +760,11 @@ FILES=(
 
 if [ "$UNINSTALL" -eq 1 ]; then
     if [ "$CONFIGURE_TMUX" -eq 1 ] && [ -x "$BINDIR/tmux-notify-jump" ]; then
-        "$BINDIR/tmux-notify-jump" --tmux-uninit || \
+        tmux_uninit_cmd=("$BINDIR/tmux-notify-jump" --tmux-uninit)
+        if [ -n "$TMUX_SOCKET_PATH" ]; then
+            tmux_uninit_cmd=(env "TMUX_NOTIFY_TMUX_SOCKET=$TMUX_SOCKET_PATH" "${tmux_uninit_cmd[@]}")
+        fi
+        "${tmux_uninit_cmd[@]}" || \
             echo "Warning: could not remove state from the running tmux server" >&2
     fi
     for f in "${FILES[@]}"; do

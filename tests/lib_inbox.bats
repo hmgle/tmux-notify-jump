@@ -474,6 +474,24 @@ tmux_cmd() {
     [ "$output" = "5" ]
 }
 
+@test "tmux uninit names the server it changed" {
+    run env -u _QUIET bash -c '
+        . "'"$PROJECT_ROOT"'/tmux-notify-jump-lib.sh"
+        tmux_cmd() {
+            [ "${1:-}" = "display-message" ] || return 0
+            case "${3:-}" in
+                "#{pid}") printf "4242\n" ;;
+                "#{socket_path}") printf "/tmp/example.sock\n" ;;
+            esac
+        }
+        tmux_notify_tmux_uninit
+    '
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Removed tmux Inbox state from /tmp/example.sock"* ]]
+    [[ "$output" == *"server pid 4242"* ]]
+}
+
 @test "tmux uninit preserves user-owned hooks and bindings" {
     FAKE_KEY_OPTION=M
     FAKE_BINDING='bind-key -T prefix M next-window'

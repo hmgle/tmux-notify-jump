@@ -1744,10 +1744,11 @@ tmux_notify_tmux_init() {
 }
 
 tmux_notify_tmux_uninit() {
-    local server_pid="" configured_key="" key="" status="" status_segment=""
+    local server_pid="" socket_path="" configured_key="" key="" status="" status_segment=""
     local existing_binding="" hook="" hook_command="" option=""
     server_pid="$(tmux_cmd display-message -p '#{pid}' 2>/dev/null || true)"
     [ -n "$server_pid" ] || return 0
+    socket_path="$(tmux_cmd display-message -p '#{socket_path}' 2>/dev/null || true)"
 
     tmux_notify_inbox_clear_all >/dev/null 2>&1 || true
 
@@ -1778,6 +1779,9 @@ tmux_notify_tmux_uninit() {
         tmux_cmd set-option -gu "$option" 2>/dev/null || true
     done
     tmux_cmd refresh-client -S 2>/dev/null || true
+    # Name the server that was changed: uninstall targets whichever server the
+    # socket resolves to, which is not necessarily the one the user expects.
+    log "Removed tmux Inbox state from ${socket_path:-the default socket} (server pid $server_pid)"
 }
 
 cache_root_dir() {

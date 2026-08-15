@@ -756,6 +756,24 @@ FAKE
     [ ! -e "$bindir/tmux-notify-jump" ]
 }
 
+@test "install.sh: tmux uninstall targets the requested socket" {
+    bindir="$TEST_TEMP_DIR/bin"
+    config="$TEST_TEMP_DIR/tmux.conf"
+    mkdir -p "$bindir"
+    cat >"$bindir/tmux-notify-jump" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "${TMUX_NOTIFY_TMUX_SOCKET:-unset}" >"$TEST_TEMP_DIR/tmux-uninit.socket"
+FAKE
+    chmod +x "$bindir/tmux-notify-jump"
+
+    run env TEST_TEMP_DIR="$TEST_TEMP_DIR" "$PROJECT_ROOT/install.sh" \
+        --bindir "$bindir" --uninstall --configure-tmux --tmux-config "$config" \
+        --tmux-socket /tmp/example.sock
+
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_TEMP_DIR/tmux-uninit.socket")" = "/tmp/example.sock" ]
+}
+
 @test "install.sh: configure-tmux quotes install paths with spaces" {
     bindir="$TEST_TEMP_DIR/bin with spaces"
     config="$TEST_TEMP_DIR/tmux.conf"
