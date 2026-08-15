@@ -19,6 +19,7 @@ setup() {
     FAKE_CLIENT_ROWS='0|10|/dev/pts/2|/dev/pts/2|222|$1|%1|work'
     FAKE_TMUX_VERSION='tmux 3.7'
     FAKE_SOCKET_PATH="$TMUX_NOTIFY_TMUX_SOCKET"
+    FAKE_INBOX_ROOT=""
     FAKE_SWITCH_FAIL=0
     FAKE_PANE_EXISTS=1
     FAKE_WINDOW_EXISTS=1
@@ -67,6 +68,16 @@ tmux_cmd() {
         list-clients)
             [ -z "$FAKE_CLIENT_ROWS" ] || printf '%s\n' "$FAKE_CLIENT_ROWS"
             ;;
+        show-option)
+            if [ "${3:-}" = '@tmux-notify-jump-inbox-root' ]; then
+                printf '%s' "$FAKE_INBOX_ROOT"
+            fi
+            ;;
+        set-option)
+            if [ "${3:-}" = '@tmux-notify-jump-inbox-root' ]; then
+                FAKE_INBOX_ROOT="${4:-}"
+            fi
+            ;;
         switch-client)
             [ "$FAKE_SWITCH_FAIL" -eq 0 ]
             ;;
@@ -103,6 +114,17 @@ tmux_cmd() {
     unset TMUX_NOTIFY_TMUX_SOCKET
 
     [ "$(tmux_notify_inbox_root)" = "$explicit_root" ]
+}
+
+@test "tmux init pins the Inbox root across shell environments" {
+    export XDG_CACHE_HOME="$TEST_TEMP_DIR/server-cache"
+    expected_root="$(tmux_notify_inbox_default_root)"
+
+    tmux_notify_tmux_init
+    [ "$FAKE_INBOX_ROOT" = "$expected_root" ]
+
+    export XDG_CACHE_HOME="$TEST_TEMP_DIR/pane-cache"
+    [ "$(tmux_notify_inbox_root)" = "$expected_root" ]
 }
 
 @test "Inbox cache is private and omits notification bodies" {

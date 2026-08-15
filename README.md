@@ -163,6 +163,15 @@ that exact pane as soon as it is visited. Repeated events for the same pane and
 priority collapse into one item with an updated count.
 Inbox cache directories and metadata files are restricted to the current user.
 Notification bodies are used for immediate delivery but are not persisted.
+Inbox routing is active even before `--configure-tmux` installs its status,
+hooks, and binding. Set `TMUX_NOTIFY_REMOTE_MODE=desktop` to disable tmux Inbox
+storage and use desktop delivery only.
+
+Initialization pins the resolved Inbox directory in the tmux server so agent
+processes and `run-shell` hooks use the same location. To customize
+`XDG_CACHE_HOME`, set it in `~/.config/tmux-notify-jump/env` (or the file named by
+`TMUX_NOTIFY_CONFIG`) and reload the tmux configuration. An override set only in
+an interactive shell rc file may not be visible to the tmux server.
 
 The default mode still sends desktop notifications when any ordinary local
 client is attached to the tmux server, even if that client is viewing another

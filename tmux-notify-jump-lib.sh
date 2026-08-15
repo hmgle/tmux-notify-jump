@@ -1267,7 +1267,7 @@ tmux_notify_process_is_remote_ssh() {
     [ -n "${SSH_CONNECTION:-}" ] || [ -n "${SSH_CLIENT:-}" ] || [ -n "${SSH_TTY:-}" ]
 }
 
-tmux_notify_inbox_root() {
+tmux_notify_inbox_default_root() {
     local requested_socket="${TMUX_NOTIFY_TMUX_SOCKET:-}"
     local socket="" server_id=""
     if [ -n "${TMUX:-}" ]; then
@@ -1291,6 +1291,18 @@ tmux_notify_inbox_root() {
     local id=""
     id="$(printf '%s|%s' "$socket" "$server_id" | sha256_hex_stdin)"
     printf '%s/tmux-notify-jump/inbox/%s' "$(cache_root_dir)" "$id"
+}
+
+tmux_notify_inbox_root() {
+    local configured_root=""
+    configured_root="$(
+        tmux_cmd show-option -gqv @tmux-notify-jump-inbox-root 2>/dev/null || true
+    )"
+    if [ -n "$configured_root" ]; then
+        printf '%s' "$configured_root"
+        return 0
+    fi
+    tmux_notify_inbox_default_root
 }
 
 tmux_notify_compact_text() {
@@ -1645,8 +1657,10 @@ tmux_notify_tmux_major_version() {
 }
 
 tmux_notify_tmux_init() {
-    local path="${TMUX_NOTIFY_ENTRYPOINT:-tmux-notify-jump}" quoted_path="" key="" configured_key=""
+    local path="${TMUX_NOTIFY_ENTRYPOINT:-tmux-notify-jump}" quoted_path="" key="" configured_key="" root=""
     printf -v quoted_path '%q' "$path"
+    root="$(tmux_notify_inbox_default_root)"
+    tmux_cmd set-option -gq @tmux-notify-jump-inbox-root "$root"
     configured_key="$(tmux_cmd show-option -gqv @tmux-notify-jump-key 2>/dev/null || true)"
     key="${TMUX_NOTIFY_TMUX_KEY:-${configured_key:-N}}"
     case "$key" in [A-Za-z0-9]) ;; *) key=N ;; esac
