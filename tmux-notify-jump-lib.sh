@@ -1677,6 +1677,20 @@ tmux_notify_tmux_prefix_binding() {
     ' || true
 }
 
+# Print the command bound to "<hook>[900]", or nothing when it is unset.
+tmux_notify_tmux_hook_command() {
+    local hook="$1" output=""
+    output="$(tmux_cmd show-hooks -g "$hook" 2>/dev/null || true)"
+    # Releases that do not accept a hook name argument print nothing here; read
+    # the whole table instead so uninstall still finds the entry to remove.
+    if [ -z "$output" ]; then
+        output="$(tmux_cmd show-hooks -g 2>/dev/null || true)"
+    fi
+    printf '%s\n' "$output" | awk -v name="${hook}[900]" '
+        $1 == name { sub(/^[^ ]+ /, ""); print; exit }
+    ' || true
+}
+
 tmux_notify_tmux_init() {
     local path="${TMUX_NOTIFY_ENTRYPOINT:-tmux-notify-jump}" quoted_path="" key="" configured_key="" root=""
     printf -v quoted_path '%q' "$path"
@@ -1746,9 +1760,7 @@ tmux_notify_tmux_uninit() {
     fi
 
     for hook in client-attached client-session-changed after-select-pane after-select-window client-focus-in; do
-        hook_command="$(tmux_cmd show-hooks -g "$hook" 2>/dev/null | awk -v name="${hook}[900]" '
-            $1 == name { sub(/^[^ ]+ /, ""); print; exit }
-        ' || true)"
+        hook_command="$(tmux_notify_tmux_hook_command "$hook")"
         if [[ "$hook_command" == *"--inbox-ack-client"* ]]; then
             tmux_cmd set-hook -gu "${hook}[900]" 2>/dev/null || true
         fi

@@ -24,6 +24,7 @@ setup() {
     FAKE_KEY_OPTION=""
     FAKE_BINDING=""
     FAKE_HOOK_COMMAND=""
+    FAKE_HOOK_NAME_ARG=1
     FAKE_SWITCH_FAIL=0
     FAKE_PANE_EXISTS=1
     FAKE_WINDOW_EXISTS=1
@@ -76,9 +77,18 @@ tmux_cmd() {
             [ -z "$FAKE_BINDING" ] || printf '%s\n' "$FAKE_BINDING"
             ;;
         show-hooks)
-            if [ -n "$FAKE_HOOK_COMMAND" ]; then
-                printf '%s[900] %s\n' "${3:-}" "$FAKE_HOOK_COMMAND"
+            [ -n "$FAKE_HOOK_COMMAND" ] || return 0
+            if [ -n "${3:-}" ]; then
+                # Releases that do not accept a hook name answer with nothing.
+                [ "$FAKE_HOOK_NAME_ARG" -eq 1 ] || return 0
+                printf '%s[900] %s\n' "$3" "$FAKE_HOOK_COMMAND"
+                return 0
             fi
+            local hook_name=""
+            for hook_name in client-attached client-session-changed \
+                after-select-pane after-select-window client-focus-in; do
+                printf '%s[900] %s\n' "$hook_name" "$FAKE_HOOK_COMMAND"
+            done
             ;;
         show-option)
             case "${3:-}" in
@@ -450,6 +460,18 @@ tmux_cmd() {
     [ "$status" -eq 0 ]
     run rg -F 'set-option -gu @tmux-notify-jump-inbox-root' "$TMUX_LOG"
     [ "$status" -eq 0 ]
+}
+
+@test "tmux uninit reads the full hook table when named lookup is unsupported" {
+    FAKE_HOOK_NAME_ARG=0
+    FAKE_KEY_OPTION=M
+    FAKE_HOOK_COMMAND='if-shell -F 1 { run-shell -b "tmux-notify-jump --inbox-ack-client client" }'
+
+    tmux_notify_tmux_uninit
+
+    run rg -c '^set-hook -gu .+\[900\]$' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+    [ "$output" = "5" ]
 }
 
 @test "tmux uninit preserves user-owned hooks and bindings" {
