@@ -184,9 +184,12 @@ initialization that acknowledgement hooks are unavailable.
 
 The configuration block is marked and idempotent. Use
 `./install.sh --configure-tmux --uninstall` to remove only that block while
-leaving the rest of the tmux configuration intact. If `prefix+N` is already
-bound, initialization warns and preserves the existing binding; pass
-`--tmux-key <key>` to choose another key.
+leaving the rest of the tmux configuration intact. The same command also clears
+the selected running server's Inbox, status segment, hooks, and tool-owned key
+binding before removing the executable. If `prefix+N` is already bound,
+initialization warns and preserves the existing binding; pass `--tmux-key
+<key>` to choose another key. Set `TMUX_NOTIFY_TMUX_STATUS=0` to keep the hooks
+and binding without appending the Inbox counts to `status-right`.
 
 macOS note: in `--ui notification` mode, if the script is detached (or `terminal-notifier` doesn’t support `-wait`), it falls back to `terminal-notifier -execute`, where any click triggers the jump (no separate “Dismiss” action). Use `--ui dialog` for explicit buttons.
 
@@ -209,6 +212,8 @@ CLI flags override environment variables where applicable.
 - `TMUX_NOTIFY_INBOX_MAX`: maximum number of Inbox entries (default: `100`).
 - `TMUX_NOTIFY_INBOX_LOCK_RETRIES`: number of 10 ms retries when concurrent
   events update the same Inbox entry (default: `20`).
+- `TMUX_NOTIFY_TMUX_STATUS`: append Inbox counts to tmux `status-right`
+  (`0` disables; default: `1`).
 - `TMUX_NOTIFY_CLASS` / `TMUX_NOTIFY_CLASSES`: terminal window class(es) used by `xdotool search --class`
 - `TMUX_NOTIFY_WEZTERM_TAB`: on Linux, after focusing the terminal window, also switch to the wezterm tab/pane that hosts the tmux client (matched via `wezterm cli list` by tty; `0` disables; default: `1`). Requires `python3` or `jq` for JSON parsing; silently skipped when neither is available, when `--no-activate` is set, or when the terminal is not wezterm.
 - `TMUX_NOTIFY_BUNDLE_ID` / `TMUX_NOTIFY_BUNDLE_IDS`: macOS terminal bundle id(s) for `osascript` activation (overrides auto-detection; e.g. kitty is `net.kovidgoyal.kitty`)

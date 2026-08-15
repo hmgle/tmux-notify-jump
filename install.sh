@@ -751,6 +751,10 @@ FILES=(
 )
 
 if [ "$UNINSTALL" -eq 1 ]; then
+    if [ "$CONFIGURE_TMUX" -eq 1 ] && [ -x "$BINDIR/tmux-notify-jump" ]; then
+        "$BINDIR/tmux-notify-jump" --tmux-uninit || \
+            echo "Warning: could not remove state from the running tmux server" >&2
+    fi
     for f in "${FILES[@]}"; do
         rm -f "$BINDIR/$f" 2>/dev/null || true
     done

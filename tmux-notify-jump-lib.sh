@@ -1656,6 +1656,21 @@ tmux_notify_tmux_major_version() {
     fi
 }
 
+tmux_notify_tmux_status_segment() {
+    printf '%s' ' #[fg=yellow]#{?@tmux-notify-jump-attention,?#{@tmux-notify-jump-attention} ,}#[fg=cyan]#{?@tmux-notify-jump-complete,!#{@tmux-notify-jump-complete} ,}'
+}
+
+tmux_notify_tmux_prefix_binding() {
+    local key="$1"
+    tmux_cmd list-keys -T prefix 2>/dev/null | awk -v key="$key" '
+        {
+            for (i = 1; i <= NF - 2; i++) {
+                if ($i == "-T" && $(i + 1) == "prefix" && $(i + 2) == key) print
+            }
+        }
+    ' || true
+}
+
 tmux_notify_tmux_init() {
     local path="${TMUX_NOTIFY_ENTRYPOINT:-tmux-notify-jump}" quoted_path="" key="" configured_key="" root=""
     printf -v quoted_path '%q' "$path"
@@ -1664,11 +1679,16 @@ tmux_notify_tmux_init() {
     configured_key="$(tmux_cmd show-option -gqv @tmux-notify-jump-key 2>/dev/null || true)"
     key="${TMUX_NOTIFY_TMUX_KEY:-${configured_key:-N}}"
     case "$key" in [A-Za-z0-9]) ;; *) key=N ;; esac
-    local status=""
+    local status="" status_segment=""
     status="$(tmux_cmd show-option -gqv status-right 2>/dev/null || true)"
-    local marker="tmux-notify-jump"
-    if [[ "$status" != *"$marker"* ]]; then
-        status="${status} #[fg=yellow]#{?@tmux-notify-jump-attention,?#{@tmux-notify-jump-attention} ,}#[fg=cyan]#{?@tmux-notify-jump-complete,!#{@tmux-notify-jump-complete} ,}"
+    status_segment="$(tmux_notify_tmux_status_segment)"
+    if is_truthy "${TMUX_NOTIFY_TMUX_STATUS:-1}" \
+        && [[ "$status" != *"$status_segment"* ]]; then
+        status="${status}${status_segment}"
+        tmux_cmd set-option -g status-right "$status"
+    elif ! is_truthy "${TMUX_NOTIFY_TMUX_STATUS:-1}" \
+        && [[ "$status" == *"$status_segment"* ]]; then
+        status="${status%%"$status_segment"*}${status#*"$status_segment"}"
         tmux_cmd set-option -g status-right "$status"
     fi
     local hook major="" hook_failed=0 hook_command=""
@@ -1690,13 +1710,7 @@ tmux_notify_tmux_init() {
     fi
     local existing_binding="" serialized_quoted_path=""
     serialized_quoted_path="${quoted_path//\\/\\\\}"
-    existing_binding="$(tmux_cmd list-keys -T prefix 2>/dev/null | awk -v key="$key" '
-        {
-            for (i = 1; i <= NF - 2; i++) {
-                if ($i == "-T" && $(i + 1) == "prefix" && $(i + 2) == key) print
-            }
-        }
-    ' || true)"
+    existing_binding="$(tmux_notify_tmux_prefix_binding "$key")"
     if [ -n "$existing_binding" ]; then
         if [[ "$existing_binding" != *"$quoted_path --inbox-next"* \
             && "$existing_binding" != *"$serialized_quoted_path --inbox-next"* ]]; then
@@ -1707,6 +1721,45 @@ tmux_notify_tmux_init() {
             "run-shell -b 'TMUX_NOTIFY_SENDER_TTY=\"#{client_tty}\" $quoted_path --inbox-next'"
     fi
     tmux_notify_inbox_sync_counts
+}
+
+tmux_notify_tmux_uninit() {
+    local server_pid="" configured_key="" key="" status="" status_segment=""
+    local existing_binding="" hook="" hook_command="" option=""
+    server_pid="$(tmux_cmd display-message -p '#{pid}' 2>/dev/null || true)"
+    [ -n "$server_pid" ] || return 0
+
+    tmux_notify_inbox_clear_all >/dev/null 2>&1 || true
+
+    configured_key="$(tmux_cmd show-option -gqv @tmux-notify-jump-key 2>/dev/null || true)"
+    key="${configured_key:-${TMUX_NOTIFY_TMUX_KEY:-N}}"
+    case "$key" in [A-Za-z0-9]) ;; *) key=N ;; esac
+    existing_binding="$(tmux_notify_tmux_prefix_binding "$key")"
+    if [[ "$existing_binding" == *"--inbox-next"* ]]; then
+        tmux_cmd unbind-key -T prefix "$key" 2>/dev/null || true
+    fi
+
+    for hook in client-attached client-session-changed after-select-pane after-select-window client-focus-in; do
+        hook_command="$(tmux_cmd show-hooks -g "$hook" 2>/dev/null | awk -v name="${hook}[900]" '
+            $1 == name { sub(/^[^ ]+ /, ""); print; exit }
+        ' || true)"
+        if [[ "$hook_command" == *"--inbox-ack-client"* ]]; then
+            tmux_cmd set-hook -gu "${hook}[900]" 2>/dev/null || true
+        fi
+    done
+
+    status="$(tmux_cmd show-option -gqv status-right 2>/dev/null || true)"
+    status_segment="$(tmux_notify_tmux_status_segment)"
+    if [[ "$status" == *"$status_segment"* ]]; then
+        status="${status%%"$status_segment"*}${status#*"$status_segment"}"
+        tmux_cmd set-option -g status-right "$status" 2>/dev/null || true
+    fi
+
+    for option in @tmux-notify-jump-attention @tmux-notify-jump-complete \
+        @tmux-notify-jump-inbox-root @tmux-notify-jump-key; do
+        tmux_cmd set-option -gu "$option" 2>/dev/null || true
+    done
+    tmux_cmd refresh-client -S 2>/dev/null || true
 }
 
 cache_root_dir() {

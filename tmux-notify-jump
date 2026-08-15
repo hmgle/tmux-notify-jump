@@ -23,6 +23,10 @@ case "${1:-}" in
         tmux_notify_tmux_init
         exit 0
         ;;
+    --tmux-uninit)
+        tmux_notify_tmux_uninit
+        exit 0
+        ;;
     --inbox-next)
         shift
         tmux_notify_inbox_next "${TMUX_NOTIFY_SENDER_TTY:-}"

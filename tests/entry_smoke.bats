@@ -727,7 +727,8 @@ FAKE
     config_mode="$(stat -c '%a' "$config" 2>/dev/null || stat -f '%Lp' "$config")"
     [ "$config_mode" = "640" ]
 
-    run "$PROJECT_ROOT/install.sh" --bindir "$bindir" --uninstall \
+    run env TMUX_NOTIFY_TMUX_SOCKET="$TEST_TEMP_DIR/missing.sock" \
+        "$PROJECT_ROOT/install.sh" --bindir "$bindir" --uninstall \
         --configure-tmux --tmux-config "$config" --tmux-key M
     [ "$status" -eq 0 ]
     run cat "$config"
@@ -735,6 +736,24 @@ FAKE
     [[ "$output" != *"tmux-notify-jump"* ]]
     config_mode="$(stat -c '%a' "$config" 2>/dev/null || stat -f '%Lp' "$config")"
     [ "$config_mode" = "640" ]
+}
+
+@test "install.sh: tmux uninstall clears runtime state before deletion" {
+    bindir="$TEST_TEMP_DIR/bin"
+    config="$TEST_TEMP_DIR/tmux.conf"
+    mkdir -p "$bindir"
+    cat >"$bindir/tmux-notify-jump" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >"$TEST_TEMP_DIR/tmux-uninit.args"
+FAKE
+    chmod +x "$bindir/tmux-notify-jump"
+
+    run env TEST_TEMP_DIR="$TEST_TEMP_DIR" "$PROJECT_ROOT/install.sh" \
+        --bindir "$bindir" --uninstall --configure-tmux --tmux-config "$config"
+
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_TEMP_DIR/tmux-uninit.args")" = "--tmux-uninit" ]
+    [ ! -e "$bindir/tmux-notify-jump" ]
 }
 
 @test "install.sh: configure-tmux quotes install paths with spaces" {

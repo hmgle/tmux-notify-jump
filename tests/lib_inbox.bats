@@ -20,6 +20,10 @@ setup() {
     FAKE_TMUX_VERSION='tmux 3.7'
     FAKE_SOCKET_PATH="$TMUX_NOTIFY_TMUX_SOCKET"
     FAKE_INBOX_ROOT=""
+    FAKE_STATUS_RIGHT=""
+    FAKE_KEY_OPTION=""
+    FAKE_BINDING=""
+    FAKE_HOOK_COMMAND=""
     FAKE_SWITCH_FAIL=0
     FAKE_PANE_EXISTS=1
     FAKE_WINDOW_EXISTS=1
@@ -68,15 +72,27 @@ tmux_cmd() {
         list-clients)
             [ -z "$FAKE_CLIENT_ROWS" ] || printf '%s\n' "$FAKE_CLIENT_ROWS"
             ;;
-        show-option)
-            if [ "${3:-}" = '@tmux-notify-jump-inbox-root' ]; then
-                printf '%s' "$FAKE_INBOX_ROOT"
+        list-keys)
+            [ -z "$FAKE_BINDING" ] || printf '%s\n' "$FAKE_BINDING"
+            ;;
+        show-hooks)
+            if [ -n "$FAKE_HOOK_COMMAND" ]; then
+                printf '%s[900] %s\n' "${3:-}" "$FAKE_HOOK_COMMAND"
             fi
             ;;
+        show-option)
+            case "${3:-}" in
+                @tmux-notify-jump-inbox-root) printf '%s' "$FAKE_INBOX_ROOT" ;;
+                @tmux-notify-jump-key) printf '%s' "$FAKE_KEY_OPTION" ;;
+                status-right) printf '%s' "$FAKE_STATUS_RIGHT" ;;
+            esac
+            ;;
         set-option)
-            if [ "${3:-}" = '@tmux-notify-jump-inbox-root' ]; then
-                FAKE_INBOX_ROOT="${4:-}"
-            fi
+            case "${3:-}" in
+                @tmux-notify-jump-inbox-root) FAKE_INBOX_ROOT="${4:-}" ;;
+                @tmux-notify-jump-key) FAKE_KEY_OPTION="${4:-}" ;;
+                status-right) FAKE_STATUS_RIGHT="${4:-}" ;;
+            esac
             ;;
         switch-client)
             [ "$FAKE_SWITCH_FAIL" -eq 0 ]
@@ -372,6 +388,50 @@ tmux_cmd() {
     [ "$status" -eq 1 ]
     run rg -F 'bin\ with\ spaces/tmux-notify-jump --inbox-next' "$TMUX_LOG"
     [ "$status" -eq 0 ]
+}
+
+@test "tmux init can remove its status segment" {
+    status_segment="$(tmux_notify_tmux_status_segment)"
+    FAKE_STATUS_RIGHT="left${status_segment} right"
+    TMUX_NOTIFY_TMUX_STATUS=0
+
+    tmux_notify_tmux_init
+
+    [ "$FAKE_STATUS_RIGHT" = "left right" ]
+}
+
+@test "tmux uninit removes its running server state" {
+    status_segment="$(tmux_notify_tmux_status_segment)"
+    FAKE_STATUS_RIGHT="left${status_segment} right"
+    FAKE_KEY_OPTION=M
+    FAKE_BINDING='bind-key -T prefix M run-shell -b "tmux-notify-jump --inbox-next"'
+    FAKE_HOOK_COMMAND='if-shell -F 1 { run-shell -b "tmux-notify-jump --inbox-ack-client client" }'
+    FAKE_INBOX_ROOT="$TEST_TEMP_DIR/pinned-inbox"
+    mkdir -p "$FAKE_INBOX_ROOT/item"
+    : >"$FAKE_INBOX_ROOT/item/kind"
+
+    tmux_notify_tmux_uninit
+
+    [ "$FAKE_STATUS_RIGHT" = "left right" ]
+    [ -z "$(find "$FAKE_INBOX_ROOT" -mindepth 1 -print -quit)" ]
+    run rg -c '^set-hook -gu .+\[900\]$' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+    [ "$output" = "5" ]
+    run rg -F 'unbind-key -T prefix M' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+    run rg -F 'set-option -gu @tmux-notify-jump-inbox-root' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+}
+
+@test "tmux uninit preserves user-owned hooks and bindings" {
+    FAKE_KEY_OPTION=M
+    FAKE_BINDING='bind-key -T prefix M next-window'
+    FAKE_HOOK_COMMAND='select-pane -L'
+
+    tmux_notify_tmux_uninit
+
+    run rg '^(set-hook -gu|unbind-key)' "$TMUX_LOG"
+    [ "$status" -eq 1 ]
 }
 
 @test "tmux init recognizes its serialized binding with a quoted path" {
