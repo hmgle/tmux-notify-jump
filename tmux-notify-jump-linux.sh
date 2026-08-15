@@ -480,11 +480,6 @@ require_desktop_tools() {
     fi
 }
 
-require_tools() {
-    require_tmux_tools
-    require_desktop_tools
-}
-
 send_dialog() {
     local backend=""
     backend="$(pick_dialog_backend 2>/dev/null || true)"

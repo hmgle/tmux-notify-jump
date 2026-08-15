@@ -130,11 +130,6 @@ require_desktop_tools() {
     fi
 }
 
-require_tools() {
-    require_tmux_tools
-    require_desktop_tools
-}
-
 bundle_id_from_process_name() {
     local name_lc="$1"
     case "$name_lc" in

@@ -899,24 +899,6 @@ validate_target_exists() {
     fi
 }
 
-get_current_tmux_session() {
-    if [ -z "${TMUX:-}" ]; then
-        return 1
-    fi
-    local session=""
-    if [ -n "${TMUX_PANE:-}" ]; then
-        session="$(tmux_cmd display-message -p -t "$TMUX_PANE" '#S' 2>/dev/null || true)"
-    fi
-    if [ -z "$session" ]; then
-        session="$(tmux_cmd display-message -p '#S' 2>/dev/null || true)"
-    fi
-    if [ -n "$session" ]; then
-        printf '%s' "$session"
-        return 0
-    fi
-    return 1
-}
-
 get_current_tmux_session_id() {
     if [ -z "${TMUX:-}" ]; then
         return 1
@@ -1208,36 +1190,6 @@ jump_to_pane() {
     log "Jumped to $SESSION:$WINDOW.$PANE via $JUMP_CLIENT_NAME"
 }
 
-tmux_session_has_remote_ssh_client() {
-    local target_session="${1:-}"
-    [ -n "$target_session" ] || return 1
-    if [ -z "${TMUX:-}" ]; then
-        return 1
-    fi
-    local target_session_id=""
-    target_session_id="$(tmux_cmd display-message -p -t "$target_session" '#{session_id}' 2>/dev/null || true)"
-    [ -n "$target_session_id" ] || return 1
-
-    local output=""
-    output="$(tmux_terminal_client_rows)"
-    local line=""
-    while IFS= read -r line; do
-        [ -n "$line" ] || continue
-        read_tmux_client_row "$line"
-
-        if ! is_integer "$CLIENT_PID"; then
-            continue
-        fi
-        if [ "$CLIENT_SESSION_ID" != "$target_session_id" ]; then
-            continue
-        fi
-
-        tmux_client_pid_is_remote_ssh "$CLIENT_PID" && return 0
-    done <<<"$output"
-
-    return 1
-}
-
 process_env_has_ssh() {
     local pid="${1:-}"
     if ! is_integer "$pid"; then
@@ -1294,20 +1246,6 @@ tmux_client_pid_is_remote_ssh() {
     process_env_has_ssh "$pid" && return 0
     process_tree_has_sshd "$pid" && return 0
     return 1
-}
-
-tmux_notify_should_suppress_remote_client() {
-    if is_truthy "${TMUX_NOTIFY_REMOTE:-0}"; then
-        return 1
-    fi
-
-    local session=""
-    session="$(get_current_tmux_session 2>/dev/null || true)"
-    if [ -z "$session" ]; then
-        return 1
-    fi
-
-    tmux_session_has_remote_ssh_client "$session"
 }
 
 # =============================================================================
@@ -1556,21 +1494,6 @@ tmux_notify_inbox_clear_all() {
         rm -rf "$dir" 2>/dev/null || true
     done
     tmux_notify_inbox_sync_counts
-}
-
-tmux_notify_inbox_target_visible() {
-    local target="$1" info=""
-    info="$(tmux_notify_inbox_target_info "$target")"
-    [ -n "$info" ] || return 1
-    local session_id window_id pane_id session_name window_index
-    IFS='|' read -r session_id window_id pane_id session_name window_index <<<"$info"
-    local row=""
-    while IFS= read -r row; do
-        [ -n "$row" ] || continue
-        read_tmux_client_row "$row"
-        [ "$CLIENT_PANE_ID" = "$pane_id" ] && return 0
-    done <<<"$(tmux_terminal_client_rows)"
-    return 1
 }
 
 tmux_notify_route_notification() {
