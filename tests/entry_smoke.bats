@@ -762,7 +762,7 @@ FAKE
     mkdir -p "$bindir"
     cat >"$bindir/tmux-notify-jump" <<'FAKE'
 #!/usr/bin/env bash
-printf '%s\n' "${TMUX_NOTIFY_TMUX_SOCKET:-unset}" >"$TEST_TEMP_DIR/tmux-uninit.socket"
+printf '%s\n' "$*" >"$TEST_TEMP_DIR/tmux-uninit.args"
 FAKE
     chmod +x "$bindir/tmux-notify-jump"
 
@@ -771,7 +771,40 @@ FAKE
         --tmux-socket /tmp/example.sock
 
     [ "$status" -eq 0 ]
-    [ "$(cat "$TEST_TEMP_DIR/tmux-uninit.socket")" = "/tmp/example.sock" ]
+    [ "$(cat "$TEST_TEMP_DIR/tmux-uninit.args")" = \
+        "--tmux-uninit --tmux-socket /tmp/example.sock" ]
+}
+
+@test "tmux internal socket option overrides user configuration" {
+    fake_bin="$TEST_TEMP_DIR/bin"
+    config="$TEST_TEMP_DIR/env"
+    mkdir -p "$fake_bin"
+    printf '%s\n' 'TMUX_NOTIFY_TMUX_SOCKET=/tmp/config.sock' >"$config"
+    cat >"$fake_bin/tmux" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TEMP_DIR/tmux.log"
+if [ "${1:-}" = "-S" ]; then
+    shift 2
+fi
+if [ "${1:-}" = "display-message" ] && [ "${2:-}" = "-p" ]; then
+    case "${3:-}" in
+        '#{pid}') printf '4242\n' ;;
+        '#{socket_path}') printf '/tmp/cli.sock\n' ;;
+    esac
+fi
+FAKE
+    chmod +x "$fake_bin/tmux"
+
+    run env PATH="$fake_bin:$PATH" TEST_TEMP_DIR="$TEST_TEMP_DIR" \
+        XDG_CACHE_HOME="$TEST_TEMP_DIR/cache" TMUX_NOTIFY_CONFIG="$config" \
+        "$PROJECT_ROOT/tmux-notify-jump" --tmux-uninit \
+        --tmux-socket /tmp/cli.sock
+
+    [ "$status" -eq 0 ]
+    run rg -F -- '-S /tmp/cli.sock' "$TEST_TEMP_DIR/tmux.log"
+    [ "$status" -eq 0 ]
+    run rg -F -- '/tmp/config.sock' "$TEST_TEMP_DIR/tmux.log"
+    [ "$status" -eq 1 ]
 }
 
 @test "install.sh: configure-tmux quotes install paths with spaces" {

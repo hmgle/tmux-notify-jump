@@ -14,8 +14,27 @@ load_user_config
 TMUX_NOTIFY_ENTRYPOINT="$SCRIPT_DIR/tmux-notify-jump"
 export TMUX_NOTIFY_ENTRYPOINT
 
+parse_tmux_integration_args() {
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --tmux-socket)
+                shift
+                [ "$#" -gt 0 ] || die "--tmux-socket requires an argument"
+                TMUX_NOTIFY_TMUX_SOCKET="$1"
+                export TMUX_NOTIFY_TMUX_SOCKET
+                ;;
+            *)
+                die "Unknown tmux integration option: $1"
+                ;;
+        esac
+        shift
+    done
+}
+
 case "${1:-}" in
     --tmux-init)
+        shift
+        parse_tmux_integration_args "$@"
         if [ -z "${TMUX_NOTIFY_TMUX_KEY:-}" ] && [ -n "${TMUX_NOTIFY_KEY:-}" ]; then
             TMUX_NOTIFY_TMUX_KEY="$TMUX_NOTIFY_KEY"
             export TMUX_NOTIFY_TMUX_KEY
@@ -24,6 +43,8 @@ case "${1:-}" in
         exit 0
         ;;
     --tmux-uninit)
+        shift
+        parse_tmux_integration_args "$@"
         tmux_notify_tmux_uninit
         exit 0
         ;;

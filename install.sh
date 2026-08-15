@@ -762,7 +762,7 @@ if [ "$UNINSTALL" -eq 1 ]; then
     if [ "$CONFIGURE_TMUX" -eq 1 ] && [ -x "$BINDIR/tmux-notify-jump" ]; then
         tmux_uninit_cmd=("$BINDIR/tmux-notify-jump" --tmux-uninit)
         if [ -n "$TMUX_SOCKET_PATH" ]; then
-            tmux_uninit_cmd=(env "TMUX_NOTIFY_TMUX_SOCKET=$TMUX_SOCKET_PATH" "${tmux_uninit_cmd[@]}")
+            tmux_uninit_cmd+=(--tmux-socket "$TMUX_SOCKET_PATH")
         fi
         "${tmux_uninit_cmd[@]}" || \
             echo "Warning: could not remove state from the running tmux server" >&2
