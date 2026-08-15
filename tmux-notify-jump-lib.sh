@@ -1484,7 +1484,7 @@ tmux_notify_inbox_enqueue() {
 }
 
 tmux_notify_inbox_ack_pane() {
-    local pane_id="$1" root="" kind="" key="" dir="" changed=0
+    local pane_id="$1" root="" kind="" key="" dir=""
     root="$(tmux_notify_inbox_root)"
     tmux_notify_inbox_secure_dir "$root" || return 1
     for kind in attention complete; do
@@ -1492,11 +1492,12 @@ tmux_notify_inbox_ack_pane() {
         dir="$root/$key"
         [ -d "$dir" ] || continue
         rm -rf "$dir" 2>/dev/null || true
-        changed=1
     done
-    if [ "$changed" -eq 1 ]; then
-        tmux_notify_inbox_sync_counts
-    fi
+    # Resynchronize even when nothing matched. The counts arm the tmux-side
+    # hook guard, so entries lost outside this flow (a cleared cache, a moved
+    # root) would otherwise keep stale counts armed and re-run this script on
+    # every pane switch without ever converging.
+    tmux_notify_inbox_sync_counts
 }
 
 tmux_notify_inbox_clear_all() {

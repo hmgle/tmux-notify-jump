@@ -276,13 +276,32 @@ tmux_cmd() {
     [ "$TMUX_NOTIFY_ROUTE_DESKTOP" = "1" ]
 }
 
-@test "ack miss skips count synchronization" {
+@test "ack miss still resynchronizes counts" {
     : >"$TMUX_LOG"
 
     tmux_notify_inbox_ack_pane "%99"
 
-    run rg 'set-option|refresh-client' "$TMUX_LOG"
-    [ "$status" -eq 1 ]
+    run rg 'set-option -gq @tmux-notify-jump-attention 0' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+    run rg 'set-option -gq @tmux-notify-jump-complete 0' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+}
+
+@test "ack converges counts after entries vanish outside the Inbox flow" {
+    tmux_notify_inbox_enqueue "%9" complete Codex "Done"
+    [ "$TMUX_NOTIFY_INBOX_COMPLETE" = "1" ]
+
+    # Simulate a cleared cache: the tmux counts still arm the hook guard, so
+    # the next acknowledgement must drive them back to zero.
+    rm -rf "$(tmux_notify_inbox_root)"
+    : >"$TMUX_LOG"
+
+    tmux_notify_inbox_ack_pane "%1"
+
+    [ "$TMUX_NOTIFY_INBOX_COMPLETE" = "0" ]
+    [ "$TMUX_NOTIFY_INBOX_ATTENTION" = "0" ]
+    run rg 'set-option -gq @tmux-notify-jump-complete 0' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
 }
 
 @test "ack client ignores an empty hook client" {
