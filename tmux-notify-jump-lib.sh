@@ -1301,7 +1301,9 @@ tmux_notify_inbox_root() {
     configured_root="$(
         tmux_cmd show-option -gqv @tmux-notify-jump-inbox-root 2>/dev/null || true
     )"
-    if [ -n "$configured_root" ]; then
+    # The option is user-writable and this path drives mkdir and rm, so only
+    # honor an absolute path and fall back to the derived root otherwise.
+    if [ -n "$configured_root" ] && [[ "$configured_root" == /* ]]; then
         printf '%s' "$configured_root"
         return 0
     fi

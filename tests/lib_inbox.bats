@@ -143,6 +143,16 @@ tmux_cmd() {
     [ "$(tmux_notify_inbox_root)" = "$expected_root" ]
 }
 
+@test "Inbox root rejects a non-absolute pinned option" {
+    expected_root="$(tmux_notify_inbox_default_root)"
+
+    FAKE_INBOX_ROOT="relative/inbox"
+    [ "$(tmux_notify_inbox_root)" = "$expected_root" ]
+
+    FAKE_INBOX_ROOT="$TEST_TEMP_DIR/absolute-inbox"
+    [ "$(tmux_notify_inbox_root)" = "$TEST_TEMP_DIR/absolute-inbox" ]
+}
+
 @test "Inbox cache is private and omits notification bodies" {
     previous_umask="$(umask)"
     umask 022
