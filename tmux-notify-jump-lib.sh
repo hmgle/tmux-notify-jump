@@ -220,7 +220,10 @@ trim_ws() {
 #   - Calls die() if tool not found
 require_tool() {
     local tool="$1"
-    command -v "$tool" >/dev/null 2>&1 || die "Missing dependency: $tool"
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        log_debug "Missing dependency: $tool"
+        die "Missing dependency: $tool"
+    fi
 }
 
 # =============================================================================

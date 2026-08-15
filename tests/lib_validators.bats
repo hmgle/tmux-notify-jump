@@ -3,6 +3,27 @@
 
 load 'test_helper'
 
+setup() {
+    setup_temp_dir
+}
+
+teardown() {
+    teardown_temp_dir
+}
+
+@test "require_tool: logs a missing dependency in debug mode" {
+    export TMUX_NOTIFY_DEBUG=1
+    export TMUX_NOTIFY_DEBUG_LOG="$TEST_TEMP_DIR/debug.log"
+
+    run require_tool "tmux-notify-jump-missing-test-tool"
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"Missing dependency: tmux-notify-jump-missing-test-tool"* ]]
+    run rg -F 'Missing dependency: tmux-notify-jump-missing-test-tool' \
+        "$TMUX_NOTIFY_DEBUG_LOG"
+    [ "$status" -eq 0 ]
+}
+
 # =============================================================================
 # is_integer() tests
 # =============================================================================

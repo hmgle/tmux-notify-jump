@@ -198,6 +198,11 @@ macOS note: in `--ui notification` mode, if the script is detached (or `terminal
 CLI flags override environment variables where applicable.
 
 - `TMUX_NOTIFY_CONFIG`: optional env file to load before running (default: `~/.config/tmux-notify-jump/env`)
+- `TMUX_NOTIFY_DEBUG`: write diagnostic details, including failures from detached
+  notification processes, when set to `1`.
+- `TMUX_NOTIFY_DEBUG_LOG`: debug log path (default:
+  `$XDG_CACHE_HOME/tmux-notify-jump/debug.log` or
+  `~/.cache/tmux-notify-jump/debug.log`).
 - `TMUX_NOTIFY_WINDOW_ID`: explicit X11 window id to focus (overrides auto-detection)
 - `TMUX_NOTIFY_TMUX_SOCKET`: tmux server socket path (passed to `tmux -S`; useful if you run multiple tmux servers)
 - `TMUX_NOTIFY_FALLBACK_TARGET`: if not running inside tmux, fall back to the most recently active tmux client pane as the jump target (`0` disables; default: `0`)
