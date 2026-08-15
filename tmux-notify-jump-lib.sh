@@ -1752,15 +1752,9 @@ tmux_notify_tmux_prefix_binding() {
     ' || true
 }
 
-# Print the command bound to "<hook>[900]", or nothing when it is unset.
+# Print the command bound to "<hook>[900]" in a show-hooks table.
 tmux_notify_tmux_hook_command() {
-    local hook="$1" output=""
-    output="$(tmux_cmd show-hooks -g "$hook" 2>/dev/null || true)"
-    # Releases that do not accept a hook name argument print nothing here; read
-    # the whole table instead so uninstall still finds the entry to remove.
-    if [ -z "$output" ]; then
-        output="$(tmux_cmd show-hooks -g 2>/dev/null || true)"
-    fi
+    local hook="$1" output="$2"
     printf '%s\n' "$output" | awk -v name="${hook}[900]" '
         $1 == name { sub(/^[^ ]+ /, ""); print; exit }
     ' || true
@@ -1820,7 +1814,7 @@ tmux_notify_tmux_init() {
 
 tmux_notify_tmux_uninit() {
     local server_pid="" socket_path="" configured_key="" key="" status="" status_segment=""
-    local existing_binding="" hook="" hook_command="" option=""
+    local existing_binding="" hook="" hook_command="" hook_table="" option=""
     server_pid="$(tmux_cmd display-message -p '#{pid}' 2>/dev/null || true)"
     [ -n "$server_pid" ] || return 0
     socket_path="$(tmux_cmd display-message -p '#{socket_path}' 2>/dev/null || true)"
@@ -1835,8 +1829,9 @@ tmux_notify_tmux_uninit() {
         tmux_cmd unbind-key -T prefix "$key" 2>/dev/null || true
     fi
 
+    hook_table="$(tmux_cmd show-hooks -g 2>/dev/null || true)"
     for hook in client-attached client-session-changed after-select-pane after-select-window client-focus-in; do
-        hook_command="$(tmux_notify_tmux_hook_command "$hook")"
+        hook_command="$(tmux_notify_tmux_hook_command "$hook" "$hook_table")"
         if [[ "$hook_command" == *"--inbox-ack-client"* ]]; then
             tmux_cmd set-hook -gu "${hook}[900]" 2>/dev/null || true
         fi

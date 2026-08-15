@@ -26,7 +26,6 @@ setup() {
     FAKE_KEY_OPTION=""
     FAKE_BINDING=""
     FAKE_HOOK_COMMAND=""
-    FAKE_HOOK_NAME_ARG=1
     FAKE_SWITCH_FAIL=0
     FAKE_PANE_EXISTS=1
     FAKE_WINDOW_EXISTS=1
@@ -81,8 +80,6 @@ tmux_cmd() {
         show-hooks)
             [ -n "$FAKE_HOOK_COMMAND" ] || return 0
             if [ -n "${3:-}" ]; then
-                # Releases that do not accept a hook name answer with nothing.
-                [ "$FAKE_HOOK_NAME_ARG" -eq 1 ] || return 0
                 printf '%s[900] %s\n' "$3" "$FAKE_HOOK_COMMAND"
                 return 0
             fi
@@ -531,13 +528,17 @@ tmux_cmd() {
     [ "$status" -eq 0 ]
 }
 
-@test "tmux uninit reads the full hook table when named lookup is unsupported" {
-    FAKE_HOOK_NAME_ARG=0
+@test "tmux uninit reads the full hook table once" {
     FAKE_KEY_OPTION=M
     FAKE_HOOK_COMMAND='if-shell -F 1 { run-shell -b "tmux-notify-jump --inbox-ack-client client" }'
 
     tmux_notify_tmux_uninit
 
+    run rg -c '^show-hooks -g$' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+    [ "$output" = "1" ]
+    run rg '^show-hooks -g .+' "$TMUX_LOG"
+    [ "$status" -eq 1 ]
     run rg -c '^set-hook -gu .+\[900\]$' "$TMUX_LOG"
     [ "$status" -eq 0 ]
     [ "$output" = "5" ]
