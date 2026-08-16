@@ -1822,7 +1822,7 @@ tmux_notify_tmux_init() {
         status="${status%%"$status_segment"*}${status#*"$status_segment"}"
         tmux_cmd set-option -g status-right "$status"
     fi
-    local hook major="" hook_failed=0 hook_command=""
+    local hook major="" hook_failed=0 hook_command="" hook_table="" existing_hook=""
     # Acknowledgement needs a different tmux format per hook family. Client
     # hooks name the client that moved, but the after-select hooks expand
     # #{hook_client} empty, so guarding those on it would silently disable
@@ -1832,6 +1832,7 @@ tmux_notify_tmux_init() {
     if [ -n "$major" ] && [ "$major" -lt 3 ]; then
         warn "tmux 3.0 or newer is required for automatic Inbox acknowledgement hooks"
     else
+        hook_table="$(tmux_cmd show-hooks -g 2>/dev/null || true)"
         for hook in client-attached client-session-changed after-select-pane after-select-window client-focus-in; do
             case "$hook" in
                 after-select-*)
@@ -1843,6 +1844,18 @@ tmux_notify_tmux_init() {
                         "$quoted_path" --inbox-ack-client '#{hook_client}')"
                     ;;
             esac
+            # Index 900 is only conventionally reserved, not private: tmux
+            # writes "set-hook -g" to index 0 and appends "-ga" from there, so
+            # nothing but a deliberate [900] can land here. Keep such a command
+            # rather than overwriting it, the way the key binding below keeps a
+            # slot this tool does not own. Uninit already refuses to remove
+            # foreign hooks, which does not help once init has replaced one.
+            existing_hook="$(tmux_notify_tmux_hook_command "$hook" "$hook_table")"
+            if [ -n "$existing_hook" ] \
+                && ! tmux_notify_tmux_is_ack_command "$existing_hook"; then
+                warn "tmux hook ${hook}[900] is already set; leaving it unchanged"
+                continue
+            fi
             if ! tmux_cmd set-hook -g "${hook}[900]" \
                 "$hook_command" 2>/dev/null; then
                 hook_failed=1

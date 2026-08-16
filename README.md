@@ -201,6 +201,18 @@ binding; pass `--tmux-key <key>` to choose another key. Set
 `TMUX_NOTIFY_TMUX_STATUS=0` to keep the hooks and binding without appending the
 Inbox counts to `status-right`.
 
+Acknowledgement hooks are installed at array index `900` of `client-attached`,
+`client-session-changed`, `after-select-pane`, `after-select-window`, and
+`client-focus-in`. That index is only conventionally reserved: a plain
+`set-hook -g <hook>` writes index `0` and `set-hook -ga` appends from there, so
+nothing but a deliberate `[900]` collides. Initialization warns and keeps a
+command it did not install, and uninstall removes only its own. Note that a
+plain `set-hook -g` replaces the whole array, including index `900`. If you set
+one of these five hooks yourself, use `set-hook -ga` to append; a plain
+`set-hook -g` evaluated after `--tmux-init` silently disables automatic
+acknowledgement, leaving Inbox entries armed until you visit them via
+`prefix+N`.
+
 macOS note: in `--ui notification` mode, if the script is detached (or `terminal-notifier` doesn’t support `-wait`), it falls back to `terminal-notifier -execute`, where any click triggers the jump (no separate “Dismiss” action). Use `--ui dialog` for explicit buttons.
 
 ## Environment variables

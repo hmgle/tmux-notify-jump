@@ -831,3 +831,31 @@ tmux_cmd() {
     run rg '^bind-key N ' "$TMUX_LOG"
     [ "$status" -eq 1 ]
 }
+
+@test "tmux init leaves a hook slot it does not own unchanged" {
+    # Index 900 is conventional, not private: warn and keep a command this tool
+    # did not install instead of silently replacing it.
+    FAKE_HOOK_COMMAND='display-message "user hook"'
+    _QUIET=0
+
+    run tmux_notify_tmux_init
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"after-select-pane[900] is already set"* ]]
+    [[ "$output" == *"client-attached[900] is already set"* ]]
+    run rg -F 'set-hook -g ' "$TMUX_LOG"
+    [ "$status" -eq 1 ]
+}
+
+@test "tmux init refreshes hook slots holding its own command" {
+    FAKE_HOOK_COMMAND='if-shell -F 1 { run-shell -b "tmux-notify-jump --inbox-ack-pane %1" }'
+    _QUIET=0
+
+    run tmux_notify_tmux_init
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"already set"* ]]
+    run rg -c '^set-hook -g .+\[900\] ' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+    [ "$output" = "5" ]
+}

@@ -131,3 +131,33 @@ teardown() {
     [ "$status" -eq 0 ]
     [[ "$output" != *'--inbox-next'* ]]
 }
+
+@test "init leaves a hook slot it does not own unchanged" {
+    "$PROJECT_ROOT/tmux-notify-jump" --tmux-uninit >/dev/null
+    tmux -S "$TMUX_SERVER_SOCKET" set-hook -g 'after-select-pane[900]' \
+        'display-message user-hook'
+
+    run env -u _QUIET "$PROJECT_ROOT/tmux-notify-jump" --tmux-init
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'after-select-pane[900] is already set'* ]]
+
+    run tmux -S "$TMUX_SERVER_SOCKET" show-hooks -g
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'after-select-pane[900] display-message user-hook'* ]]
+    # The other four slots were free, so acknowledgement still installs there.
+    [ "$(printf '%s\n' "$output" | rg -c -- '--inbox-ack-')" = "4" ]
+}
+
+@test "uninit leaves a foreign hook slot in place" {
+    "$PROJECT_ROOT/tmux-notify-jump" --tmux-uninit >/dev/null
+    tmux -S "$TMUX_SERVER_SOCKET" set-hook -g 'after-select-pane[900]' \
+        'display-message user-hook'
+    "$PROJECT_ROOT/tmux-notify-jump" --tmux-init >/dev/null
+
+    "$PROJECT_ROOT/tmux-notify-jump" --tmux-uninit >/dev/null
+
+    run tmux -S "$TMUX_SERVER_SOCKET" show-hooks -g
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'after-select-pane[900] display-message user-hook'* ]]
+    [[ "$output" != *'--inbox-ack-'* ]]
+}
