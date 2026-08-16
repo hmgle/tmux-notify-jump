@@ -1596,14 +1596,22 @@ tmux_notify_inbox_ack_pane() {
 }
 
 tmux_notify_inbox_clear_all() {
-    local root="" dir
+    local root="" dir status=0
+    TMUX_NOTIFY_INBOX_CLEARED=0
+    TMUX_NOTIFY_INBOX_CLEAR_FAILURES=0
     root="$(tmux_notify_inbox_root)"
     tmux_notify_inbox_secure_dir "$root" || return 1
     for dir in "$root"/*; do
         tmux_notify_inbox_entry_dir_is_valid "$dir" || continue
-        rm -rf "$dir" 2>/dev/null || true
+        if rm -rf "$dir" 2>/dev/null; then
+            TMUX_NOTIFY_INBOX_CLEARED=$((TMUX_NOTIFY_INBOX_CLEARED + 1))
+        else
+            TMUX_NOTIFY_INBOX_CLEAR_FAILURES=$((TMUX_NOTIFY_INBOX_CLEAR_FAILURES + 1))
+            status=1
+        fi
     done
-    tmux_notify_inbox_sync_counts
+    tmux_notify_inbox_sync_counts || status=1
+    return "$status"
 }
 
 tmux_notify_route_notification() {
@@ -1831,7 +1839,7 @@ tmux_notify_tmux_init() {
 tmux_notify_tmux_uninit() {
     local server_pid="" socket_path="" configured_key="" key="" status="" status_segment=""
     local existing_binding="" hook="" hook_command="" hook_table="" option=""
-    local inbox_root="" counts=""
+    local inbox_root="" counts="" cleared=0 clear_failures=0 clear_status=0
     server_pid="$(tmux_cmd display-message -p '#{pid}' 2>/dev/null || true)"
     [ -n "$server_pid" ] || return 0
     socket_path="$(tmux_cmd display-message -p '#{socket_path}' 2>/dev/null || true)"
@@ -1861,13 +1869,9 @@ tmux_notify_tmux_uninit() {
         return 0
     fi
 
-    local cleared=0 entry="" resolved_root=""
-    resolved_root="$(tmux_notify_inbox_root)"
-    for entry in "$resolved_root"/*; do
-        tmux_notify_inbox_entry_dir_is_valid "$entry" || continue
-        cleared=$((cleared + 1))
-    done
-    tmux_notify_inbox_clear_all >/dev/null 2>&1 || true
+    tmux_notify_inbox_clear_all >/dev/null 2>&1 || clear_status=$?
+    cleared="${TMUX_NOTIFY_INBOX_CLEARED:-0}"
+    clear_failures="${TMUX_NOTIFY_INBOX_CLEAR_FAILURES:-0}"
 
     if [[ "$existing_binding" == *"--inbox-next"* ]]; then
         tmux_cmd unbind-key -T prefix "$key" 2>/dev/null || true
@@ -1892,7 +1896,12 @@ tmux_notify_tmux_uninit() {
     tmux_cmd refresh-client -S 2>/dev/null || true
     # Name the server that was changed: uninstall targets whichever server the
     # socket resolves to, which is not necessarily the one the user expects.
-    log "Removed tmux Inbox state from ${socket_path:-the default socket} (server pid $server_pid, $cleared Inbox entries)"
+    if [ "$clear_status" -eq 0 ]; then
+        log "Removed tmux Inbox state from ${socket_path:-the default socket} (server pid $server_pid, $cleared Inbox entries)"
+        return 0
+    fi
+    warn "Inbox cleanup incomplete on ${socket_path:-the default socket} (server pid $server_pid, $cleared Inbox entries removed, $clear_failures removal failures)"
+    return 1
 }
 
 cache_root_dir() {

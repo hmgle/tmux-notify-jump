@@ -397,6 +397,33 @@ tmux_cmd() {
     [ -d "$root/project" ]
 }
 
+@test "Inbox clear counts successful removals and reports failures" {
+    root="$(tmux_notify_inbox_root)"
+    removed_key="$(printf '%s' 'removed entry' | sha256_hex_stdin)"
+    failed_key="$(printf '%s' 'failed entry' | sha256_hex_stdin)"
+    removed_entry="$root/$removed_key"
+    failed_entry="$root/$failed_key"
+    mkdir -p "$removed_entry" "$failed_entry"
+    : >"$removed_entry/kind"
+    : >"$failed_entry/kind"
+    rm() {
+        local arg="" last=""
+        for arg in "$@"; do last="$arg"; done
+        [ "$last" != "$failed_entry" ] || return 1
+        command rm "$@"
+    }
+
+    clear_status=0
+    tmux_notify_inbox_clear_all || clear_status=$?
+    unset -f rm
+
+    [ "$clear_status" -eq 1 ]
+    [ "$TMUX_NOTIFY_INBOX_CLEARED" -eq 1 ]
+    [ "$TMUX_NOTIFY_INBOX_CLEAR_FAILURES" -eq 1 ]
+    [ ! -e "$removed_entry" ]
+    [ -d "$failed_entry" ]
+}
+
 @test "ack client ignores an empty hook client" {
     : >"$TMUX_LOG"
 
@@ -604,6 +631,31 @@ tmux_cmd() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"2 Inbox entries"* ]]
     [ -z "$(find "$FAKE_INBOX_ROOT" -mindepth 1 -type d -print -quit)" ]
+}
+
+@test "tmux uninit reports incomplete Inbox cleanup" {
+    _QUIET=0
+    FAKE_KEY_OPTION=N
+    FAKE_INBOX_ROOT="$(tmux_notify_inbox_default_root)"
+    entry_key="$(printf '%s' 'failed uninstall entry' | sha256_hex_stdin)"
+    failed_entry="$FAKE_INBOX_ROOT/$entry_key"
+    mkdir -p "$failed_entry"
+    : >"$failed_entry/kind"
+    rm() {
+        local arg="" last=""
+        for arg in "$@"; do last="$arg"; done
+        [ "$last" != "$failed_entry" ] || return 1
+        command rm "$@"
+    }
+
+    run tmux_notify_tmux_uninit
+    unset -f rm
+
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Inbox cleanup incomplete"* ]]
+    [[ "$output" == *"0 Inbox entries removed"* ]]
+    [[ "$output" == *"1 removal failures"* ]]
+    [ -d "$failed_entry" ]
 }
 
 @test "tmux uninit removes its running server state" {

@@ -187,14 +187,15 @@ The configuration block is marked and idempotent. Use
 leaving the rest of the tmux configuration intact. The same command also clears
 a running server's Inbox, status segment, hooks, and tool-owned key binding
 before removing the executable, and reports the socket it changed together with
-how many Inbox entries it discarded. That server is the one `$TMUX` points at,
-otherwise the default socket; pass `--tmux-socket <path>` to name a different
-one when you run several servers. A server that carries none of this tool's
-state is reported and left untouched. That check only recognizes servers this
-tool never configured: servers sharing a `~/.tmux.conf` all run `--tmux-init`
-and carry identical marks, so naming the wrong socket does clear that server's
-Inbox. Check the reported socket, and pass `--tmux-socket` deliberately when
-more than one server is configured. If
+how many Inbox entries it removed. Incomplete Inbox cleanup is reported as an
+error. That server is the one `$TMUX` points at, otherwise the default socket;
+pass `--tmux-socket <path>` to name a different one when you run several
+servers. A server that carries none of this tool's state is reported and left
+untouched. That check only recognizes servers this tool never configured:
+servers sharing a `~/.tmux.conf` all run `--tmux-init` and carry identical
+marks, so naming the wrong socket does clear that server's Inbox. Check the
+reported socket, and pass `--tmux-socket` deliberately when more than one server
+is configured. If
 `prefix+N` is already bound, initialization warns and preserves the existing
 binding; pass `--tmux-key <key>` to choose another key. Set
 `TMUX_NOTIFY_TMUX_STATUS=0` to keep the hooks and binding without appending the
