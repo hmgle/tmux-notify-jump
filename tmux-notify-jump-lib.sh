@@ -1376,24 +1376,31 @@ tmux_notify_compact_text() {
     truncate_text 512 "$text"
 }
 
+# Read one Inbox field into the variable named by $3.
+#
+# Entry metadata is stored one field per file and read field by field on hot
+# paths: the focus hooks acknowledge on every pane switch and every count sync
+# walks the whole Inbox. A command substitution per field forks a subshell and
+# dominates that cost, so use the read builtin and assign indirectly.
+tmux_notify_inbox_read_field() {
+    local dir="$1" name="$2" var="$3" value=""
+    read -r value 2>/dev/null <"$dir/$name" || true
+    printf -v "$var" '%s' "$value"
+}
+
 tmux_notify_inbox_entry_read() {
     local dir="$1"
-    INBOX_KIND="$(cat "$dir/kind" 2>/dev/null || true)"
-    INBOX_COUNT="$(cat "$dir/count" 2>/dev/null || true)"
-    INBOX_FIRST_MS="$(cat "$dir/first_ms" 2>/dev/null || true)"
-    # shellcheck disable=SC2034
-    INBOX_LAST_MS="$(cat "$dir/last_ms" 2>/dev/null || true)"
-    INBOX_PANE_ID="$(cat "$dir/pane_id" 2>/dev/null || true)"
-    INBOX_WINDOW_ID="$(cat "$dir/window_id" 2>/dev/null || true)"
-    INBOX_SESSION_ID="$(cat "$dir/session_id" 2>/dev/null || true)"
-    # shellcheck disable=SC2034
-    INBOX_SESSION_NAME="$(cat "$dir/session_name" 2>/dev/null || true)"
-    # shellcheck disable=SC2034
-    INBOX_WINDOW_INDEX="$(cat "$dir/window_index" 2>/dev/null || true)"
-    # shellcheck disable=SC2034
-    INBOX_SOURCE="$(cat "$dir/source" 2>/dev/null || true)"
-    # shellcheck disable=SC2034
-    INBOX_TITLE="$(cat "$dir/title" 2>/dev/null || true)"
+    tmux_notify_inbox_read_field "$dir" kind INBOX_KIND
+    tmux_notify_inbox_read_field "$dir" count INBOX_COUNT
+    tmux_notify_inbox_read_field "$dir" first_ms INBOX_FIRST_MS
+    tmux_notify_inbox_read_field "$dir" last_ms INBOX_LAST_MS
+    tmux_notify_inbox_read_field "$dir" pane_id INBOX_PANE_ID
+    tmux_notify_inbox_read_field "$dir" window_id INBOX_WINDOW_ID
+    tmux_notify_inbox_read_field "$dir" session_id INBOX_SESSION_ID
+    tmux_notify_inbox_read_field "$dir" session_name INBOX_SESSION_NAME
+    tmux_notify_inbox_read_field "$dir" window_index INBOX_WINDOW_INDEX
+    tmux_notify_inbox_read_field "$dir" source INBOX_SOURCE
+    tmux_notify_inbox_read_field "$dir" title INBOX_TITLE
 }
 
 tmux_notify_inbox_secure_dir() {
@@ -1437,8 +1444,8 @@ tmux_notify_inbox_sync_counts() {
     for dir in "$root"/*; do
         tmux_notify_inbox_entry_dir_is_valid "$dir" || continue
         local kind="" count=""
-        kind="$(cat "$dir/kind" 2>/dev/null || true)"
-        count="$(cat "$dir/count" 2>/dev/null || true)"
+        tmux_notify_inbox_read_field "$dir" kind kind
+        tmux_notify_inbox_read_field "$dir" count count
         [[ "$count" =~ ^[0-9]+$ ]] || count=1
         if [ "$kind" = "attention" ]; then
             attention=$((attention + count))
@@ -1477,7 +1484,7 @@ tmux_notify_inbox_gc() {
     local dir last
     for dir in "$root"/*; do
         tmux_notify_inbox_entry_dir_is_valid "$dir" || continue
-        last="$(cat "$dir/last_ms" 2>/dev/null || true)"
+        tmux_notify_inbox_read_field "$dir" last_ms last
         if [[ "$last" =~ ^[0-9]+$ ]] && [ "$ttl" -gt 0 ] && [ "$now" -gt "$last" ] && [ $((now - last)) -ge "$ttl" ]; then
             rm -rf "$dir" 2>/dev/null || true
         fi
@@ -1486,7 +1493,8 @@ tmux_notify_inbox_gc() {
         local count=0 list=""
         for dir in "$root"/*; do
             tmux_notify_inbox_entry_dir_is_valid "$dir" || continue
-            last="$(cat "$dir/last_ms" 2>/dev/null || echo 0)"
+            tmux_notify_inbox_read_field "$dir" last_ms last
+            [ -n "$last" ] || last=0
             # Embed a real newline. Feeding "\n" through printf '%b' would also
             # expand any backslash escape the cache path happens to contain.
             list+="$last|$dir"$'\n'
