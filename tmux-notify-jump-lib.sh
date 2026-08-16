@@ -1776,6 +1776,23 @@ tmux_notify_tmux_prefix_binding() {
     ' || true
 }
 
+# Print every prefix-table key bound to an Inbox jump command.
+#
+# The key and the install path are both user-configurable, so a binding this
+# tool left behind is recognized by its command rather than by the key it sits
+# on or the path it names. Looking only at the configured key would strand the
+# previous binding whenever either setting changes.
+tmux_notify_tmux_inbox_bindings() {
+    tmux_cmd list-keys -T prefix 2>/dev/null | awk '
+        index($0, "--inbox-next") == 0 { next }
+        {
+            for (i = 1; i <= NF - 2; i++) {
+                if ($i == "-T" && $(i + 1) == "prefix") { print $(i + 2); next }
+            }
+        }
+    ' || true
+}
+
 # Build the "<hook>[900]" acknowledgement command.
 #
 # The guard and the argument share one format, so a hook only spawns the script
@@ -1865,24 +1882,46 @@ tmux_notify_tmux_init() {
             warn "Some automatic Inbox acknowledgement hooks could not be installed"
         fi
     fi
-    local existing_binding="" serialized_quoted_path=""
+    local existing_binding="" serialized_quoted_path="" stale_key="" stale_count=0
+    local binding_is_current=0
     serialized_quoted_path="${quoted_path//\\/\\\\}"
     existing_binding="$(tmux_notify_tmux_prefix_binding "$key")"
-    if [ -n "$existing_binding" ]; then
-        if [[ "$existing_binding" != *"$quoted_path --inbox-next"* \
-            && "$existing_binding" != *"$serialized_quoted_path --inbox-next"* ]]; then
-            warn "tmux prefix+$key is already bound; leaving it unchanged"
+    if [[ "$existing_binding" == *"$quoted_path --inbox-next"* \
+        || "$existing_binding" == *"$serialized_quoted_path --inbox-next"* ]]; then
+        binding_is_current=1
+    fi
+    # An earlier init may have bound a different key, or this key against a
+    # different install directory. Both keep firing, and the one naming the old
+    # path breaks as soon as that install is removed, so retire them before
+    # binding the current key. They are found by command: judging by path alone
+    # would file this tool's own stale binding as a third-party conflict and
+    # warn about one the user never created.
+    while IFS= read -r stale_key; do
+        [ -n "$stale_key" ] || continue
+        if [ "$stale_key" = "$key" ]; then
+            [ "$binding_is_current" -eq 0 ] || continue
+            existing_binding=""
         fi
-    else
-        tmux_cmd bind-key "$key" \
-            "run-shell -b 'TMUX_NOTIFY_SENDER_TTY=\"#{client_tty}\" $quoted_path --inbox-next'"
+        tmux_cmd unbind-key -T prefix "$stale_key" 2>/dev/null || true
+        stale_count=$((stale_count + 1))
+    done < <(tmux_notify_tmux_inbox_bindings)
+    if [ "$stale_count" -gt 0 ]; then
+        log "Removed $stale_count tmux Inbox key binding(s) left by an earlier install"
+    fi
+    if [ "$binding_is_current" -eq 0 ]; then
+        if [ -n "$existing_binding" ]; then
+            warn "tmux prefix+$key is already bound; leaving it unchanged"
+        else
+            tmux_cmd bind-key "$key" \
+                "run-shell -b 'TMUX_NOTIFY_SENDER_TTY=\"#{client_tty}\" $quoted_path --inbox-next'"
+        fi
     fi
     tmux_notify_inbox_sync_counts
 }
 
 tmux_notify_tmux_uninit() {
-    local server_pid="" socket_path="" configured_key="" key="" status="" status_segment=""
-    local existing_binding="" hook="" hook_command="" hook_table="" option=""
+    local server_pid="" socket_path="" configured_key="" status="" status_segment=""
+    local inbox_bindings="" bound_key="" hook="" hook_command="" hook_table="" option=""
     local inbox_root="" counts="" cleared=0 clear_failures=0 clear_status=0
     server_pid="$(tmux_cmd display-message -p '#{pid}' 2>/dev/null || true)"
     [ -n "$server_pid" ] || return 0
@@ -1892,9 +1931,11 @@ tmux_notify_tmux_uninit() {
     configured_key="$(tmux_cmd show-option -gqv @tmux-notify-jump-key 2>/dev/null || true)"
     counts="$(tmux_cmd show-option -gqv @tmux-notify-jump-attention 2>/dev/null || true)"
     counts+="$(tmux_cmd show-option -gqv @tmux-notify-jump-complete 2>/dev/null || true)"
-    key="${configured_key:-${TMUX_NOTIFY_TMUX_KEY:-N}}"
-    case "$key" in [A-Za-z0-9]) ;; *) key=N ;; esac
-    existing_binding="$(tmux_notify_tmux_prefix_binding "$key")"
+    # Collect the bindings by command rather than by the configured key. The key
+    # is configurable, so earlier inits may have left jump bindings on keys the
+    # current option no longer names; keying off the option would leave those
+    # bound to the binary this uninstall is about to delete.
+    inbox_bindings="$(tmux_notify_tmux_inbox_bindings)"
     hook_table="$(tmux_cmd show-hooks -g 2>/dev/null || true)"
     status="$(tmux_cmd show-option -gqv status-right 2>/dev/null || true)"
     status_segment="$(tmux_notify_tmux_status_segment)"
@@ -1906,7 +1947,7 @@ tmux_notify_tmux_uninit() {
     # tmux configuration all carry the same marks, so this cannot single out the
     # intended one; report what was cleared so a wrong socket is visible.
     if [ -z "$inbox_root" ] && [ -z "$configured_key" ] && [ -z "$counts" ] \
-        && [[ "$existing_binding" != *"--inbox-next"* ]] \
+        && [ -z "$inbox_bindings" ] \
         && ! tmux_notify_tmux_is_ack_command "$hook_table" \
         && [[ "$status" != *"$status_segment"* ]]; then
         log "No tmux Inbox state on ${socket_path:-the default socket} (server pid $server_pid); left unchanged"
@@ -1917,9 +1958,10 @@ tmux_notify_tmux_uninit() {
     cleared="${TMUX_NOTIFY_INBOX_CLEARED:-0}"
     clear_failures="${TMUX_NOTIFY_INBOX_CLEAR_FAILURES:-0}"
 
-    if [[ "$existing_binding" == *"--inbox-next"* ]]; then
-        tmux_cmd unbind-key -T prefix "$key" 2>/dev/null || true
-    fi
+    while IFS= read -r bound_key; do
+        [ -n "$bound_key" ] || continue
+        tmux_cmd unbind-key -T prefix "$bound_key" 2>/dev/null || true
+    done <<<"$inbox_bindings"
 
     for hook in client-attached client-session-changed after-select-pane after-select-window client-focus-in; do
         hook_command="$(tmux_notify_tmux_hook_command "$hook" "$hook_table")"

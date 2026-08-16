@@ -29,6 +29,11 @@ inbox_count() {
     tmux -S "$TMUX_SERVER_SOCKET" show-option -gqv "@tmux-notify-jump-$1"
 }
 
+# Print the prefix-table lines that carry an Inbox jump binding.
+jump_bindings() {
+    tmux -S "$TMUX_SERVER_SOCKET" list-keys -T prefix | rg -F -- '--inbox-next' || true
+}
+
 # Hooks run through `run-shell -b`, so the count converges asynchronously.
 wait_for_inbox_count() {
     local name="$1" expected="$2" attempt=0
@@ -51,7 +56,7 @@ setup() {
     export TMUX_NOTIFY_CONFIG="$TEST_TEMP_DIR/absent-env"
     TMUX_SERVER_SOCKET="$TEST_TEMP_DIR/tmux.sock"
     export TMUX_NOTIFY_TMUX_SOCKET="$TMUX_SERVER_SOCKET"
-    unset TMUX TMUX_PANE
+    unset TMUX TMUX_PANE TMUX_NOTIFY_TMUX_KEY
 
     local major=""
     major="$(tmux_notify_tmux_major_version)"
@@ -130,6 +135,42 @@ teardown() {
     run tmux -S "$TMUX_SERVER_SOCKET" list-keys -T prefix
     [ "$status" -eq 0 ]
     [[ "$output" != *'--inbox-next'* ]]
+}
+
+@test "init retires a jump binding naming an earlier install path" {
+    # setup() bound prefix+N against $PROJECT_ROOT. Re-run init as if the tool
+    # had been reinstalled under a different --bindir: the stale binding still
+    # fires, and breaks as soon as the old install is removed.
+    TMUX_NOTIFY_ENTRYPOINT="$TEST_TEMP_DIR/relocated/tmux-notify-jump"
+    tmux_notify_tmux_init >/dev/null
+
+    bindings="$(jump_bindings)"
+    [ "$(printf '%s\n' "$bindings" | rg -c . )" = "1" ]
+    [[ "$bindings" == *"$TEST_TEMP_DIR/relocated/tmux-notify-jump --inbox-next"* ]]
+    [[ "$bindings" != *"$PROJECT_ROOT/tmux-notify-jump --inbox-next"* ]]
+}
+
+@test "init moves its jump binding when the configured key changes" {
+    TMUX_NOTIFY_ENTRYPOINT="$PROJECT_ROOT/tmux-notify-jump"
+    tmux -S "$TMUX_SERVER_SOCKET" set-option -g @tmux-notify-jump-key A
+
+    tmux_notify_tmux_init >/dev/null
+
+    bindings="$(jump_bindings)"
+    [ "$(printf '%s\n' "$bindings" | rg -c . )" = "1" ]
+    [[ "$bindings" == *' -T prefix A '* ]]
+}
+
+@test "uninit removes a jump binding the key option no longer names" {
+    TMUX_NOTIFY_ENTRYPOINT="$PROJECT_ROOT/tmux-notify-jump"
+    # Leave the binding on N while the option names A, the state a key change
+    # produced before init learned to migrate it.
+    tmux -S "$TMUX_SERVER_SOCKET" set-option -g @tmux-notify-jump-key A
+    [ -n "$(jump_bindings)" ]
+
+    "$PROJECT_ROOT/tmux-notify-jump" --tmux-uninit >/dev/null
+
+    [ -z "$(jump_bindings)" ]
 }
 
 @test "init leaves a hook slot it does not own unchanged" {

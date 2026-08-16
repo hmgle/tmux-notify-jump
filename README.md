@@ -196,8 +196,13 @@ servers sharing a `~/.tmux.conf` all run `--tmux-init` and carry identical
 marks, so naming the wrong socket does clear that server's Inbox. Check the
 reported socket, and pass `--tmux-socket` deliberately when more than one server
 is configured. If
-`prefix+N` is already bound, initialization warns and preserves the existing
-binding; pass `--tmux-key <key>` to choose another key. Set
+`prefix+N` is already bound to something else, initialization warns and
+preserves the existing binding; pass `--tmux-key <key>` to choose another key.
+Changing `--tmux-key` or reinstalling under a different `--bindir` migrates the
+binding: initialization finds jump bindings by command rather than by key, so it
+retires the one an earlier install left behind instead of leaving a second key
+bound, or leaving the current key pointing at an install path that no longer
+exists. Uninstall removes them the same way. Set
 `TMUX_NOTIFY_TMUX_STATUS=0` to keep the hooks and binding without appending the
 Inbox counts to `status-right`.
 

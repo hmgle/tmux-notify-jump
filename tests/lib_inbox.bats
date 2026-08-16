@@ -6,7 +6,7 @@ setup() {
     setup_temp_dir
     export XDG_CACHE_HOME="$TEST_TEMP_DIR/cache"
     export TMUX_NOTIFY_TMUX_SOCKET="$TEST_TEMP_DIR/tmux.sock"
-    unset TMUX
+    unset TMUX TMUX_NOTIFY_TMUX_KEY TMUX_NOTIFY_ENTRYPOINT
     export TMUX_NOTIFY_INBOX_TTL_MS=604800000
     export TMUX_NOTIFY_INBOX_MAX=100
     TMUX_LOG="$TEST_TEMP_DIR/tmux.log"
@@ -832,6 +832,38 @@ tmux_cmd() {
     [ "$status" -eq 1 ]
 }
 
+@test "tmux init retires a jump binding naming an earlier install path" {
+    # Reinstalling under a new --bindir leaves the old binding firing the old
+    # path, which breaks once that install is removed. Matching on the current
+    # path alone would also misreport this tool's own binding as third-party.
+    TMUX_NOTIFY_ENTRYPOINT='/opt/new/tmux-notify-jump'
+    FAKE_BINDING='bind-key -T prefix N run-shell -b "TMUX_NOTIFY_SENDER_TTY=\"#{client_tty}\" /opt/old/tmux-notify-jump --inbox-next"'
+    _QUIET=0
+
+    run tmux_notify_tmux_init
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"already bound"* ]]
+    run rg -F 'unbind-key -T prefix N' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+    run rg -F "bind-key N run-shell -b 'TMUX_NOTIFY_SENDER_TTY=\"#{client_tty}\" /opt/new/tmux-notify-jump --inbox-next'" "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+}
+
+@test "tmux init moves its jump binding when the configured key changes" {
+    TMUX_NOTIFY_ENTRYPOINT='/opt/tnj/tmux-notify-jump'
+    FAKE_KEY_OPTION=A
+    FAKE_BINDING='bind-key -T prefix N run-shell -b "TMUX_NOTIFY_SENDER_TTY=\"#{client_tty}\" /opt/tnj/tmux-notify-jump --inbox-next"'
+
+    run tmux_notify_tmux_init
+
+    [ "$status" -eq 0 ]
+    run rg -F 'unbind-key -T prefix N' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+    run rg '^bind-key A ' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+}
+
 @test "tmux init leaves a hook slot it does not own unchanged" {
     # Index 900 is conventional, not private: warn and keep a command this tool
     # did not install instead of silently replacing it.
@@ -858,4 +890,26 @@ tmux_cmd() {
     run rg -c '^set-hook -g .+\[900\] ' "$TMUX_LOG"
     [ "$status" -eq 0 ]
     [ "$output" = "5" ]
+}
+
+@test "tmux uninit removes jump bindings the key option no longer names" {
+    FAKE_KEY_OPTION=A
+    FAKE_BINDING='bind-key -T prefix N run-shell -b "tmux-notify-jump --inbox-next"
+bind-key -T prefix A run-shell -b "tmux-notify-jump --inbox-next"'
+
+    tmux_notify_tmux_uninit
+
+    run rg -F 'unbind-key -T prefix N' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+    run rg -F 'unbind-key -T prefix A' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+}
+
+@test "tmux uninit recognizes a server marked only by a stale jump binding" {
+    FAKE_BINDING='bind-key -T prefix Z run-shell -b "tmux-notify-jump --inbox-next"'
+
+    tmux_notify_tmux_uninit
+
+    run rg -F 'unbind-key -T prefix Z' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
 }
