@@ -1281,7 +1281,10 @@ tmux_notify_normalized_absolute_path() {
 
 tmux_notify_inbox_cache_root() {
     local root="" home="${HOME:-}"
-    root="$(cache_root_dir)"
+    # Command substitutions strip trailing newlines. Keep a sentinel at the
+    # end while capturing the path, then remove only that sentinel.
+    root="$(cache_root_dir; printf '.')"
+    root="${root%.}"
     while [ "$root" != "/" ] && [[ "$root" == */ ]]; do
         root="${root%/}"
     done
@@ -1317,7 +1320,8 @@ tmux_notify_inbox_default_root() {
     [ -n "$server_id" ] || server_id="default"
     local id=""
     id="$(printf '%s|%s' "$socket" "$server_id" | sha256_hex_stdin)"
-    cache_root="$(tmux_notify_inbox_cache_root)"
+    cache_root="$(tmux_notify_inbox_cache_root; printf '.')"
+    cache_root="${cache_root%.}"
     printf '%s/tmux-notify-jump/inbox/%s' "${cache_root%/}" "$id"
 }
 

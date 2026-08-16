@@ -204,6 +204,14 @@ tmux_cmd() {
     [[ "$root" == "$HOME/.cache/tmux-notify-jump/inbox/"* ]]
 }
 
+@test "Inbox default root preserves a trailing newline in the cache base" {
+    export XDG_CACHE_HOME="$TEST_TEMP_DIR/cache"$'\n'
+
+    root="$(tmux_notify_inbox_default_root)"
+
+    [[ "$root" == "$XDG_CACHE_HOME/tmux-notify-jump/inbox/"* ]]
+}
+
 @test "Inbox cache is private and omits notification bodies" {
     previous_umask="$(umask)"
     umask 022
