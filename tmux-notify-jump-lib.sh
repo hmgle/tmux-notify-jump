@@ -1490,19 +1490,20 @@ tmux_notify_inbox_gc() {
         fi
     done
     if [[ "$max" =~ ^[0-9]+$ ]] && [ "$max" -gt 0 ]; then
-        local count=0 list=""
+        local count=0 list="" id=""
         for dir in "$root"/*; do
             tmux_notify_inbox_entry_dir_is_valid "$dir" || continue
             tmux_notify_inbox_read_field "$dir" last_ms last
             [ -n "$last" ] || last=0
-            # Embed a real newline. Feeding "\n" through printf '%b' would also
-            # expand any backslash escape the cache path happens to contain.
-            list+="$last|$dir"$'\n'
+            # Sort on the entry id, never the full path. A cache root may
+            # legally contain a newline, which would split these records; the
+            # id is always hex or digits, so the root's bytes cannot leak in.
+            list+="$last|${dir##*/}"$'\n'
             count=$((count + 1))
         done
         if [ "$count" -gt "$max" ]; then
-            printf '%s' "$list" | sort -n -t '|' -k1,1 | head -n $((count - max)) | cut -d '|' -f2- | while IFS= read -r dir; do
-                if [ -n "$dir" ]; then rm -rf "$dir" 2>/dev/null || true; fi
+            printf '%s' "$list" | sort -n -t '|' -k1,1 | head -n $((count - max)) | cut -d '|' -f2- | while IFS= read -r id; do
+                if [ -n "$id" ]; then rm -rf "${root:?}/$id" 2>/dev/null || true; fi
             done
         fi
     fi
@@ -1684,11 +1685,12 @@ tmux_notify_inbox_next() {
         tmux_notify_inbox_entry_read "$dir"
         local rank=1
         [ "${INBOX_KIND:-complete}" = "attention" ] && rank=0
-        list+="$rank|${INBOX_FIRST_MS:-0}|$dir"$'\n'
+        list+="$rank|${INBOX_FIRST_MS:-0}|${dir##*/}"$'\n'
     done
-    local selected=""
-    selected="$(printf '%s' "$list" | sort -n -t '|' -k1,1 -k2,2 | head -n 1 | cut -d '|' -f3- || true)"
-    [ -n "$selected" ] || { tmux_notify_inbox_sync_counts; return 0; }
+    local selected_id="" selected=""
+    selected_id="$(printf '%s' "$list" | sort -n -t '|' -k1,1 -k2,2 | head -n 1 | cut -d '|' -f3- || true)"
+    [ -n "$selected_id" ] || { tmux_notify_inbox_sync_counts; return 0; }
+    selected="$root/$selected_id"
     tmux_notify_inbox_entry_read "$selected"
     local client="" target_client="" row target_activity=0
     while IFS= read -r row; do
