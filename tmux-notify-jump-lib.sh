@@ -1817,21 +1817,40 @@ tmux_notify_tmux_init() {
 tmux_notify_tmux_uninit() {
     local server_pid="" socket_path="" configured_key="" key="" status="" status_segment=""
     local existing_binding="" hook="" hook_command="" hook_table="" option=""
+    local inbox_root="" counts=""
     server_pid="$(tmux_cmd display-message -p '#{pid}' 2>/dev/null || true)"
     [ -n "$server_pid" ] || return 0
     socket_path="$(tmux_cmd display-message -p '#{socket_path}' 2>/dev/null || true)"
 
-    tmux_notify_inbox_clear_all >/dev/null 2>&1 || true
-
+    inbox_root="$(tmux_cmd show-option -gqv @tmux-notify-jump-inbox-root 2>/dev/null || true)"
     configured_key="$(tmux_cmd show-option -gqv @tmux-notify-jump-key 2>/dev/null || true)"
+    counts="$(tmux_cmd show-option -gqv @tmux-notify-jump-attention 2>/dev/null || true)"
+    counts+="$(tmux_cmd show-option -gqv @tmux-notify-jump-complete 2>/dev/null || true)"
     key="${configured_key:-${TMUX_NOTIFY_TMUX_KEY:-N}}"
     case "$key" in [A-Za-z0-9]) ;; *) key=N ;; esac
     existing_binding="$(tmux_notify_tmux_prefix_binding "$key")"
+    hook_table="$(tmux_cmd show-hooks -g 2>/dev/null || true)"
+    status="$(tmux_cmd show-option -gqv status-right 2>/dev/null || true)"
+    status_segment="$(tmux_notify_tmux_status_segment)"
+
+    # Uninstall reaches whichever server the socket resolves to, which is not
+    # always one this tool ever touched. Every individual removal below is
+    # already guarded, but clearing the Inbox is not, and it cannot be undone.
+    # Refuse servers that carry none of our marks instead.
+    if [ -z "$inbox_root" ] && [ -z "$configured_key" ] && [ -z "$counts" ] \
+        && [[ "$existing_binding" != *"--inbox-next"* ]] \
+        && [[ "$hook_table" != *"--inbox-ack-client"* ]] \
+        && [[ "$status" != *"$status_segment"* ]]; then
+        log "No tmux Inbox state on ${socket_path:-the default socket} (server pid $server_pid); left unchanged"
+        return 0
+    fi
+
+    tmux_notify_inbox_clear_all >/dev/null 2>&1 || true
+
     if [[ "$existing_binding" == *"--inbox-next"* ]]; then
         tmux_cmd unbind-key -T prefix "$key" 2>/dev/null || true
     fi
 
-    hook_table="$(tmux_cmd show-hooks -g 2>/dev/null || true)"
     for hook in client-attached client-session-changed after-select-pane after-select-window client-focus-in; do
         hook_command="$(tmux_notify_tmux_hook_command "$hook" "$hook_table")"
         if [[ "$hook_command" == *"--inbox-ack-client"* ]]; then
@@ -1839,8 +1858,6 @@ tmux_notify_tmux_uninit() {
         fi
     done
 
-    status="$(tmux_cmd show-option -gqv status-right 2>/dev/null || true)"
-    status_segment="$(tmux_notify_tmux_status_segment)"
     if [[ "$status" == *"$status_segment"* ]]; then
         status="${status%%"$status_segment"*}${status#*"$status_segment"}"
         tmux_cmd set-option -g status-right "$status" 2>/dev/null || true

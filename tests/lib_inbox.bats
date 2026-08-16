@@ -576,6 +576,44 @@ tmux_cmd() {
     run env -u _QUIET bash -c '
         . "'"$PROJECT_ROOT"'/tmux-notify-jump-lib.sh"
         tmux_cmd() {
+            case "${1:-}" in
+                display-message)
+                    case "${3:-}" in
+                        "#{pid}") printf "4242\n" ;;
+                        "#{socket_path}") printf "/tmp/example.sock\n" ;;
+                    esac
+                    ;;
+                show-option)
+                    [ "${3:-}" = "@tmux-notify-jump-key" ] && printf "N\n"
+                    ;;
+            esac
+            return 0
+        }
+        tmux_notify_tmux_uninit
+    '
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Removed tmux Inbox state from /tmp/example.sock"* ]]
+    [[ "$output" == *"server pid 4242"* ]]
+}
+
+@test "tmux uninit leaves a server carrying none of its marks untouched" {
+    root="$(tmux_notify_inbox_default_root)"
+    entry_key="$(printf '%s' 'unrelated server entry' | sha256_hex_stdin)"
+    mkdir -p "$root/$entry_key"
+    : >"$root/$entry_key/kind"
+
+    tmux_notify_tmux_uninit
+
+    [ -f "$root/$entry_key/kind" ]
+    run rg '^(set-hook|unbind-key|set-option|refresh-client)' "$TMUX_LOG"
+    [ "$status" -eq 1 ]
+}
+
+@test "tmux uninit reports leaving an unmarked server alone" {
+    run env -u _QUIET bash -c '
+        . "'"$PROJECT_ROOT"'/tmux-notify-jump-lib.sh"
+        tmux_cmd() {
             [ "${1:-}" = "display-message" ] || return 0
             case "${3:-}" in
                 "#{pid}") printf "4242\n" ;;
@@ -586,8 +624,8 @@ tmux_cmd() {
     '
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Removed tmux Inbox state from /tmp/example.sock"* ]]
-    [[ "$output" == *"server pid 4242"* ]]
+    [[ "$output" == *"No tmux Inbox state on /tmp/example.sock"* ]]
+    [[ "$output" == *"left unchanged"* ]]
 }
 
 @test "tmux uninit preserves user-owned hooks and bindings" {
