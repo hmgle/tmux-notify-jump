@@ -4,6 +4,7 @@
 [![Lint](https://github.com/hmgle/tmux-notify-jump/actions/workflows/lint.yml/badge.svg)](https://github.com/hmgle/tmux-notify-jump/actions/workflows/lint.yml)
 [![Test](https://github.com/hmgle/tmux-notify-jump/actions/workflows/test.yml/badge.svg)](https://github.com/hmgle/tmux-notify-jump/actions/workflows/test.yml)
 [![Quality Gate](https://github.com/hmgle/tmux-notify-jump/actions/workflows/quality-gate.yml/badge.svg)](https://github.com/hmgle/tmux-notify-jump/actions/workflows/quality-gate.yml)
+[![Release](https://img.shields.io/github/v/release/hmgle/tmux-notify-jump)](https://github.com/hmgle/tmux-notify-jump/releases/latest)
 
 Send a tmux-native or desktop notification on Linux and macOS.
 
