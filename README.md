@@ -627,7 +627,8 @@ Notes:
 
 ## Tests
 
-- Install `bats-core` (macOS: `brew install bats-core`).
+- Install `bats-core` and `ripgrep`; install `tmux` to include the live hook
+  integration tests (macOS: `brew install bats-core ripgrep tmux`).
 - Run: `./tests/run_all.sh` (or `make -C tests test`).
 - The suite includes shared-lib unit tests plus entry-script smoke tests (`tests/entry_smoke.bats`) for Linux/macOS dry-run and common validation paths.
 

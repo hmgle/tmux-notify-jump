@@ -15,11 +15,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install bats
+      - name: Install test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bats tmux
+          sudo apt-get install -y bats ripgrep tmux
 
       - name: Run bats test suite
         run: make test
-
