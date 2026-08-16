@@ -417,6 +417,34 @@ tmux_cmd() {
     [ -z "$(find "$root" -mindepth 1 -maxdepth 1 -type d ! -name '*.lock' -print -quit)" ]
 }
 
+@test "Inbox GC prunes when the cache path contains a backslash escape" {
+    export XDG_CACHE_HOME="$TEST_TEMP_DIR/ca"$'\\'"the"
+    export TMUX_NOTIFY_INBOX_MAX=1
+    export TMUX_NOTIFY_INBOX_TTL_MS=0
+    tmux_notify_inbox_enqueue "%9" complete Codex "First" "Body"
+    root="$(tmux_notify_inbox_root)"
+    first_entry="$(find "$root" -mindepth 1 -maxdepth 1 -type d ! -name '*.lock' -print -quit)"
+    printf '1\n' >"$first_entry/last_ms"
+    FAKE_TARGET_PANE_ID='%10'
+    tmux_notify_inbox_enqueue "%10" complete Codex "Second" "Body"
+
+    entries=("$root"/*)
+    [ "${#entries[@]}" -eq 1 ]
+    [ "$(cat "${entries[0]}/pane_id")" = "%10" ]
+}
+
+@test "Inbox next selects when the cache path contains a backslash escape" {
+    export XDG_CACHE_HOME="$TEST_TEMP_DIR/ca"$'\\'"the"
+    tmux_notify_inbox_enqueue "%9" attention Claude "Permission" "Body"
+
+    tmux_notify_inbox_next "/dev/pts/2"
+
+    root="$(tmux_notify_inbox_root)"
+    [ -z "$(find "$root" -mindepth 1 -maxdepth 1 -type d ! -name '*.lock' -print -quit)" ]
+    run rg 'select-pane -t %9' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+}
+
 @test "Inbox next retains a live target after switch failure" {
     tmux_notify_inbox_enqueue "%9" attention Claude "Permission" "Body"
     FAKE_SWITCH_FAIL=1

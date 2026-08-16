@@ -1487,11 +1487,13 @@ tmux_notify_inbox_gc() {
         for dir in "$root"/*; do
             tmux_notify_inbox_entry_dir_is_valid "$dir" || continue
             last="$(cat "$dir/last_ms" 2>/dev/null || echo 0)"
-            list+="$last|$dir\n"
+            # Embed a real newline. Feeding "\n" through printf '%b' would also
+            # expand any backslash escape the cache path happens to contain.
+            list+="$last|$dir"$'\n'
             count=$((count + 1))
         done
         if [ "$count" -gt "$max" ]; then
-            printf '%b' "$list" | sort -n -t '|' -k1,1 | head -n $((count - max)) | cut -d '|' -f2- | while IFS= read -r dir; do
+            printf '%s' "$list" | sort -n -t '|' -k1,1 | head -n $((count - max)) | cut -d '|' -f2- | while IFS= read -r dir; do
                 if [ -n "$dir" ]; then rm -rf "$dir" 2>/dev/null || true; fi
             done
         fi
@@ -1674,10 +1676,10 @@ tmux_notify_inbox_next() {
         tmux_notify_inbox_entry_read "$dir"
         local rank=1
         [ "${INBOX_KIND:-complete}" = "attention" ] && rank=0
-        list+="$rank|${INBOX_FIRST_MS:-0}|$dir\n"
+        list+="$rank|${INBOX_FIRST_MS:-0}|$dir"$'\n'
     done
     local selected=""
-    selected="$(printf '%b' "$list" | sort -n -t '|' -k1,1 -k2,2 | head -n 1 | cut -d '|' -f3- || true)"
+    selected="$(printf '%s' "$list" | sort -n -t '|' -k1,1 -k2,2 | head -n 1 | cut -d '|' -f3- || true)"
     [ -n "$selected" ] || { tmux_notify_inbox_sync_counts; return 0; }
     tmux_notify_inbox_entry_read "$selected"
     local client="" target_client="" row target_activity=0
