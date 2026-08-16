@@ -560,6 +560,44 @@ tmux_cmd() {
     [ "$FAKE_STATUS_RIGHT" = "left right" ]
 }
 
+@test "tmux uninit clears a second configured server and reports the count" {
+    # Servers sharing a tmux configuration all run --tmux-init, so they carry
+    # identical marks and the unrelated-server guard cannot single out the
+    # intended one. Pin that limit, and pin the count that makes it visible.
+    FAKE_KEY_OPTION=N
+    FAKE_INBOX_ROOT="$(tmux_notify_inbox_default_root)"
+    for label in 'first entry' 'second entry'; do
+        entry_key="$(printf '%s' "$label" | sha256_hex_stdin)"
+        mkdir -p "$FAKE_INBOX_ROOT/$entry_key"
+        : >"$FAKE_INBOX_ROOT/$entry_key/kind"
+    done
+
+    run env -u _QUIET bash -c '
+        . "'"$PROJECT_ROOT"'/tmux-notify-jump-lib.sh"
+        export XDG_CACHE_HOME="'"$XDG_CACHE_HOME"'"
+        export TMUX_NOTIFY_TMUX_SOCKET="'"$TMUX_NOTIFY_TMUX_SOCKET"'"
+        tmux_cmd() {
+            case "${1:-}" in
+                display-message)
+                    case "${3:-}" in
+                        "#{pid}") printf "4242\n" ;;
+                        "#{socket_path}") printf "%s\n" "$TMUX_NOTIFY_TMUX_SOCKET" ;;
+                    esac
+                    ;;
+                show-option)
+                    [ "${3:-}" = "@tmux-notify-jump-key" ] && printf "N"
+                    ;;
+            esac
+            return 0
+        }
+        tmux_notify_tmux_uninit
+    '
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"2 Inbox entries"* ]]
+    [ -z "$(find "$FAKE_INBOX_ROOT" -mindepth 1 -type d -print -quit)" ]
+}
+
 @test "tmux uninit removes its running server state" {
     status_segment="$(tmux_notify_tmux_status_segment)"
     FAKE_STATUS_RIGHT="left${status_segment} right"

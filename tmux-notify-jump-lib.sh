@@ -1846,7 +1846,9 @@ tmux_notify_tmux_uninit() {
     # Uninstall reaches whichever server the socket resolves to, which is not
     # always one this tool ever touched. Every individual removal below is
     # already guarded, but clearing the Inbox is not, and it cannot be undone.
-    # Refuse servers that carry none of our marks instead.
+    # Refuse servers that carry none of our marks instead. Servers that share a
+    # tmux configuration all carry the same marks, so this cannot single out the
+    # intended one; report what was cleared so a wrong socket is visible.
     if [ -z "$inbox_root" ] && [ -z "$configured_key" ] && [ -z "$counts" ] \
         && [[ "$existing_binding" != *"--inbox-next"* ]] \
         && [[ "$hook_table" != *"--inbox-ack-client"* ]] \
@@ -1855,6 +1857,12 @@ tmux_notify_tmux_uninit() {
         return 0
     fi
 
+    local cleared=0 entry="" resolved_root=""
+    resolved_root="$(tmux_notify_inbox_root)"
+    for entry in "$resolved_root"/*; do
+        tmux_notify_inbox_entry_dir_is_valid "$entry" || continue
+        cleared=$((cleared + 1))
+    done
     tmux_notify_inbox_clear_all >/dev/null 2>&1 || true
 
     if [[ "$existing_binding" == *"--inbox-next"* ]]; then
@@ -1880,7 +1888,7 @@ tmux_notify_tmux_uninit() {
     tmux_cmd refresh-client -S 2>/dev/null || true
     # Name the server that was changed: uninstall targets whichever server the
     # socket resolves to, which is not necessarily the one the user expects.
-    log "Removed tmux Inbox state from ${socket_path:-the default socket} (server pid $server_pid)"
+    log "Removed tmux Inbox state from ${socket_path:-the default socket} (server pid $server_pid, $cleared Inbox entries)"
 }
 
 cache_root_dir() {
