@@ -585,6 +585,51 @@ tmux_cmd() {
     [ "$status" -eq 0 ]
 }
 
+@test "tmux init acknowledges select hooks by pane and client hooks by client" {
+    # tmux expands #{hook_client} empty in after-select-pane and
+    # after-select-window, so guarding those on it silently disables
+    # acknowledgement for every ordinary pane and window switch. Those hooks
+    # expand #{pane_id} to the pane just selected instead.
+    TMUX_NOTIFY_ENTRYPOINT='/opt/tmux-notify-jump'
+    attention_opt='#{@tmux-notify-jump-attention}'
+    complete_opt='#{@tmux-notify-jump-complete}'
+
+    tmux_notify_tmux_init
+
+    for hook in after-select-pane after-select-window; do
+        run rg -F "set-hook -g ${hook}[900] if-shell -F '#{&&:#{||:${attention_opt},${complete_opt}},#{pane_id}}' { run-shell -b '/opt/tmux-notify-jump --inbox-ack-pane \"#{pane_id}\"' }" "$TMUX_LOG"
+        [ "$status" -eq 0 ]
+    done
+    for hook in client-attached client-session-changed client-focus-in; do
+        run rg -F "set-hook -g ${hook}[900] if-shell -F '#{&&:#{||:${attention_opt},${complete_opt}},#{hook_client}}' { run-shell -b '/opt/tmux-notify-jump --inbox-ack-client \"#{hook_client}\"' }" "$TMUX_LOG"
+        [ "$status" -eq 0 ]
+    done
+    run rg -F 'set-hook -g after-select' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *'hook_client'* ]]
+}
+
+@test "tmux uninit removes pane acknowledgement hooks" {
+    FAKE_KEY_OPTION=M
+    FAKE_HOOK_COMMAND='if-shell -F 1 { run-shell -b "tmux-notify-jump --inbox-ack-pane %1" }'
+
+    tmux_notify_tmux_uninit
+
+    run rg -c '^set-hook -gu .+\[900\]$' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+    [ "$output" = "5" ]
+}
+
+@test "tmux uninit recognizes a server marked only by pane acknowledgement hooks" {
+    FAKE_HOOK_COMMAND='if-shell -F 1 { run-shell -b "tmux-notify-jump --inbox-ack-pane %1" }'
+
+    tmux_notify_tmux_uninit
+
+    run rg -c '^set-hook -gu .+\[900\]$' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+    [ "$output" = "5" ]
+}
+
 @test "tmux init can remove its status segment" {
     status_segment="$(tmux_notify_tmux_status_segment)"
     FAKE_STATUS_RIGHT="left${status_segment} right"

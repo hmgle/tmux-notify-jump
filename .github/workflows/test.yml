@@ -18,7 +18,7 @@ jobs:
       - name: Install bats
         run: |
           sudo apt-get update
-          sudo apt-get install -y bats
+          sudo apt-get install -y bats tmux
 
       - name: Run bats test suite
         run: make test

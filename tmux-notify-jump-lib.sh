@@ -1776,6 +1776,24 @@ tmux_notify_tmux_prefix_binding() {
     ' || true
 }
 
+# Build the "<hook>[900]" acknowledgement command.
+#
+# The guard and the argument share one format, so a hook only spawns the script
+# when the Inbox is non-empty and tmux can actually name what to acknowledge.
+tmux_notify_tmux_ack_hook_command() {
+    local quoted_path="$1" option="$2" format="$3" guard=""
+    guard="#{&&:#{||:#{@tmux-notify-jump-attention},#{@tmux-notify-jump-complete}},$format}"
+    printf '%s' "if-shell -F '$guard' { run-shell -b '$quoted_path $option \"$format\"' }"
+}
+
+# Report whether a hook command is one this tool installed.
+tmux_notify_tmux_is_ack_command() {
+    case "${1:-}" in
+        *--inbox-ack-client*|*--inbox-ack-pane*) return 0 ;;
+    esac
+    return 1
+}
+
 # Print the command bound to "<hook>[900]" in a show-hooks table.
 tmux_notify_tmux_hook_command() {
     local hook="$1" output="$2"
@@ -1805,13 +1823,26 @@ tmux_notify_tmux_init() {
         tmux_cmd set-option -g status-right "$status"
     fi
     local hook major="" hook_failed=0 hook_command=""
-    local ack_guard='#{&&:#{||:#{@tmux-notify-jump-attention},#{@tmux-notify-jump-complete}},#{hook_client}}'
-    hook_command="if-shell -F '$ack_guard' { run-shell -b '$quoted_path --inbox-ack-client \"#{hook_client}\"' }"
+    # Acknowledgement needs a different tmux format per hook family. Client
+    # hooks name the client that moved, but the after-select hooks expand
+    # #{hook_client} empty, so guarding those on it would silently disable
+    # acknowledgement for every ordinary pane and window switch. Those hooks do
+    # expand #{pane_id} to the pane just selected, which is what to clear.
     major="$(tmux_notify_tmux_major_version)"
     if [ -n "$major" ] && [ "$major" -lt 3 ]; then
         warn "tmux 3.0 or newer is required for automatic Inbox acknowledgement hooks"
     else
         for hook in client-attached client-session-changed after-select-pane after-select-window client-focus-in; do
+            case "$hook" in
+                after-select-*)
+                    hook_command="$(tmux_notify_tmux_ack_hook_command \
+                        "$quoted_path" --inbox-ack-pane '#{pane_id}')"
+                    ;;
+                *)
+                    hook_command="$(tmux_notify_tmux_ack_hook_command \
+                        "$quoted_path" --inbox-ack-client '#{hook_client}')"
+                    ;;
+            esac
             if ! tmux_cmd set-hook -g "${hook}[900]" \
                 "$hook_command" 2>/dev/null; then
                 hook_failed=1
@@ -1863,7 +1894,7 @@ tmux_notify_tmux_uninit() {
     # intended one; report what was cleared so a wrong socket is visible.
     if [ -z "$inbox_root" ] && [ -z "$configured_key" ] && [ -z "$counts" ] \
         && [[ "$existing_binding" != *"--inbox-next"* ]] \
-        && [[ "$hook_table" != *"--inbox-ack-client"* ]] \
+        && ! tmux_notify_tmux_is_ack_command "$hook_table" \
         && [[ "$status" != *"$status_segment"* ]]; then
         log "No tmux Inbox state on ${socket_path:-the default socket} (server pid $server_pid); left unchanged"
         return 0
@@ -1879,7 +1910,7 @@ tmux_notify_tmux_uninit() {
 
     for hook in client-attached client-session-changed after-select-pane after-select-window client-focus-in; do
         hook_command="$(tmux_notify_tmux_hook_command "$hook" "$hook_table")"
-        if [[ "$hook_command" == *"--inbox-ack-client"* ]]; then
+        if tmux_notify_tmux_is_ack_command "$hook_command"; then
             tmux_cmd set-hook -gu "${hook}[900]" 2>/dev/null || true
         fi
     done
