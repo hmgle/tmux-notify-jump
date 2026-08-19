@@ -1208,10 +1208,11 @@ process_env_has_ssh() {
     return 1
 }
 
-process_tree_has_sshd() {
+process_tree_ssh_state() {
     local pid="${1:-}"
     if ! is_integer "$pid"; then
-        return 1
+        printf '%s' "unknown"
+        return 0
     fi
 
     local current_pid="$pid"
@@ -1220,8 +1221,13 @@ process_tree_has_sshd() {
         local comm=""
         comm="$(ps -p "$current_pid" -o comm= 2>/dev/null || true)"
         comm="$(trim_ws "$comm")"
+        if [ -z "$comm" ]; then
+            printf '%s' "unknown"
+            return 0
+        fi
         case "$comm" in
             sshd|sshd:*|*/sshd|*/sshd:*)
+                printf '%s' "remote"
                 return 0
                 ;;
         esac
@@ -1229,26 +1235,34 @@ process_tree_has_sshd() {
         local ppid=""
         ppid="$(ps -p "$current_pid" -o ppid= 2>/dev/null || true)"
         ppid="$(trim_ws "$ppid")"
-        if ! is_integer "$ppid" || [ "$ppid" -le 1 ] || [ "$ppid" = "$current_pid" ]; then
-            break
+        if ! is_integer "$ppid" || [ "$ppid" = "$current_pid" ]; then
+            printf '%s' "unknown"
+            return 0
+        fi
+        if [ "$ppid" -le 1 ]; then
+            printf '%s' "local"
+            return 0
         fi
 
         current_pid="$ppid"
         depth=$((depth + 1))
     done
 
-    return 1
+    printf '%s' "unknown"
 }
 
-tmux_client_pid_is_remote_ssh() {
+tmux_client_pid_ssh_state() {
     local pid="${1:-}"
     if ! is_integer "$pid"; then
-        return 1
+        printf '%s' "unknown"
+        return 0
     fi
 
-    process_env_has_ssh "$pid" && return 0
-    process_tree_has_sshd "$pid" && return 0
-    return 1
+    if process_env_has_ssh "$pid"; then
+        printf '%s' "remote"
+        return 0
+    fi
+    process_tree_ssh_state "$pid"
 }
 
 # =============================================================================
@@ -1621,37 +1635,44 @@ tmux_notify_route_notification() {
     mode="$(tmux_notify_remote_mode)"
     rows="$(tmux_terminal_client_rows 2>/dev/null || true)"
     info="$(tmux_notify_inbox_target_info "$target")"
-    if [ -z "$info" ]; then
-        # Legacy tmux and restricted command stubs may not expand the complete
-        # metadata format. Preserve the pre-Inbox desktop path in that case.
-        TMUX_NOTIFY_ROUTE_DESKTOP=1
-        export TMUX_NOTIFY_ROUTE_DESKTOP
-        return 0
-    fi
     local session_id="" window_id="" pane_id="" session_name="" window_index=""
-    IFS='|' read -r session_id window_id pane_id session_name window_index <<<"$info"
-    local visible=0 local_client=0 remote_target_client=0 row message is_remote
+    local target_info_available=0
+    if [ -n "$info" ]; then
+        IFS='|' read -r session_id window_id pane_id session_name window_index <<<"$info"
+        if [ -n "$session_id" ] && is_pane_id "$pane_id"; then
+            target_info_available=1
+        fi
+    fi
+    local visible=0 local_client=0 remote_client=0 unknown_client=0
+    local remote_target_client=0 unknown_target_client=0 row message client_state
     while IFS= read -r row; do
         [ -n "$row" ] || continue
         read_tmux_client_row "$row"
-        is_remote=0
-        if tmux_client_pid_is_remote_ssh "${CLIENT_PID:-}"; then
-            is_remote=1
-        else
-            local_client=1
-        fi
+        client_state="$(tmux_client_pid_ssh_state "${CLIENT_PID:-}")"
+        case "$client_state" in
+            remote) remote_client=1 ;;
+            local) local_client=1 ;;
+            *) unknown_client=1 ;;
+        esac
+        [ "$target_info_available" -eq 1 ] || continue
         [ "$CLIENT_SESSION_ID" = "$session_id" ] || continue
         if [ "$CLIENT_PANE_ID" = "$pane_id" ]; then visible=1; fi
-        if [ "$is_remote" -eq 1 ]; then
-            remote_target_client=1
-            if [ "$mode" = "tmux" ] || [ "$mode" = "both" ]; then
-                message="[$(tmux_notify_compact_text "$source")] $(tmux_notify_compact_text "$title")"
-                tmux_cmd display-message -c "$CLIENT_NAME" \
-                    "${message}: $(tmux_notify_compact_text "$body")" >/dev/null 2>&1 || true
-            fi
-        fi
+        case "$client_state" in
+            remote)
+                remote_target_client=1
+                if [ "$mode" = "tmux" ] || [ "$mode" = "both" ]; then
+                    message="[$(tmux_notify_compact_text "$source")] $(tmux_notify_compact_text "$title")"
+                    tmux_cmd display-message -c "$CLIENT_NAME" \
+                        "${message}: $(tmux_notify_compact_text "$body")" >/dev/null 2>&1 || true
+                fi
+                ;;
+            unknown)
+                unknown_target_client=1
+                ;;
+        esac
     done <<<"$rows"
-    if [ "$mode" = "tmux" ] || [ "$mode" = "both" ]; then
+    if [ "$target_info_available" -eq 1 ] \
+        && { [ "$mode" = "tmux" ] || [ "$mode" = "both" ]; }; then
         if [ "$visible" -eq 0 ]; then
             tmux_notify_inbox_enqueue "$target" "$kind" "$source" "$title" || true
         else
@@ -1663,12 +1684,18 @@ tmux_notify_route_notification() {
             TMUX_NOTIFY_ROUTE_DESKTOP=1
             ;;
         tmux)
-            if [ "$local_client" -eq 1 ] \
-                || { [ "$remote_target_client" -eq 0 ] && ! tmux_notify_process_is_remote_ssh; }; then
+            local remote_blocker="$remote_target_client" unknown_blocker="$unknown_target_client"
+            if [ "$target_info_available" -eq 0 ]; then
+                remote_blocker="$remote_client"
+                unknown_blocker="$unknown_client"
+            fi
+            if [ "$remote_blocker" -eq 0 ] && [ "$unknown_blocker" -eq 0 ] \
+                && { [ "$local_client" -eq 1 ] || ! tmux_notify_process_is_remote_ssh; }; then
                 TMUX_NOTIFY_ROUTE_DESKTOP=1
             fi
             ;;
     esac
+    log_debug "notification route mode=$mode target_info=$target_info_available local_client=$local_client remote_client=$remote_client unknown_client=$unknown_client remote_target=$remote_target_client unknown_target=$unknown_target_client desktop=$TMUX_NOTIFY_ROUTE_DESKTOP"
     export TMUX_NOTIFY_ROUTE_DESKTOP
 }
 

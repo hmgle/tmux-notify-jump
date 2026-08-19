@@ -174,14 +174,17 @@ processes and `run-shell` hooks use the same location. To customize
 `TMUX_NOTIFY_CONFIG`) and reload the tmux configuration. An override set only in
 an interactive shell rc file may not be visible to the tmux server.
 
-The default mode still sends desktop notifications when any ordinary local
-client is attached to the tmux server, even if that client is viewing another
-session. With no attached clients, desktop delivery is retained for local
-processes and skipped when the notification process has an SSH environment.
-Remote clients viewing the target session also receive a transient tmux
-message. Automatic acknowledgement on manual pane visits requires tmux 3.0 or
-newer; older releases keep the status and `prefix+N` workflow but warn during
-initialization that acknowledgement hooks are unavailable.
+In the default mode, an SSH client attached to the target session takes
+precedence over local clients: feedback stays inside tmux and no desktop
+notification is sent. This also covers an old pane whose processes retained a
+local graphical environment before an SSH client attached. Set
+`TMUX_NOTIFY_REMOTE_MODE=both` to opt into desktop delivery for mixed local and
+SSH attachments. With no remote target client, desktop delivery is retained for
+local clients and local processes. Remote clients viewing the target session
+also receive a transient tmux message. Automatic acknowledgement on manual pane
+visits requires tmux 3.0 or newer; older releases keep the status and `prefix+N`
+workflow but warn during initialization that acknowledgement hooks are
+unavailable.
 
 The configuration block is marked and idempotent. Use
 `./install.sh --configure-tmux --uninstall` to remove only that block while
@@ -237,9 +240,9 @@ CLI flags override environment variables where applicable.
 - `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK`: when hooks run without tmux (missing or no server/target), fall back to `--focus-only` instead of no-op (`0` disables; default: `1`)
 - `TMUX_NOTIFY_UNATTACHED_FALLBACK`: policy when the target session has no identifiable ordinary client. The default `single` switches the server's sole ordinary client; it still refuses when there are zero or multiple ordinary clients. Set `none` for strict mode, which reports that the target is not visible instead of moving a terminal. Unknown values warn and fall back to `single`. On macOS the selected policy is forwarded to the notification click callback.
 - `TMUX_NOTIFY_REMOTE_MODE`: `tmux` (Inbox/status/remote `display-message`,
-  plus desktop delivery when a local client is present; default), `desktop`
-  (desktop only), `both` (tmux and desktop routing), or `suppress`. The legacy
-  `TMUX_NOTIFY_REMOTE=1` value maps to `desktop` for compatibility.
+  with remote target clients taking precedence over desktop delivery; default),
+  `desktop` (desktop only), `both` (tmux and desktop routing), or `suppress`.
+  The legacy `TMUX_NOTIFY_REMOTE=1` value maps to `desktop` for compatibility.
 - `TMUX_NOTIFY_INBOX_TTL_MS`: remove Inbox items older than this value (default:
   `604800000`, seven days).
 - `TMUX_NOTIFY_INBOX_MAX`: maximum number of Inbox entries (default: `100`).

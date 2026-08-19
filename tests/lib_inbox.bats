@@ -7,6 +7,8 @@ setup() {
     export XDG_CACHE_HOME="$TEST_TEMP_DIR/cache"
     export TMUX_NOTIFY_TMUX_SOCKET="$TEST_TEMP_DIR/tmux.sock"
     unset TMUX TMUX_NOTIFY_TMUX_KEY TMUX_NOTIFY_ENTRYPOINT
+    unset TMUX_NOTIFY_REMOTE_MODE TMUX_NOTIFY_REMOTE
+    unset SSH_CONNECTION SSH_CLIENT SSH_TTY
     export TMUX_NOTIFY_INBOX_TTL_MS=604800000
     export TMUX_NOTIFY_INBOX_MAX=100
     TMUX_LOG="$TEST_TEMP_DIR/tmux.log"
@@ -253,8 +255,43 @@ tmux_cmd() {
     [ "$(tmux_notify_remote_mode)" = "tmux" ]
 }
 
+@test "client SSH state detects an sshd ancestor" {
+    ps() {
+        case "${4:-}:${2:-}" in
+            comm=:987654) printf '%s\n' "tmux" ;;
+            ppid=:987654) printf '%s\n' "987653" ;;
+            comm=:987653) printf '%s\n' "sshd" ;;
+            ppid=:987653) printf '%s\n' "1" ;;
+            *) return 1 ;;
+        esac
+    }
+
+    [ "$(tmux_client_pid_ssh_state 987654)" = "remote" ]
+}
+
+@test "client SSH state confirms a local process tree" {
+    ps() {
+        case "${4:-}:${2:-}" in
+            comm=:987654) printf '%s\n' "tmux" ;;
+            ppid=:987654) printf '%s\n' "987653" ;;
+            comm=:987653) printf '%s\n' "zsh" ;;
+            ppid=:987653) printf '%s\n' "1" ;;
+            *) return 1 ;;
+        esac
+    }
+
+    [ "$(tmux_client_pid_ssh_state 987654)" = "local" ]
+}
+
+@test "client SSH state preserves inspection failures as unknown" {
+    ps() { return 1; }
+
+    [ "$(tmux_client_pid_ssh_state 987654)" = "unknown" ]
+    [ "$(tmux_client_pid_ssh_state invalid)" = "unknown" ]
+}
+
 @test "remote tmux routing enqueues and skips desktop dependencies" {
-    tmux_client_pid_is_remote_ssh() { return 0; }
+    tmux_client_pid_ssh_state() { printf '%s' "remote"; }
 
     tmux_notify_route_notification "%9" "Needs input" "Approve tool" attention Claude
 
@@ -265,6 +302,48 @@ tmux_cmd() {
     [ "$(cat "${entries[0]}/kind")" = "attention" ]
     run rg 'display-message -c /dev/pts/2' "$TMUX_LOG"
     [ "$status" -eq 0 ]
+}
+
+@test "remote target client suppresses desktop with local clients attached" {
+    FAKE_CLIENT_ROWS=$'0|20|/dev/pts/remote|/dev/pts/remote|222|$1|%9|work\n0|10|/dev/pts/local|/dev/pts/local|333|$1|%9|work'
+    tmux_client_pid_ssh_state() {
+        case "$1" in
+            222) printf '%s' "remote" ;;
+            333) printf '%s' "local" ;;
+        esac
+    }
+    unset SSH_CONNECTION SSH_CLIENT SSH_TTY
+
+    tmux_notify_route_notification "%9" "Done" "Body" complete Codex
+
+    [ "$TMUX_NOTIFY_ROUTE_DESKTOP" = "0" ]
+    run rg 'display-message -c /dev/pts/remote' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+}
+
+@test "remote target client suppresses desktop from local clients in other sessions" {
+    FAKE_CLIENT_ROWS=$'0|20|/dev/pts/remote|/dev/pts/remote|222|$1|%9|work\n0|10|/dev/pts/local|/dev/pts/local|333|$9|%7|main'
+    tmux_client_pid_ssh_state() {
+        case "$1" in
+            222) printf '%s' "remote" ;;
+            333) printf '%s' "local" ;;
+        esac
+    }
+    unset SSH_CONNECTION SSH_CLIENT SSH_TTY
+
+    tmux_notify_route_notification "%9" "Done" "Body" complete Codex
+
+    [ "$TMUX_NOTIFY_ROUTE_DESKTOP" = "0" ]
+}
+
+@test "unknown target client does not enable desktop delivery" {
+    FAKE_CLIENT_ROWS='0|10|/dev/pts/unknown|/dev/pts/unknown|222|$1|%9|work'
+    tmux_client_pid_ssh_state() { printf '%s' "unknown"; }
+    unset SSH_CONNECTION SSH_CLIENT SSH_TTY
+
+    tmux_notify_route_notification "%9" "Done" "Body" complete Codex
+
+    [ "$TMUX_NOTIFY_ROUTE_DESKTOP" = "0" ]
 }
 
 @test "Inbox next chooses attention before completion" {
@@ -289,7 +368,7 @@ tmux_cmd() {
 
 @test "local clients in another session retain desktop delivery" {
     FAKE_CLIENT_ROWS='0|10|/dev/pts/local|/dev/pts/local|222|$9|%7|main'
-    tmux_client_pid_is_remote_ssh() { return 1; }
+    tmux_client_pid_ssh_state() { printf '%s' "local"; }
 
     tmux_notify_route_notification "%9" "Done" "Body" complete Codex
 
@@ -333,10 +412,45 @@ tmux_cmd() {
     [ -z "$(find "$root" -mindepth 1 -maxdepth 1 -type d ! -name '*.lock' -print -quit 2>/dev/null)" ]
 }
 
+@test "both mode keeps desktop delivery for mixed remote and local clients" {
+    FAKE_CLIENT_ROWS=$'0|20|/dev/pts/remote|/dev/pts/remote|222|$1|%9|work\n0|10|/dev/pts/local|/dev/pts/local|333|$9|%7|main'
+    tmux_client_pid_ssh_state() {
+        case "$1" in
+            222) printf '%s' "remote" ;;
+            333) printf '%s' "local" ;;
+        esac
+    }
+    TMUX_NOTIFY_REMOTE_MODE=both
+
+    tmux_notify_route_notification "%9" "Both" "Body" complete Codex
+
+    [ "$TMUX_NOTIFY_ROUTE_DESKTOP" = "1" ]
+    run rg 'display-message -c /dev/pts/remote' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+}
+
+@test "missing target metadata respects remote routing modes" {
+    FAKE_CLIENT_ROWS='0|10|/dev/pts/remote|/dev/pts/remote|222|$1|%9|work'
+    tmux_client_pid_ssh_state() { printf '%s' "remote"; }
+    tmux_notify_inbox_target_info() { return 0; }
+
+    TMUX_NOTIFY_REMOTE_MODE=tmux
+    tmux_notify_route_notification "%9" "Tmux" "Body" complete Codex
+    [ "$TMUX_NOTIFY_ROUTE_DESKTOP" = "0" ]
+
+    TMUX_NOTIFY_REMOTE_MODE=suppress
+    tmux_notify_route_notification "%9" "Suppress" "Body" complete Codex
+    [ "$TMUX_NOTIFY_ROUTE_DESKTOP" = "0" ]
+
+    TMUX_NOTIFY_REMOTE_MODE=desktop
+    tmux_notify_route_notification "%9" "Desktop" "Body" complete Codex
+    [ "$TMUX_NOTIFY_ROUTE_DESKTOP" = "1" ]
+}
+
 @test "visible target acknowledges existing Inbox entries" {
     tmux_notify_inbox_enqueue "%9" attention Claude "Permission" "Body"
     FAKE_CLIENT_ROWS='0|10|/dev/pts/local|/dev/pts/local|222|$1|%9|work'
-    tmux_client_pid_is_remote_ssh() { return 1; }
+    tmux_client_pid_ssh_state() { printf '%s' "local"; }
 
     tmux_notify_route_notification "%9" "Visible" "Body" complete Codex
 
