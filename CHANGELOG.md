@@ -2,6 +2,16 @@
 
 Notable changes to tmux-notify-jump are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- omp (oh-my-pi) integration: `omp-extension/tmux-notify-jump.ts` extension
+  bridge and `notify-omp.sh` wrapper, plus `--configure-omp` /
+  `--omp-extension-path` installer support.
+
+[Unreleased]: https://github.com/hmgle/tmux-notify-jump/compare/v1.0.0...HEAD
+
 ## [1.0.0] - 2026-08-16
 
 This is the first stable release of tmux-notify-jump.

@@ -31,6 +31,8 @@ This repo contains:
 - `opencode-plugin/tmux-notify-jump.ts`: OpenCode plugin (bridges events to `notify-opencode.sh`)
 - `pi-extension/tmux-notify-jump.ts`: Pi coding agent extension (bridges events to `notify-pi.sh`)
 - `notify-pi.sh`: Pi wrapper (reads JSON from stdin)
+- `omp-extension/tmux-notify-jump.ts`: omp coding agent extension (bridges events to `notify-omp.sh`)
+- `notify-omp.sh`: omp wrapper (reads JSON from stdin)
 
 ## Requirements
 
@@ -51,9 +53,9 @@ This repo contains:
 - `xdotool` for focusing the terminal window before jumping (the script auto-disables focusing if missing)
 - `python3` for safer Unicode truncation
 
-### Wrappers (Codex/Claude/Kimi/Grok/OpenCode/Pi hooks)
+### Wrappers (Codex/Claude/Kimi/Grok/OpenCode/Pi/omp hooks)
 
-- `jq` (required by the Codex, Claude, Kimi, Grok, OpenCode, and Pi wrappers; if missing, the wrappers no-op)
+- `jq` (required by the Codex, Claude, Kimi, Grok, OpenCode, Pi, and omp wrappers; if missing, the wrappers no-op)
 
 ## Install
 
@@ -84,7 +86,7 @@ Uninstall:
 Or run from the repo (no install):
 
 ```bash
-chmod +x tmux-notify-jump tmux-notify-jump-linux.sh tmux-notify-jump-macos.sh tmux-notify-jump-hook.sh notify-codex.sh notify-claude-code.sh notify-kimi-code.sh notify-grok.sh notify-opencode.sh notify-pi.sh
+chmod +x tmux-notify-jump tmux-notify-jump-linux.sh tmux-notify-jump-macos.sh tmux-notify-jump-hook.sh notify-codex.sh notify-claude-code.sh notify-kimi-code.sh notify-grok.sh notify-opencode.sh notify-pi.sh notify-omp.sh
 ```
 
 ## Usage
@@ -627,6 +629,61 @@ Notes:
 - Set `PI_NOTIFY_DEBUG=1` to log diagnostics to `~/.pi/agent/logs/notify-pi.log` (override with `PI_NOTIFY_DEBUG_LOG`).
 - If you enable multiple events (e.g. `agent_end,agent_settled`), a settled run may emit two notifications back-to-back; their titles differ, so the built-in dedupe does not merge them.
 - See the [official Pi extensions documentation](https://pi.dev/docs/latest/extensions) for the event contract.
+
+## omp integration
+
+[omp](https://omp.sh) (oh-my-pi) has no shell-command hook system; its integration point is TypeScript extensions. Use `omp-extension/tmux-notify-jump.ts`, a thin bridge that forwards omp lifecycle events as JSON on stdin to `notify-omp.sh`, which calls `tmux-notify-jump` (or `TMUX_NOTIFY_JUMP_SH` if set) — same pattern as the Pi integration, with the same tmux targeting, SSH suppression, and focus-only fallback behavior as the other wrappers.
+
+Install the scripts and the extension:
+
+```bash
+./install.sh --prefix "$HOME/.local" --symlink --configure-omp
+```
+
+Or manually:
+
+```bash
+cp omp-extension/tmux-notify-jump.ts ~/.omp/agent/extensions/
+# and ensure notify-omp.sh is on your PATH
+```
+
+Extensions are auto-discovered from `~/.omp/agent/extensions/` (user-level), `<project>/.omp/extensions/` (project-level), or the `extensions:` list in `~/.omp/agent/config.yml`.
+
+Default events: `session_stop` (the main session finished responding and is idle — omp's equivalent of Pi's `agent_settled`; it never fires for task/subagent sessions). Additional events (`agent_end`, `turn_end`) can be enabled via filtering; they may also fire for subagent runs, so keep them opt-in.
+
+Optional event filtering (comma-separated lists; `*` = all):
+
+- `OMP_NOTIFY_EVENTS`: whitelist (empty = default: `session_stop`)
+- `OMP_NOTIFY_EXCLUDE_EVENTS`: blacklist (set to `*` to disable all)
+- `OMP_NOTIFY_SHOW_EVENT_TYPE`: include `[event]` in title (`1`/`0`; default: `1`)
+
+Optional UI/timeout routing (per-event):
+
+- `OMP_NOTIFY_UI_BY_EVENT`: per-event UI override (e.g. `session_stop:notification,agent_end:dialog`)
+- `OMP_NOTIFY_TIMEOUT_MS_BY_EVENT`: per-event timeout override (e.g. `session_stop:10000,agent_end:0`)
+- `OMP_NOTIFY_UI`: wrapper default UI override (falls back to `TMUX_NOTIFY_UI` if unset)
+- `OMP_NOTIFY_TIMEOUT_MS`: default notification timeout (default: `0`, sticky; daemon-dependent)
+
+UI override precedence: `OMP_NOTIFY_UI_BY_EVENT` → `OMP_NOTIFY_UI` → `TMUX_NOTIFY_UI`/default.
+
+Extension-level options:
+
+- `OMP_NOTIFY_CMD`: bridge command (default: `notify-omp.sh` on PATH)
+- `OMP_NOTIFY_HEADLESS`: also notify when omp runs without UI, i.e. print (`-p`) and JSON event-stream modes (`1` enables; default: `0`). TUI and RPC (editor-driven) modes always notify — omp reports `ctx.hasUI` as true there.
+
+Notes:
+
+- Run omp inside tmux so `TMUX_PANE` identifies the originating pane.
+- SSH-attached clients use the tmux Inbox by default, so no desktop notification
+  daemon is required on the remote host. Use `TMUX_NOTIFY_REMOTE_MODE` to change
+  the routing policy.
+- If the extension runs without tmux env but a tmux server is running, set `OMP_NOTIFY_FALLBACK_TARGET=1` (or `TMUX_NOTIFY_FALLBACK_TARGET=1`) to target the most recently active tmux client pane.
+- If tmux isn't available/running, the wrapper falls back to `--focus-only` by default (set `OMP_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0` to restore no-op).
+- On macOS (and on Linux if you have `zenity`/`kdialog`/`yad`), set `OMP_NOTIFY_UI=dialog` (or `TMUX_NOTIFY_UI=dialog`) to use a modal "Jump/Dismiss" dialog that stays until clicked.
+- Requires `jq` (otherwise the wrapper no-ops; set `OMP_NOTIFY_DEBUG=1` to see why in logs).
+- Set `OMP_NOTIFY_DEBUG=1` to log diagnostics to `~/.omp/agent/logs/notify-omp.log` (override with `OMP_NOTIFY_DEBUG_LOG`).
+- If you enable multiple events (e.g. `agent_end,session_stop`), a settled run may emit two notifications back-to-back; their titles differ, so the built-in dedupe does not merge them.
+- See the [official omp extension documentation](https://github.com/can1357/oh-my-pi/blob/main/docs/extensions.md) for the event contract.
 
 ## Tests
 

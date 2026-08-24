@@ -11,6 +11,7 @@ CONFIGURE_KIMI=0
 CONFIGURE_GROK=0
 CONFIGURE_OPENCODE=0
 CONFIGURE_PI=0
+CONFIGURE_OMP=0
 CONFIGURE_TMUX=0
 CODEX_CONFIG_PATH="${CODEX_CONFIG_PATH:-}"
 CLAUDE_CONFIG_PATH="${CLAUDE_CONFIG_PATH:-}"
@@ -18,6 +19,7 @@ KIMI_CONFIG_PATH="${KIMI_CONFIG_PATH:-}"
 GROK_HOOKS_PATH="${GROK_HOOKS_PATH:-}"
 OPENCODE_PLUGIN_PATH="${OPENCODE_PLUGIN_PATH:-}"
 PI_EXTENSION_PATH="${PI_EXTENSION_PATH:-}"
+OMP_EXTENSION_PATH="${OMP_EXTENSION_PATH:-}"
 TMUX_CONFIG_PATH="${TMUX_CONFIG_PATH:-$HOME/.tmux.conf}"
 TMUX_KEY="${TMUX_KEY:-N}"
 TMUX_SOCKET_PATH="${TMUX_SOCKET_PATH:-}"
@@ -37,6 +39,7 @@ Options:
   --configure-grok  Configure Grok Build hooks (opt-in)
   --configure-opencode Configure OpenCode plugin (opt-in)
   --configure-pi    Configure Pi coding agent extension (opt-in)
+  --configure-omp   Configure omp coding agent extension (opt-in)
   --configure-tmux  Configure tmux status, hooks, and prefix key (opt-in)
   --codex-config <path>  Codex config.toml path (default: ~/.codex/config.toml)
   --claude-config <path> Claude settings.json path (default: ~/.claude/settings.json)
@@ -44,6 +47,7 @@ Options:
   --grok-hooks-path <path> Grok hooks dir (default: \$GROK_HOME/hooks or ~/.grok/hooks)
   --opencode-plugin-path <path> OpenCode plugins dir (default: ~/.config/opencode/plugins)
   --pi-extension-path <path> Pi extensions dir (default: ~/.pi/agent/extensions)
+  --omp-extension-path <path> omp extensions dir (default: ~/.omp/agent/extensions)
   --tmux-config <path> tmux config path (default: ~/.tmux.conf)
   --tmux-key <key>  Prefix key for Inbox next (default: N)
   --tmux-socket <path> tmux server socket cleaned by --uninstall (default: the
@@ -60,6 +64,7 @@ Examples:
   $0 --prefix "\$HOME/.local" --symlink --configure-grok
   $0 --prefix "\$HOME/.local" --symlink --configure-opencode
   $0 --prefix "\$HOME/.local" --symlink --configure-pi
+  $0 --prefix "\$HOME/.local" --symlink --configure-omp
 EOF
 }
 
@@ -636,6 +641,52 @@ configure_pi() {
     echo "Ensure notify-pi.sh is on your PATH"
 }
 
+configure_omp() {
+    local ext_dir="${OMP_EXTENSION_PATH:-$HOME/.omp/agent/extensions}"
+    local ext_src="$REPO_DIR/omp-extension/tmux-notify-jump.ts"
+    local ext_dst="$ext_dir/tmux-notify-jump.ts"
+
+    if [ ! -f "$ext_src" ]; then
+        echo "Warning: omp extension source not found: $ext_src"
+        return 0
+    fi
+
+    mkdir -p "$ext_dir"
+
+    if [ -f "$ext_dst" ] || [ -L "$ext_dst" ]; then
+        local existing_target=""
+        if [ -L "$ext_dst" ]; then
+            # readlink -f is GNU-only; fall back to portable resolution
+            existing_target="$(readlink -f "$ext_dst" 2>/dev/null \
+                || python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$ext_dst" 2>/dev/null \
+                || true)"
+        fi
+        local canonical_src=""
+        canonical_src="$(readlink -f "$ext_src" 2>/dev/null \
+            || python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$ext_src" 2>/dev/null \
+            || true)"
+        if [ -n "$existing_target" ] && [ -n "$canonical_src" ] \
+            && [ "$existing_target" = "$canonical_src" ]; then
+            echo "omp extension already installed: $ext_dst"
+            return 0
+        fi
+        backup_file "$ext_dst"
+    fi
+
+    case "$MODE" in
+        symlink)
+            ln -sf "$ext_src" "$ext_dst"
+            ;;
+        copy)
+            rm -f "$ext_dst"
+            cp -f "$ext_src" "$ext_dst"
+            ;;
+    esac
+
+    echo "Installed omp extension: $ext_dst"
+    echo "Ensure notify-omp.sh is on your PATH"
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --prefix)
@@ -672,6 +723,9 @@ while [ $# -gt 0 ]; do
         --configure-pi)
             CONFIGURE_PI=1
             ;;
+        --configure-omp)
+            CONFIGURE_OMP=1
+            ;;
         --configure-tmux)
             CONFIGURE_TMUX=1
             ;;
@@ -704,6 +758,11 @@ while [ $# -gt 0 ]; do
             shift
             [ $# -gt 0 ] || die "--pi-extension-path requires a path"
             PI_EXTENSION_PATH="$1"
+            ;;
+        --omp-extension-path)
+            shift
+            [ $# -gt 0 ] || die "--omp-extension-path requires a path"
+            OMP_EXTENSION_PATH="$1"
             ;;
         --tmux-config)
             shift
@@ -756,6 +815,7 @@ FILES=(
     notify-grok.sh
     notify-opencode.sh
     notify-pi.sh
+    notify-omp.sh
 )
 
 if [ "$UNINSTALL" -eq 1 ]; then
@@ -829,6 +889,10 @@ fi
 
 if [ "$CONFIGURE_PI" -eq 1 ]; then
     configure_pi
+fi
+
+if [ "$CONFIGURE_OMP" -eq 1 ]; then
+    configure_omp
 fi
 
 if [ "$CONFIGURE_TMUX" -eq 1 ]; then
