@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Pi coding agent integration for tmux-notify-jump
-# Reads JSON from stdin (piped by the pi-extension/tmux-notify-jump.ts bridge)
+# omp (oh-my-pi) coding agent integration for tmux-notify-jump
+# Reads JSON from stdin (piped by the omp-extension/tmux-notify-jump.ts bridge)
 
 # Extension-spawned processes may run with a restricted environment (common
 # under tmux / hook runners).
@@ -24,13 +24,13 @@ load_user_config
 ensure_tmux_notify_socket_from_env
 
 log_debug() {
-    [ "${PI_NOTIFY_DEBUG:-0}" = "1" ] || return 0
-    local logfile="${PI_NOTIFY_DEBUG_LOG:-}"
+    [ "${OMP_NOTIFY_DEBUG:-0}" = "1" ] || return 0
+    local logfile="${OMP_NOTIFY_DEBUG_LOG:-}"
     if [ -z "$logfile" ]; then
         local home="${HOME:-}"
         # Fail open: hooks may run without HOME; skip logging instead of crashing.
         [ -n "$home" ] || return 0
-        logfile="$home/.pi/agent/logs/notify-pi.log"
+        logfile="$home/.omp/agent/logs/notify-omp.log"
     fi
     mkdir -p "$(dirname "$logfile")" 2>/dev/null || true
     printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$logfile" 2>/dev/null || true
@@ -45,7 +45,7 @@ lookup_kv_map() {
     # Lookup key in a comma-separated key:value map string.
     #
     # Example:
-    #   lookup_kv_map "agent_settled" "agent_settled:notification,agent_end:dialog"
+    #   lookup_kv_map "session_stop" "session_stop:notification,agent_end:dialog"
     #
     # Prints value to stdout if found, otherwise prints nothing.
     local key="${1:-}"
@@ -94,22 +94,22 @@ if ! jq -e . >/dev/null 2>&1 <<<"$payload"; then
     exit 0
 fi
 
-MAX_TITLE="$(normalize_int "${PI_NOTIFY_MAX_TITLE:-${TMUX_NOTIFY_MAX_TITLE:-80}}" 80)"
-MAX_BODY="$(normalize_int "${PI_NOTIFY_MAX_BODY:-${TMUX_NOTIFY_MAX_BODY:-200}}" 200)"
-TIMEOUT_MS_BASE="$(normalize_int "${PI_NOTIFY_TIMEOUT_MS:-${TMUX_NOTIFY_TIMEOUT:-0}}" 0)"
+MAX_TITLE="$(normalize_int "${OMP_NOTIFY_MAX_TITLE:-${TMUX_NOTIFY_MAX_TITLE:-80}}" 80)"
+MAX_BODY="$(normalize_int "${OMP_NOTIFY_MAX_BODY:-${TMUX_NOTIFY_MAX_BODY:-200}}" 200)"
+TIMEOUT_MS_BASE="$(normalize_int "${OMP_NOTIFY_TIMEOUT_MS:-${TMUX_NOTIFY_TIMEOUT:-0}}" 0)"
 
 # Event filtering configuration
-PI_EVENTS="${PI_NOTIFY_EVENTS:-}"          # whitelist (empty=default, *=all)
-PI_EXCLUDE="${PI_NOTIFY_EXCLUDE_EVENTS:-}" # blacklist
-PI_DEFAULT_EVENTS="agent_settled"          # default enabled events
-PI_SHOW_TYPE="${PI_NOTIFY_SHOW_EVENT_TYPE:-1}" # show event type in title
+OMP_EVENTS="${OMP_NOTIFY_EVENTS:-}"          # whitelist (empty=default, *=all)
+OMP_EXCLUDE="${OMP_NOTIFY_EXCLUDE_EVENTS:-}" # blacklist
+OMP_DEFAULT_EVENTS="session_stop"            # default enabled events
+OMP_SHOW_TYPE="${OMP_NOTIFY_SHOW_EVENT_TYPE:-1}" # show event type in title
 
 # Parse event type
 EVENT_NAME="$(jq -r '.event // empty' <<<"$payload" 2>/dev/null || true)"
 EVENT_NAME="$(trim_ws "$EVENT_NAME")"
 
 # Check if event is enabled
-if ! is_event_enabled "$EVENT_NAME" "$PI_EVENTS" "$PI_EXCLUDE" "$PI_DEFAULT_EVENTS"; then
+if ! is_event_enabled "$EVENT_NAME" "$OMP_EVENTS" "$OMP_EXCLUDE" "$OMP_DEFAULT_EVENTS"; then
     log_debug "event not enabled: $EVENT_NAME"
     exit 0
 fi
@@ -119,8 +119,8 @@ TITLE_MSG=""
 MESSAGE=""
 
 case "$EVENT_NAME" in
-    agent_settled)
-        # Pi is fully idle: no auto-retry, compaction, or queued follow-up left.
+    session_stop)
+        # Main session settled: omp finished responding and is awaiting input.
         TITLE_MSG="Response Complete"
         MESSAGE="Click to jump to tmux pane"
         ;;
@@ -145,18 +145,18 @@ case "$EVENT_NAME" in
 esac
 
 # Format title with optional event type
-TITLE="$(format_notify_title "Pi" "$EVENT_NAME" "$TITLE_MSG" "$PI_SHOW_TYPE")"
+TITLE="$(format_notify_title "omp" "$EVENT_NAME" "$TITLE_MSG" "$OMP_SHOW_TYPE")"
 
-ALLOW_FOCUS_FALLBACK="${PI_NOTIFY_FOCUS_ONLY_FALLBACK:-${TMUX_NOTIFY_FOCUS_ONLY_FALLBACK:-1}}"
-ALLOW_FALLBACK="${PI_NOTIFY_FALLBACK_TARGET:-${TMUX_NOTIFY_FALLBACK_TARGET:-0}}"
+ALLOW_FOCUS_FALLBACK="${OMP_NOTIFY_FOCUS_ONLY_FALLBACK:-${TMUX_NOTIFY_FOCUS_ONLY_FALLBACK:-1}}"
+ALLOW_FALLBACK="${OMP_NOTIFY_FALLBACK_TARGET:-${TMUX_NOTIFY_FALLBACK_TARGET:-0}}"
 
 # Timeout routing (optional):
 # - Allow per-event timeout override
 TIMEOUT_MS="$TIMEOUT_MS_BASE"
 TIMEOUT_MS_SOURCE="default"
 
-if [ -n "$EVENT_NAME" ] && [ -n "${PI_NOTIFY_TIMEOUT_MS_BY_EVENT:-}" ]; then
-    TIMEOUT_MS_CANDIDATE="$(lookup_kv_map "$EVENT_NAME" "${PI_NOTIFY_TIMEOUT_MS_BY_EVENT:-}" 2>/dev/null || true)"
+if [ -n "$EVENT_NAME" ] && [ -n "${OMP_NOTIFY_TIMEOUT_MS_BY_EVENT:-}" ]; then
+    TIMEOUT_MS_CANDIDATE="$(lookup_kv_map "$EVENT_NAME" "${OMP_NOTIFY_TIMEOUT_MS_BY_EVENT:-}" 2>/dev/null || true)"
     if [ -n "$TIMEOUT_MS_CANDIDATE" ]; then
         if is_integer "$TIMEOUT_MS_CANDIDATE"; then
             TIMEOUT_MS="$TIMEOUT_MS_CANDIDATE"
@@ -196,7 +196,7 @@ args=(
     --max-title "$MAX_TITLE"
     --max-body "$MAX_BODY"
     --notify-kind "$NOTIFY_KIND"
-    --notify-source "Pi"
+    --notify-source "omp"
 )
 
 # UI routing (optional):
@@ -205,8 +205,8 @@ args=(
 UI_OVERRIDE=""
 UI_OVERRIDE_SOURCE="none"
 
-if [ -n "$EVENT_NAME" ] && [ -n "${PI_NOTIFY_UI_BY_EVENT:-}" ]; then
-    UI_OVERRIDE="$(lookup_kv_map "$EVENT_NAME" "${PI_NOTIFY_UI_BY_EVENT:-}" 2>/dev/null || true)"
+if [ -n "$EVENT_NAME" ] && [ -n "${OMP_NOTIFY_UI_BY_EVENT:-}" ]; then
+    UI_OVERRIDE="$(lookup_kv_map "$EVENT_NAME" "${OMP_NOTIFY_UI_BY_EVENT:-}" 2>/dev/null || true)"
     if [ -n "$UI_OVERRIDE" ]; then
         if is_valid_ui "$UI_OVERRIDE"; then
             UI_OVERRIDE_SOURCE="event:$EVENT_NAME"
@@ -217,12 +217,12 @@ if [ -n "$EVENT_NAME" ] && [ -n "${PI_NOTIFY_UI_BY_EVENT:-}" ]; then
     fi
 fi
 
-if [ -z "$UI_OVERRIDE" ] && [ -n "${PI_NOTIFY_UI:-}" ]; then
-    if is_valid_ui "${PI_NOTIFY_UI:-}"; then
-        UI_OVERRIDE="${PI_NOTIFY_UI:-}"
+if [ -z "$UI_OVERRIDE" ] && [ -n "${OMP_NOTIFY_UI:-}" ]; then
+    if is_valid_ui "${OMP_NOTIFY_UI:-}"; then
+        UI_OVERRIDE="${OMP_NOTIFY_UI:-}"
         UI_OVERRIDE_SOURCE="default"
     else
-        log_debug "invalid PI_NOTIFY_UI: '${PI_NOTIFY_UI:-}' (expected notification|dialog)"
+        log_debug "invalid OMP_NOTIFY_UI: '${OMP_NOTIFY_UI:-}' (expected notification|dialog)"
     fi
 fi
 
@@ -243,11 +243,11 @@ if is_integer "${PPID:-}"; then
     args+=(--sender-pid "$PPID")
 fi
 
-if [ "${PI_NOTIFY_QUIET:-1}" = "1" ] && [ "${PI_NOTIFY_DEBUG:-0}" != "1" ]; then
+if [ "${OMP_NOTIFY_QUIET:-1}" = "1" ] && [ "${OMP_NOTIFY_DEBUG:-0}" != "1" ]; then
     args+=(--quiet)
 fi
 
-if [ "${PI_NOTIFY_DEBUG:-0}" = "1" ]; then
+if [ "${OMP_NOTIFY_DEBUG:-0}" = "1" ]; then
     log_debug "jump_sh=$JUMP_SH"
     log_debug "event=$EVENT_NAME target=${TARGET:-} focus_only=$([ -z "$TARGET" ] && echo "1" || echo "0") timeout=$TIMEOUT_MS max_title=$MAX_TITLE max_body=$MAX_BODY"
     log_debug "timeout_source=$TIMEOUT_MS_SOURCE"

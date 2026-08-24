@@ -12,6 +12,7 @@ SCRIPTS := \
 	notify-grok.sh \
 	notify-opencode.sh \
 	notify-pi.sh \
+	notify-omp.sh \
 	install.sh
 
 help:

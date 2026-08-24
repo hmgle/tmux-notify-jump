@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Smoke tests for notify-pi.sh wrapper.
+# Smoke tests for notify-omp.sh wrapper.
 
 load 'test_helper'
 
@@ -11,20 +11,20 @@ teardown() {
     teardown_temp_dir
 }
 
-@test "notify-pi.sh: empty stdin exits 0" {
-    run bash -c 'echo -n "" | "$1"' _ "$PROJECT_ROOT/notify-pi.sh"
+@test "notify-omp.sh: empty stdin exits 0" {
+    run bash -c 'echo -n "" | "$1"' _ "$PROJECT_ROOT/notify-omp.sh"
 
     [ "$status" -eq 0 ]
     [ -z "$output" ]
 }
 
-@test "notify-pi.sh: invalid JSON exits 0" {
-    run bash -c 'echo "not json" | "$1"' _ "$PROJECT_ROOT/notify-pi.sh"
+@test "notify-omp.sh: invalid JSON exits 0" {
+    run bash -c 'echo "not json" | "$1"' _ "$PROJECT_ROOT/notify-omp.sh"
 
     [ "$status" -eq 0 ]
 }
 
-@test "notify-pi.sh: agent_settled payload calls tmux-notify-jump with correct title" {
+@test "notify-omp.sh: session_stop payload calls tmux-notify-jump with correct title" {
     fake_bin="$TEST_TEMP_DIR/bin"
     mkdir -p "$fake_bin"
 
@@ -50,8 +50,8 @@ FAKE
         export PATH="'"$fake_bin"':$PATH"
         export CAPTURE_FILE
         export TMUX_NOTIFY_JUMP_SH
-        echo "{\"event\":\"agent_settled\"}" \
-            | "'"$PROJECT_ROOT/notify-pi.sh"'"
+        echo "{\"event\":\"session_stop\"}" \
+            | "'"$PROJECT_ROOT/notify-omp.sh"'"
     '
 
     [ "$status" -eq 0 ]
@@ -59,22 +59,32 @@ FAKE
 
     captured="$(cat "$CAPTURE_FILE")"
     [[ "$captured" == *"Response Complete"* ]]
-    [[ "$captured" == *"Pi"* ]]
+    [[ "$captured" == *"omp"* ]]
     [[ "$captured" == *"--focus-only"* ]]
     [[ "$captured" == *"Click to focus terminal"* ]]
 }
 
-@test "notify-pi.sh: agent_end disabled by default exits 0 silently" {
+@test "notify-omp.sh: agent_end disabled by default exits 0 silently" {
     run bash -c '
         echo "{\"event\":\"agent_end\"}" \
-            | "'"$PROJECT_ROOT/notify-pi.sh"'"
+            | "'"$PROJECT_ROOT/notify-omp.sh"'"
     '
 
     [ "$status" -eq 0 ]
     [ -z "$output" ]
 }
 
-@test "notify-pi.sh: PI_NOTIFY_EVENTS enables agent_end" {
+@test "notify-omp.sh: turn_end disabled by default exits 0 silently" {
+    run bash -c '
+        echo "{\"event\":\"turn_end\"}" \
+            | "'"$PROJECT_ROOT/notify-omp.sh"'"
+    '
+
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "notify-omp.sh: OMP_NOTIFY_EVENTS enables agent_end" {
     fake_bin="$TEST_TEMP_DIR/bin"
     mkdir -p "$fake_bin"
 
@@ -98,9 +108,9 @@ FAKE
         export PATH="'"$fake_bin"':$PATH"
         export CAPTURE_FILE
         export TMUX_NOTIFY_JUMP_SH
-        export PI_NOTIFY_EVENTS="agent_end"
+        export OMP_NOTIFY_EVENTS="agent_end"
         echo "{\"event\":\"agent_end\"}" \
-            | "'"$PROJECT_ROOT/notify-pi.sh"'"
+            | "'"$PROJECT_ROOT/notify-omp.sh"'"
     '
 
     [ "$status" -eq 0 ]
@@ -110,18 +120,18 @@ FAKE
     [[ "$captured" == *"Agent Run Ended"* ]]
 }
 
-@test "notify-pi.sh: excluded event exits 0 silently" {
+@test "notify-omp.sh: excluded event exits 0 silently" {
     run bash -c '
-        export PI_NOTIFY_EXCLUDE_EVENTS="agent_settled"
-        echo "{\"event\":\"agent_settled\"}" \
-            | "'"$PROJECT_ROOT/notify-pi.sh"'"
+        export OMP_NOTIFY_EXCLUDE_EVENTS="session_stop"
+        echo "{\"event\":\"session_stop\"}" \
+            | "'"$PROJECT_ROOT/notify-omp.sh"'"
     '
 
     [ "$status" -eq 0 ]
     [ -z "$output" ]
 }
 
-@test "notify-pi.sh: per-event UI and timeout routing" {
+@test "notify-omp.sh: per-event UI and timeout routing" {
     fake_bin="$TEST_TEMP_DIR/bin"
     mkdir -p "$fake_bin"
 
@@ -145,10 +155,10 @@ FAKE
         export PATH="'"$fake_bin"':$PATH"
         export CAPTURE_FILE
         export TMUX_NOTIFY_JUMP_SH
-        export PI_NOTIFY_UI_BY_EVENT="agent_settled:dialog"
-        export PI_NOTIFY_TIMEOUT_MS_BY_EVENT="agent_settled:12345"
-        echo "{\"event\":\"agent_settled\"}" \
-            | "'"$PROJECT_ROOT/notify-pi.sh"'"
+        export OMP_NOTIFY_UI_BY_EVENT="session_stop:dialog"
+        export OMP_NOTIFY_TIMEOUT_MS_BY_EVENT="session_stop:12345"
+        echo "{\"event\":\"session_stop\"}" \
+            | "'"$PROJECT_ROOT/notify-omp.sh"'"
     '
 
     [ "$status" -eq 0 ]
@@ -160,7 +170,7 @@ FAKE
     [[ "$captured" == *"12345"* ]]
 }
 
-@test "notify-pi.sh: remote ssh tmux client routes through tmux by default" {
+@test "notify-omp.sh: remote ssh tmux client routes through tmux by default" {
     fake_bin="$TEST_TEMP_DIR/bin"
     mkdir -p "$fake_bin"
 
@@ -237,8 +247,8 @@ FAKE
         export TMUX_NOTIFY_JUMP_SH
         export TMUX="/tmp/tmux-test,123,0"
         export TMUX_PANE="%1"
-        echo "{\"event\":\"agent_settled\"}" \
-            | "'"$PROJECT_ROOT/notify-pi.sh"'"
+        echo "{\"event\":\"session_stop\"}" \
+            | "'"$PROJECT_ROOT/notify-omp.sh"'"
     '
 
     [ "$status" -eq 0 ]
@@ -249,7 +259,7 @@ FAKE
     [[ "$output" == *"complete"* ]]
 }
 
-@test "notify-pi.sh: TMUX_NOTIFY_REMOTE allows remote ssh tmux notification" {
+@test "notify-omp.sh: TMUX_NOTIFY_REMOTE allows remote ssh tmux notification" {
     fake_bin="$TEST_TEMP_DIR/bin"
     mkdir -p "$fake_bin"
 
@@ -327,8 +337,8 @@ FAKE
         export TMUX="/tmp/tmux-test,123,0"
         export TMUX_PANE="%1"
         export TMUX_NOTIFY_REMOTE=1
-        echo "{\"event\":\"agent_settled\"}" \
-            | "'"$PROJECT_ROOT/notify-pi.sh"'"
+        echo "{\"event\":\"session_stop\"}" \
+            | "'"$PROJECT_ROOT/notify-omp.sh"'"
     '
 
     [ "$status" -eq 0 ]
@@ -339,11 +349,11 @@ FAKE
     [[ "$captured" == *"Click to jump to tmux pane"* ]]
 }
 
-@test "notify-pi.sh: debug enabled without HOME still exits 0" {
+@test "notify-omp.sh: debug enabled without HOME still exits 0" {
     run bash -c '
-        export PI_NOTIFY_DEBUG=1
+        export OMP_NOTIFY_DEBUG=1
         echo "{\"event\":\"agent_end\"}" \
-            | env -u HOME "'"$PROJECT_ROOT/notify-pi.sh"'"
+            | env -u HOME "'"$PROJECT_ROOT/notify-omp.sh"'"
     '
 
     [ "$status" -eq 0 ]
