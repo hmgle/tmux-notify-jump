@@ -48,8 +48,8 @@ Options:
   --opencode-plugin-path <path> OpenCode plugins dir (default: ~/.config/opencode/plugins)
   --pi-extension-path <path> Pi extensions dir (default: ~/.pi/agent/extensions)
   --omp-extension-path <path> omp extensions dir (default: derived from
-                    OMP_PROFILE/PI_PROFILE, PI_CODING_AGENT_DIR, PI_CONFIG_DIR;
-                    usually ~/.omp/agent/extensions)
+                    OMP_PROFILE/PI_PROFILE, PI_CODING_AGENT_DIR (absolute
+                    path required), PI_CONFIG_DIR; usually ~/.omp/agent/extensions)
   --tmux-config <path> tmux config path (default: ~/.tmux.conf)
   --tmux-key <key>  Prefix key for Inbox next (default: N)
   --tmux-socket <path> tmux server socket cleaned by --uninstall (default: the
@@ -645,30 +645,57 @@ configure_pi() {
 
 # Resolve omp's user-level extensions directory using omp's own rules
 # (pi-utils dirs.ts): a named profile (OMP_PROFILE, falling back to
-# PI_PROFILE; empty or "default" selects the default profile) lives under
-# ~/.omp/profiles/<name>/agent and ignores PI_CODING_AGENT_DIR; the default
-# profile honors PI_CODING_AGENT_DIR; PI_CONFIG_DIR replaces ".omp".
-# Prints the directory on stdout; fails with a message for invalid names.
+# PI_PROFILE; edge-trimmed, empty or "default" selects the default profile)
+# lives under ~/.omp/profiles/<name>/agent and ignores PI_CODING_AGENT_DIR;
+# the default profile honors PI_CODING_AGENT_DIR (absolute path required:
+# omp resolves relative values against each session's working directory);
+# PI_CONFIG_DIR replaces ".omp". Profile names follow omp's
+# normalizeProfileName(): lowercase alnum start, [a-z0-9._-] only, <=64
+# chars, no trailing dot, no Windows-reserved device aliases.
+# Prints the directory on stdout; fails with a message for invalid input.
 resolve_omp_extension_dir() {
     local config_dir="${PI_CONFIG_DIR:-.omp}"
-    local profile=""
+    local raw_profile=""
     if [ -n "${OMP_PROFILE+x}" ]; then
         # Explicitly set OMP_PROFILE wins even when empty; PI_PROFILE is ignored.
-        profile="${OMP_PROFILE//[[:space:]]/}"
+        raw_profile="$OMP_PROFILE"
     elif [ -n "${PI_PROFILE:-}" ]; then
-        profile="${PI_PROFILE//[[:space:]]/}"
+        raw_profile="$PI_PROFILE"
     fi
+    # omp trims leading/trailing whitespace only; interior whitespace is invalid.
+    local profile="${raw_profile#"${raw_profile%%[![:space:]]*}"}"
+    profile="${profile%"${profile##*[![:space:]]}"}"
     if [ "$profile" = "default" ]; then
         profile=""
     fi
     if [ -z "$profile" ]; then
-        printf '%s\n' "${PI_CODING_AGENT_DIR:-$HOME/$config_dir/agent}/extensions"
+        if [ -n "${PI_CODING_AGENT_DIR:-}" ]; then
+            case "$PI_CODING_AGENT_DIR" in
+                /*)
+                    printf '%s\n' "$PI_CODING_AGENT_DIR/extensions"
+                    ;;
+                *)
+                    echo "Error: PI_CODING_AGENT_DIR must be an absolute path (omp resolves it against each session's working directory): $PI_CODING_AGENT_DIR" >&2
+                    return 1
+                    ;;
+            esac
+            return 0
+        fi
+        printf '%s\n' "$HOME/$config_dir/agent/extensions"
         return 0
     fi
     if ! [[ "$profile" =~ ^[a-z0-9][a-z0-9._-]{0,63}$ ]] || [[ "$profile" == *. ]]; then
-        echo "Error: invalid omp profile name: $profile" >&2
+        echo "Error: invalid omp profile name: $raw_profile" >&2
         return 1
     fi
+    case "${profile%%.*}" in
+        con|prn|aux|nul|com[0-9]|lpt[0-9])
+            # Windows-reserved device alias (CON, PRN, ..., COM1-9, LPT0-9),
+            # including dotted forms like "con.dev"; rejected by omp too.
+            echo "Error: invalid omp profile name: $raw_profile" >&2
+            return 1
+            ;;
+    esac
     printf '%s\n' "$HOME/$config_dir/profiles/$profile/agent/extensions"
 }
 

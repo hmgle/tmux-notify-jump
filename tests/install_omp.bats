@@ -108,3 +108,55 @@ install_omp() {
 
     [ "$status" -ne 0 ]
 }
+
+@test "configure-omp: interior whitespace makes the profile name invalid" {
+    install_omp 'OMP_PROFILE=team name'
+
+    [ "$status" -ne 0 ]
+    [ ! -e "$TEST_TEMP_DIR/home/.omp/profiles" ]
+}
+
+@test "configure-omp: surrounding whitespace is trimmed from profile names" {
+    install_omp 'OMP_PROFILE= work '
+
+    [ "$status" -eq 0 ]
+    link="$TEST_TEMP_DIR/home/.omp/profiles/work/agent/extensions/tmux-notify-jump.ts"
+    [ -L "$link" ]
+}
+
+@test "configure-omp: whitespace-only OMP_PROFILE selects the default profile" {
+    install_omp 'OMP_PROFILE=   '
+
+    [ "$status" -eq 0 ]
+    link="$TEST_TEMP_DIR/home/.omp/agent/extensions/tmux-notify-jump.ts"
+    [ -L "$link" ]
+}
+
+@test "configure-omp: Windows-reserved device names are rejected" {
+    install_omp 'OMP_PROFILE=con'
+    [ "$status" -ne 0 ]
+
+    install_omp 'OMP_PROFILE=nul'
+    [ "$status" -ne 0 ]
+
+    install_omp 'OMP_PROFILE=com1'
+    [ "$status" -ne 0 ]
+
+    install_omp 'OMP_PROFILE=con.dev'
+    [ "$status" -ne 0 ]
+}
+
+@test "configure-omp: names merely containing reserved stems are accepted" {
+    install_omp 'OMP_PROFILE=console'
+
+    [ "$status" -eq 0 ]
+    link="$TEST_TEMP_DIR/home/.omp/profiles/console/agent/extensions/tmux-notify-jump.ts"
+    [ -L "$link" ]
+}
+
+@test "configure-omp: relative PI_CODING_AGENT_DIR is rejected" {
+    install_omp 'PI_CODING_AGENT_DIR=relative-agent'
+
+    [ "$status" -ne 0 ]
+    [ ! -e "$TEST_TEMP_DIR/home/.omp" ]
+}

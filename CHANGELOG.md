@@ -10,7 +10,9 @@ Notable changes to tmux-notify-jump are documented in this file.
   bridge and `notify-omp.sh` wrapper, plus `--configure-omp` /
   `--omp-extension-path` installer support with omp profile-aware extension
   directory resolution (`OMP_PROFILE`/`PI_PROFILE`, `PI_CODING_AGENT_DIR`,
-  `PI_CONFIG_DIR`).
+  `PI_CONFIG_DIR`). Profile names are validated with omp's exact rules
+  (edge-trimmed, charset, length, Windows-reserved aliases) and
+  `PI_CODING_AGENT_DIR` must be absolute, matching omp runtime resolution.
   Bridge and wrapper coverage includes installer path tests and a Bun-based
   extension registration test.
 
