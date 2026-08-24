@@ -22,8 +22,17 @@ ensure_tmux_notify_socket_from_env
 
 log_debug() {
     [ "${KIMI_NOTIFY_DEBUG:-0}" = "1" ] || return 0
-    local kimi_home="${KIMI_CODE_HOME:-$HOME/.kimi-code}"
-    local logfile="${KIMI_NOTIFY_DEBUG_LOG:-$kimi_home/logs/notify-kimi-code.log}"
+    local logfile="${KIMI_NOTIFY_DEBUG_LOG:-}"
+    if [ -z "$logfile" ]; then
+        local kimi_home="${KIMI_CODE_HOME:-}"
+        if [ -z "$kimi_home" ]; then
+            local home="${HOME:-}"
+            # Fail open: hooks may run without HOME; skip logging instead of crashing.
+            [ -n "$home" ] || return 0
+            kimi_home="$home/.kimi-code"
+        fi
+        logfile="$kimi_home/logs/notify-kimi-code.log"
+    fi
     mkdir -p "$(dirname "$logfile")" 2>/dev/null || true
     printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$logfile" 2>/dev/null || true
 }

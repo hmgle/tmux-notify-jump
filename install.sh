@@ -47,7 +47,9 @@ Options:
   --grok-hooks-path <path> Grok hooks dir (default: \$GROK_HOME/hooks or ~/.grok/hooks)
   --opencode-plugin-path <path> OpenCode plugins dir (default: ~/.config/opencode/plugins)
   --pi-extension-path <path> Pi extensions dir (default: ~/.pi/agent/extensions)
-  --omp-extension-path <path> omp extensions dir (default: ~/.omp/agent/extensions)
+  --omp-extension-path <path> omp extensions dir (default: derived from
+                    OMP_PROFILE/PI_PROFILE, PI_CODING_AGENT_DIR, PI_CONFIG_DIR;
+                    usually ~/.omp/agent/extensions)
   --tmux-config <path> tmux config path (default: ~/.tmux.conf)
   --tmux-key <key>  Prefix key for Inbox next (default: N)
   --tmux-socket <path> tmux server socket cleaned by --uninstall (default: the
@@ -641,8 +643,42 @@ configure_pi() {
     echo "Ensure notify-pi.sh is on your PATH"
 }
 
+# Resolve omp's user-level extensions directory using omp's own rules
+# (pi-utils dirs.ts): a named profile (OMP_PROFILE, falling back to
+# PI_PROFILE; empty or "default" selects the default profile) lives under
+# ~/.omp/profiles/<name>/agent and ignores PI_CODING_AGENT_DIR; the default
+# profile honors PI_CODING_AGENT_DIR; PI_CONFIG_DIR replaces ".omp".
+# Prints the directory on stdout; fails with a message for invalid names.
+resolve_omp_extension_dir() {
+    local config_dir="${PI_CONFIG_DIR:-.omp}"
+    local profile=""
+    if [ -n "${OMP_PROFILE+x}" ]; then
+        # Explicitly set OMP_PROFILE wins even when empty; PI_PROFILE is ignored.
+        profile="${OMP_PROFILE//[[:space:]]/}"
+    elif [ -n "${PI_PROFILE:-}" ]; then
+        profile="${PI_PROFILE//[[:space:]]/}"
+    fi
+    if [ "$profile" = "default" ]; then
+        profile=""
+    fi
+    if [ -z "$profile" ]; then
+        printf '%s\n' "${PI_CODING_AGENT_DIR:-$HOME/$config_dir/agent}/extensions"
+        return 0
+    fi
+    if ! [[ "$profile" =~ ^[a-z0-9][a-z0-9._-]{0,63}$ ]] || [[ "$profile" == *. ]]; then
+        echo "Error: invalid omp profile name: $profile" >&2
+        return 1
+    fi
+    printf '%s\n' "$HOME/$config_dir/profiles/$profile/agent/extensions"
+}
+
 configure_omp() {
-    local ext_dir="${OMP_EXTENSION_PATH:-$HOME/.omp/agent/extensions}"
+    local ext_dir=""
+    if [ -n "$OMP_EXTENSION_PATH" ]; then
+        ext_dir="$OMP_EXTENSION_PATH"
+    elif ! ext_dir="$(resolve_omp_extension_dir)"; then
+        exit 1
+    fi
     local ext_src="$REPO_DIR/omp-extension/tmux-notify-jump.ts"
     local ext_dst="$ext_dir/tmux-notify-jump.ts"
 

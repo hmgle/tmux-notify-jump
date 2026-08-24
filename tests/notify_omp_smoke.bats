@@ -348,3 +348,13 @@ FAKE
     [[ "$captured" == *"--target"* ]]
     [[ "$captured" == *"Click to jump to tmux pane"* ]]
 }
+
+@test "notify-omp.sh: debug enabled without HOME still exits 0" {
+    run bash -c '
+        export OMP_NOTIFY_DEBUG=1
+        echo "{\"event\":\"agent_end\"}" \
+            | env -u HOME "'"$PROJECT_ROOT/notify-omp.sh"'"
+    '
+
+    [ "$status" -eq 0 ]
+}

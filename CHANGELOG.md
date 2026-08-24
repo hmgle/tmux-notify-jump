@@ -8,7 +8,17 @@ Notable changes to tmux-notify-jump are documented in this file.
 
 - omp (oh-my-pi) integration: `omp-extension/tmux-notify-jump.ts` extension
   bridge and `notify-omp.sh` wrapper, plus `--configure-omp` /
-  `--omp-extension-path` installer support.
+  `--omp-extension-path` installer support with omp profile-aware extension
+  directory resolution (`OMP_PROFILE`/`PI_PROFILE`, `PI_CODING_AGENT_DIR`,
+  `PI_CONFIG_DIR`).
+  Bridge and wrapper coverage includes installer path tests and a Bun-based
+  extension registration test.
+
+### Fixed
+
+- All agent wrappers now fail open when `HOME` is unset and debug logging is
+  enabled: diagnostics are skipped instead of aborting with an unbound
+  variable error.
 
 [Unreleased]: https://github.com/hmgle/tmux-notify-jump/compare/v1.0.0...HEAD
 

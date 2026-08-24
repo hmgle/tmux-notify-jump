@@ -25,7 +25,13 @@ ensure_tmux_notify_socket_from_env
 
 log_debug() {
     [ "${PI_NOTIFY_DEBUG:-0}" = "1" ] || return 0
-    local logfile="${PI_NOTIFY_DEBUG_LOG:-$HOME/.pi/agent/logs/notify-pi.log}"
+    local logfile="${PI_NOTIFY_DEBUG_LOG:-}"
+    if [ -z "$logfile" ]; then
+        local home="${HOME:-}"
+        # Fail open: hooks may run without HOME; skip logging instead of crashing.
+        [ -n "$home" ] || return 0
+        logfile="$home/.pi/agent/logs/notify-pi.log"
+    fi
     mkdir -p "$(dirname "$logfile")" 2>/dev/null || true
     printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$logfile" 2>/dev/null || true
 }

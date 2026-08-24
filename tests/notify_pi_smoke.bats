@@ -338,3 +338,13 @@ FAKE
     [[ "$captured" == *"--target"* ]]
     [[ "$captured" == *"Click to jump to tmux pane"* ]]
 }
+
+@test "notify-pi.sh: debug enabled without HOME still exits 0" {
+    run bash -c '
+        export PI_NOTIFY_DEBUG=1
+        echo "{\"event\":\"agent_end\"}" \
+            | env -u HOME "'"$PROJECT_ROOT/notify-pi.sh"'"
+    '
+
+    [ "$status" -eq 0 ]
+}

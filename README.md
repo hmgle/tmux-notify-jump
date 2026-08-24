@@ -682,6 +682,7 @@ Notes:
 - On macOS (and on Linux if you have `zenity`/`kdialog`/`yad`), set `OMP_NOTIFY_UI=dialog` (or `TMUX_NOTIFY_UI=dialog`) to use a modal "Jump/Dismiss" dialog that stays until clicked.
 - Requires `jq` (otherwise the wrapper no-ops; set `OMP_NOTIFY_DEBUG=1` to see why in logs).
 - Set `OMP_NOTIFY_DEBUG=1` to log diagnostics to `~/.omp/agent/logs/notify-omp.log` (override with `OMP_NOTIFY_DEBUG_LOG`).
+- The installer derives the extension directory the same way omp does: `--omp-extension-path` wins outright; otherwise a named profile (`OMP_PROFILE`, falling back to `PI_PROFILE`; an explicitly empty value or `default` selects the default profile) targets `~/.omp/profiles/<name>/agent/extensions` and ignores `PI_CODING_AGENT_DIR`, while the default profile honors `PI_CODING_AGENT_DIR`; `PI_CONFIG_DIR` replaces `.omp` throughout.
 - If you enable multiple events (e.g. `agent_end,session_stop`), a settled run may emit two notifications back-to-back; their titles differ, so the built-in dedupe does not merge them.
 - See the [official omp extension documentation](https://github.com/can1357/oh-my-pi/blob/main/docs/extensions.md) for the event contract.
 

@@ -21,8 +21,17 @@ ensure_tmux_notify_socket_from_env
 
 log_debug() {
     [ "${GROK_NOTIFY_DEBUG:-0}" = "1" ] || return 0
-    local grok_home="${GROK_HOME:-$HOME/.grok}"
-    local logfile="${GROK_NOTIFY_DEBUG_LOG:-$grok_home/logs/notify-grok.log}"
+    local logfile="${GROK_NOTIFY_DEBUG_LOG:-}"
+    if [ -z "$logfile" ]; then
+        local grok_home="${GROK_HOME:-}"
+        if [ -z "$grok_home" ]; then
+            local home="${HOME:-}"
+            # Fail open: hooks may run without HOME; skip logging instead of crashing.
+            [ -n "$home" ] || return 0
+            grok_home="$home/.grok"
+        fi
+        logfile="$grok_home/logs/notify-grok.log"
+    fi
     mkdir -p "$(dirname "$logfile")" 2>/dev/null || true
     printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$logfile" 2>/dev/null || true
 }
