@@ -2,7 +2,7 @@
 
 Notable changes to tmux-notify-jump are documented in this file.
 
-## [Unreleased]
+## [1.1.0] - 2026-08-24
 
 ### Added
 
@@ -22,7 +22,7 @@ Notable changes to tmux-notify-jump are documented in this file.
   enabled: diagnostics are skipped instead of aborting with an unbound
   variable error.
 
-[Unreleased]: https://github.com/hmgle/tmux-notify-jump/compare/v1.0.0...HEAD
+[1.1.0]: https://github.com/hmgle/tmux-notify-jump/compare/v1.0.0...v1.1.0
 
 ## [1.0.0] - 2026-08-16
 
