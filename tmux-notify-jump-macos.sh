@@ -52,6 +52,7 @@ TIMEOUT="$DEFAULT_TIMEOUT"
 MAX_TITLE="$DEFAULT_MAX_TITLE"
 MAX_BODY="$DEFAULT_MAX_BODY"
 DEDUPE_MS="$DEFAULT_DEDUPE_MS"
+BELL="${TMUX_NOTIFY_BELL:-0}"
 UI="$DEFAULT_UI"
 NOTIFY_KIND="${TMUX_NOTIFY_KIND:-complete}"
 NOTIFY_SOURCE="${TMUX_NOTIFY_SOURCE:-tmux-notify-jump}"
@@ -93,6 +94,8 @@ Options:
   --tmux-socket <PATH> Use a specific tmux server socket (passed to tmux -S)
   --dry-run            Print what would happen and exit
   --quiet              Suppress non-error output
+  --bell               Ring all ordinary terminals attached to the target session
+  --no-bell            Disable the terminal bell (default; overrides configuration)
   --timeout <ms>       Notification timeout in ms (default 10000)
   --ui <notification|dialog>
                       notification: desktop notification (default)
@@ -889,6 +892,11 @@ if [ "$DETACH" -eq 1 ]; then
         child_args+=(--title "$TITLE" --body "$BODY")
         child_args+=(--timeout "$TIMEOUT" --max-title "$MAX_TITLE" --max-body "$MAX_BODY" --dedupe-ms "$DEDUPE_MS")
         child_args+=(--notify-kind "$NOTIFY_KIND" --notify-source "$NOTIFY_SOURCE")
+        if is_truthy "$BELL"; then
+            child_args+=(--bell)
+        else
+            child_args+=(--no-bell)
+        fi
         child_args+=(--ui "$UI" --detach)
         if [ "$NO_ACTIVATE" -eq 1 ]; then
             child_args+=(--no-activate)

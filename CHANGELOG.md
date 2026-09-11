@@ -2,6 +2,36 @@
 
 Notable changes to tmux-notify-jump are documented in this file.
 
+## [1.2.0] - 2026-09-11
+
+### Added
+
+- Optional terminal BEL notifications for every supported agent integration.
+  Enable `TMUX_NOTIFY_BELL=1` or pass `--bell`; disable with `--no-bell`.
+  Each ordinary terminal attached to the target tmux session receives one BEL,
+  including SSH clients and clients viewing a different pane. Delivery works
+  with redirected hook output and detached notifications, after event filtering
+  and deduplication, without additional runtime or desktop dependencies.
+- Per-agent bell overrides: `CODEX_NOTIFY_BELL`, `CLAUDE_NOTIFY_BELL`,
+  `KIMI_NOTIFY_BELL`, `GROK_NOTIFY_BELL`, `OPENCODE_NOTIFY_BELL`,
+  `PI_NOTIFY_BELL`, and `OMP_NOTIFY_BELL`. Set `OMP_NOTIFY_BELL=0` when keeping
+  omp's built-in sound to avoid duplicate bells.
+- Coverage for terminal byte delivery, detached execution, configuration
+  precedence, agent overrides, and ordinary versus control-mode clients.
+  The automated suite now contains 322 tests.
+
+### Compatibility
+
+- Bells are disabled by default and operate independently of Inbox and desktop
+  routing, including `TMUX_NOTIFY_REMOTE_MODE=suppress`. They require a valid
+  tmux target and an attached terminal; focus-only notifications do not ring.
+- Direct client TTY delivery bypasses the server's `bell-action` and
+  `visual-bell` settings without triggering another `alert-bell` hook. The
+  terminal emulator controls the audible or visual effect. The `alert-bell`
+  wrapper defaults to no additional bell unless explicitly given `--bell`.
+
+[1.2.0]: https://github.com/hmgle/tmux-notify-jump/compare/v1.1.0...v1.2.0
+
 ## [1.1.0] - 2026-08-24
 
 ### Added

@@ -144,6 +144,7 @@ Common options:
 - `--class <CLASS>` / `--classes <A,B>`: fallback terminal window class(es) to focus (default: `org.wezfurlong.wezterm,Alacritty`)
 - `--timeout <ms>`: notification timeout in milliseconds (default: `10000`; `0` may be sticky depending on daemon)
 - `--dedupe-ms <ms>`: suppress duplicate notifications within this window (default: `2000`; `0` disables). Uses a small cache under `XDG_CACHE_HOME`/`~/.cache` and prunes old entries automatically.
+- `--bell` / `--no-bell`: enable/disable a terminal BEL for the target tmux session (default: disabled). Override configuration; the last flag wins.
 - Linux/macOS: `--ui <notification|dialog>`: UI mode (`dialog` always waits for click; can also set `TMUX_NOTIFY_UI`, but `--ui` wins)
 - `--detach`: run in background (recommended for hook/callback use)
 - `--dry-run`: print what would happen and exit
@@ -152,6 +153,50 @@ Common options:
   are selected first by the tmux Inbox key.
 - `--notify-source <name>`: source label shown in remote tmux messages and the
   Inbox metadata.
+
+## Terminal bell over SSH
+
+All supported agent wrappers can add a terminal bell to their notifications.
+Enable it in `~/.config/tmux-notify-jump/env` (or `TMUX_NOTIFY_CONFIG`):
+
+```bash
+TMUX_NOTIFY_BELL=1
+OMP_NOTIFY_BELL=0  # Keep omp's built-in sound without adding another bell
+```
+
+Per-agent overrides are `CODEX_NOTIFY_BELL`, `CLAUDE_NOTIFY_BELL`,
+`KIMI_NOTIFY_BELL`, `GROK_NOTIFY_BELL`, `OPENCODE_NOTIFY_BELL`, `PI_NOTIFY_BELL`,
+and `OMP_NOTIFY_BELL`. Unset or empty values inherit the global setting.
+Use `0` to disable, or `1`, `true`, `yes`, or `on` to enable (uppercase words
+also work); other values disable. Wrappers forward an explicit per-agent
+override as `--bell` or `--no-bell`, taking precedence over the global setting.
+
+For an agent running in Linux tmux over SSH from macOS, the notification writes
+one BEL byte (`0x07`) to each distinct ordinary client TTY attached to the
+target session. SSH carries it back to your macOS terminal, which controls the
+audible or visual effect. The pane may be active or in a background window.
+Other sessions and control-mode clients are excluded; without a valid target
+and attached terminal, including `--focus-only`, the bell is skipped.
+
+BEL needs no desktop notification daemon, audio tool, or additional runtime
+dependency. It works with redirected hook output and `--detach`, after event
+filtering and deduplication. `--quiet` does not silence it; `--dry-run` never
+rings. The bell is independent of `TMUX_NOTIFY_REMOTE_MODE`, including
+`suppress`: use `--no-bell` or `TMUX_NOTIFY_BELL=0` to disable it. Inbox and
+desktop delivery continue normally if writing a terminal fails.
+
+The byte goes directly to the client terminal, bypassing this tmux server's
+`bell-action` and `visual-bell` settings and avoiding a new `alert-bell` hook.
+The `alert-bell` wrapper defaults to `--no-bell` to avoid duplicating an original
+pane bell; explicitly passing `--bell` overrides that default. If you hear no
+sound, check the terminal emulator's audible bell and mute settings. For
+nested terminal multiplexers, their outer bell policies can still apply.
+
+Test from inside the target tmux pane:
+
+```bash
+tmux-notify-jump --target "$TMUX_PANE" --bell --title "Bell test" --detach
+```
 
 ## tmux Inbox
 
@@ -231,6 +276,7 @@ macOS note: in `--ui notification` mode, if the script is detached (or `terminal
 CLI flags override environment variables where applicable.
 
 - `TMUX_NOTIFY_CONFIG`: optional env file to load before running (default: `~/.config/tmux-notify-jump/env`)
+- `TMUX_NOTIFY_BELL`: add a terminal BEL for all ordinary clients attached to the target tmux session (`0` by default). See [Terminal bell over SSH](#terminal-bell-over-ssh) for per-agent overrides and terminal settings.
 - `TMUX_NOTIFY_DEBUG`: write diagnostic details, including failures from detached
   notification processes, when set to `1`.
 - `TMUX_NOTIFY_DEBUG_LOG`: debug log path (default:
@@ -692,6 +738,7 @@ Notes:
   integration tests (macOS: `brew install bats-core ripgrep tmux`).
 - Run: `./tests/run_all.sh` (or `make -C tests test`).
 - The suite includes shared-lib unit tests plus entry-script smoke tests (`tests/entry_smoke.bats`) for Linux/macOS dry-run and common validation paths.
+- The isolated BEL byte test uses `uv` and an installed Python 3 interpreter; it is skipped when either is unavailable. It uses temporary pseudo-terminals and does not ring your terminal.
 
 ## Quality checks
 
