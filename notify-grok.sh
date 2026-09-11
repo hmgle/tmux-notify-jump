@@ -198,6 +198,11 @@ if [ "${GROK_NOTIFY_QUIET:-1}" = "1" ] && [ "${GROK_NOTIFY_DEBUG:-0}" != "1" ]; 
     args+=(--quiet)
 fi
 
+bell_arg="$(tmux_notify_agent_bell_arg GROK)"
+if [ -n "$bell_arg" ]; then
+    args+=("$bell_arg")
+fi
+
 if [ "${GROK_NOTIFY_DEBUG:-0}" = "1" ]; then
     log_debug "jump_sh=$JUMP_SH"
     log_debug "event=$EVENT_NAME label=$EVENT_LABEL target=${TARGET:-} timeout=$TIMEOUT_MS"

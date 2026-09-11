@@ -247,6 +247,11 @@ if [ "${OMP_NOTIFY_QUIET:-1}" = "1" ] && [ "${OMP_NOTIFY_DEBUG:-0}" != "1" ]; th
     args+=(--quiet)
 fi
 
+bell_arg="$(tmux_notify_agent_bell_arg OMP)"
+if [ -n "$bell_arg" ]; then
+    args+=("$bell_arg")
+fi
+
 if [ "${OMP_NOTIFY_DEBUG:-0}" = "1" ]; then
     log_debug "jump_sh=$JUMP_SH"
     log_debug "event=$EVENT_NAME target=${TARGET:-} focus_only=$([ -z "$TARGET" ] && echo "1" || echo "0") timeout=$TIMEOUT_MS max_title=$MAX_TITLE max_body=$MAX_BODY"

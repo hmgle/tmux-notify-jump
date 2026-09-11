@@ -335,6 +335,11 @@ if [ "${CLAUDE_NOTIFY_QUIET:-1}" = "1" ] && [ "${CLAUDE_NOTIFY_DEBUG:-0}" != "1"
     args+=(--quiet)
 fi
 
+bell_arg="$(tmux_notify_agent_bell_arg CLAUDE)"
+if [ -n "$bell_arg" ]; then
+    args+=("$bell_arg")
+fi
+
 if [ "${CLAUDE_NOTIFY_DEBUG:-0}" = "1" ]; then
     log_debug "jump_sh=$JUMP_SH"
     log_debug "event=$EVENT_NAME label=$EVENT_LABEL target=${TARGET:-} focus_only=$([ -z "$TARGET" ] && echo "1" || echo "0") timeout=$TIMEOUT_MS max_title=$MAX_TITLE max_body=$MAX_BODY"

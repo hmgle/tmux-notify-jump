@@ -12,6 +12,19 @@ teardown() {
     teardown_temp_dir
 }
 
+@test "bell delivery uses terminal inventory filtering and legacy tty fallback" {
+    tmux_cmd() {
+        printf '1|30|control|/dev/pts/9|900|$1|%%9|work\n'
+        printf '|20||/dev/pts/7|700|$1|%%7|work\n'
+        printf '|40|||800|$1|%%8|work\n'
+    }
+    tmux_notify_write_bell() { printf '%s\n' "$1"; }
+    BELL=1
+    run tmux_notify_ring_bell '$1' "$(tmux_terminal_client_rows)"
+    [ "$status" -eq 0 ]
+    [ "$output" = /dev/pts/7 ]
+}
+
 write_tmux_inventory_fake() {
     cat >"$fake_bin/tmux" <<'FAKE'
 #!/usr/bin/env bash

@@ -271,6 +271,11 @@ if [ "${KIMI_NOTIFY_QUIET:-1}" = "1" ] && [ "${KIMI_NOTIFY_DEBUG:-0}" != "1" ]; 
     args+=(--quiet)
 fi
 
+bell_arg="$(tmux_notify_agent_bell_arg KIMI)"
+if [ -n "$bell_arg" ]; then
+    args+=("$bell_arg")
+fi
+
 if [ "${KIMI_NOTIFY_DEBUG:-0}" = "1" ]; then
     log_debug "jump_sh=$JUMP_SH"
     log_debug "event=$EVENT_NAME label=$EVENT_LABEL target=${TARGET:-} timeout=$TIMEOUT_MS timeout_source=$TIMEOUT_MS_SOURCE"

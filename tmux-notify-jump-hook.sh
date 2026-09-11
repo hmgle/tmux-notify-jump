@@ -147,4 +147,10 @@ if ! has_forward_arg --detach && ! has_forward_arg --dry-run && ! forward_ui_is_
     FORWARD_ARGS+=(--detach)
 fi
 
+# The original pane bell already reached tmux. Do not add a second bell unless
+# the hook configuration explicitly requests one.
+if [ "$EVENT" = "alert-bell" ] && ! has_forward_arg --bell && ! has_forward_arg --no-bell; then
+    FORWARD_ARGS+=(--no-bell)
+fi
+
 exec "$SCRIPT_DIR/tmux-notify-jump" --target "$HOOK_PANE_ID" "${FORWARD_ARGS[@]}"

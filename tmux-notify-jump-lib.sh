@@ -246,7 +246,7 @@ require_arg() {
 # Common options handled:
 #   --target, --focus-only, --title, --body, --sender-tty, --tmux-socket
 #   --no-activate, --list, --dry-run, --quiet, --timeout, --ui
-#   --max-title, --max-body, --dedupe-ms, --detach, --notify-kind,
+#   --max-title, --max-body, --dedupe-ms, --bell, --no-bell, --detach, --notify-kind,
 #   --notify-source
 #
 # Special return values in _PARSE_CONSUMED:
@@ -320,6 +320,12 @@ parse_common_opt() {
             QUIET=1
             # Keep shared logging suppressed even if someone logs during parsing.
             _QUIET=1
+            _PARSE_CONSUMED=1
+            return 0
+            ;;
+        --bell|--no-bell)
+            BELL=0
+            [ "$opt" != "--bell" ] || BELL=1
             _PARSE_CONSUMED=1
             return 0
             ;;
@@ -476,6 +482,7 @@ print_dry_run_common() {
     log "Body: $BODY"
     log "Notification kind: ${NOTIFY_KIND:-complete}"
     log "Notification source: ${NOTIFY_SOURCE:-tmux-notify-jump}"
+    log "Terminal bell: $(is_truthy "${BELL:-0}" && echo "yes" || echo "no") (requires a tmux target)"
     if [ -n "${SENDER_CLIENT_TTY:-}" ]; then
         log "Sender tmux client tty: $SENDER_CLIENT_TTY"
     fi
@@ -1628,6 +1635,55 @@ tmux_notify_inbox_clear_all() {
     return "$status"
 }
 
+# Only a per-agent override becomes a CLI argument. Unset/empty values inherit
+# the platform's global setting, including when a custom jump command is used.
+tmux_notify_agent_bell_arg() {
+    local variable="${1}_NOTIFY_BELL"
+    local value="${!variable:-}"
+    [ -n "$value" ] || return 0
+    if is_truthy "$value"; then
+        printf '%s' '--bell'
+    else
+        printf '%s' '--no-bell'
+    fi
+}
+
+# Open only a terminal device supplied by the tmux client inventory. Use a
+# subshell so the private descriptor never replaces a caller's descriptor.
+# Writing the client TTY bypasses pane input/output and tmux's alert-bell hook.
+tmux_notify_write_bell() (
+    local tty="${1:-}"
+    case "$tty" in
+        /dev/*) ;;
+        *) return 1 ;;
+    esac
+    [ -c "$tty" ] && [ -w "$tty" ] || return 1
+    exec 3>"$tty" || return 1
+    [ -t 3 ] || return 1
+    printf '\007' >&3
+)
+
+tmux_notify_ring_bell() {
+    local session_id="$1" rows="$2" row="" tty="" seen=$'\n'
+    is_truthy "${BELL:-0}" || return 0
+    [ -n "$session_id" ] || return 0
+    while IFS= read -r row; do
+        [ -n "$row" ] || continue
+        read_tmux_client_row "$row"
+        [ "$CLIENT_SESSION_ID" = "$session_id" ] || continue
+        tty="$CLIENT_TTY"
+        [ -n "$tty" ] || continue
+        case "$seen" in
+            *$'\n'"$tty"$'\n'*) continue ;;
+        esac
+        seen+="$tty"$'\n'
+        if ! tmux_notify_write_bell "$tty" 2>/dev/null; then
+            log_debug "terminal bell skipped: cannot write to client tty=$tty"
+        fi
+    done <<<"$rows"
+    return 0
+}
+
 tmux_notify_route_notification() {
     local target="$1" title="$2" body="$3" kind="${4:-complete}" source="${5:-tmux-notify-jump}"
     TMUX_NOTIFY_ROUTE_DESKTOP=0
@@ -1644,6 +1700,9 @@ tmux_notify_route_notification() {
         fi
     fi
     local visible=0 local_client=0 remote_client=0 unknown_client=0
+    if [ "$target_info_available" -eq 1 ]; then
+        tmux_notify_ring_bell "$session_id" "$rows"
+    fi
     local remote_target_client=0 unknown_target_client=0 row message client_state
     while IFS= read -r row; do
         [ -n "$row" ] || continue
