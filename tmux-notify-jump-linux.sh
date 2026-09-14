@@ -54,6 +54,8 @@ SENDER_CLIENT_PID=""
 SENDER_CLIENT_TTY=""
 TMUX_SOCKET=""
 PANE_ID=""
+WEZTERM_PANE_ID=""
+WEZTERM_SOCKET_USED=""
 
 print_usage() {
     cat <<EOF
@@ -317,19 +319,35 @@ EOF
     [ $status -eq 0 ]
 }
 
-find_wezterm_pane_id_by_tty() {
-    local tty="${1:-}"
-    [ -n "$tty" ] || return 1
-    command -v wezterm >/dev/null 2>&1 || return 1
-
-    local pane_list=""
-    pane_list="$(wezterm cli list --format json 2>/dev/null || true)"
-    if [ -z "$pane_list" ]; then
-        log_debug "wezterm cli list returned no data (no reachable GUI instance?)"
-        return 1
+find_wezterm_socket_candidates() {
+    if [ -n "${WEZTERM_UNIX_SOCKET:-}" ]; then
+        printf '%s\n' "$WEZTERM_UNIX_SOCKET"
     fi
 
+    local runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    [ -d "$runtime_dir/wezterm" ] || return 0
+
+    if [ -n "${DISPLAY:-}" ]; then
+        local link="$runtime_dir/wezterm/x11-${DISPLAY}-org.wezfurlong.wezterm"
+        if [ -L "$link" ]; then
+            local target=""
+            target="$(readlink "$link")"
+            case "$target" in
+                /*) printf '%s\n' "$target" ;;
+                ?*) printf '%s\n' "$runtime_dir/wezterm/$target" ;;
+            esac
+        fi
+    fi
+
+    find "$runtime_dir/wezterm" -maxdepth 1 -name 'gui-sock-*' -type s -printf '%T@ %p\n' 2>/dev/null |
+        sort -rn | cut -d' ' -f2-
+}
+
+parse_wezterm_pane_id_from_json() {
+    local pane_list="${1:-}"
+    local tty="${2:-}"
     local pane_id=""
+
     if command -v python3 >/dev/null 2>&1; then
         pane_id="$(printf '%s' "$pane_list" | python3 -c 'import json, sys
 tty = sys.argv[1]
@@ -342,7 +360,7 @@ for pane in panes:
         print(pane.get("pane_id"))
         raise SystemExit(0)
 raise SystemExit(1)
-' "$tty")" || pane_id=""
+' "$tty" 2>/dev/null)" || pane_id=""
     fi
 
     if [ -z "$pane_id" ] && command -v jq >/dev/null 2>&1; then
@@ -350,15 +368,54 @@ raise SystemExit(1)
             jq -r --arg tty "$tty" '[.[] | select(.tty_name == $tty) | .pane_id][0] // empty' 2>/dev/null || true)"
     fi
 
-    if ! is_integer "$pane_id"; then
-        if ! command -v python3 >/dev/null 2>&1 && ! command -v jq >/dev/null 2>&1; then
-            log_debug "Cannot match wezterm pane for tty $tty: no JSON parser available (need python3 or jq)"
-        else
-            log_debug "No wezterm pane found for tty $tty"
-        fi
-        return 1
-    fi
+    is_integer "$pane_id" || return 1
     printf '%s' "$pane_id"
+}
+
+# The wezterm GUI IPC socket path embeds the GUI pid, so restarting the GUI
+# invalidates WEZTERM_UNIX_SOCKET values frozen in long-lived environments
+# (e.g. a tmux server started inside a previous GUI instance). Probe each
+# candidate socket instead of trusting that variable alone. On success sets
+# WEZTERM_PANE_ID and WEZTERM_SOCKET_USED (reused for activate-pane).
+find_wezterm_pane_id_by_tty() {
+    WEZTERM_PANE_ID=""
+    WEZTERM_SOCKET_USED=""
+
+    local tty="${1:-}"
+    [ -n "$tty" ] || return 1
+    command -v wezterm >/dev/null 2>&1 || return 1
+
+    local socket_path="" pane_list="" pane_id="" seen=""
+    while IFS= read -r socket_path; do
+        [ -n "$socket_path" ] || continue
+        # Skip missing socket files before invoking the CLI: on a failed
+        # connect the CLI tries to spawn a mux server, which costs seconds.
+        [ -S "$socket_path" ] || continue
+        case "$seen" in
+            *"|$socket_path|"*) continue ;;
+        esac
+        seen="$seen|$socket_path|"
+
+        pane_list="$(WEZTERM_UNIX_SOCKET="$socket_path" wezterm cli list --format json 2>/dev/null || true)"
+        if [ -z "$pane_list" ]; then
+            log_debug "wezterm cli list via $socket_path returned no data"
+            continue
+        fi
+
+        pane_id="$(parse_wezterm_pane_id_from_json "$pane_list" "$tty")" || pane_id=""
+        if [ -n "$pane_id" ]; then
+            WEZTERM_PANE_ID="$pane_id"
+            WEZTERM_SOCKET_USED="$socket_path"
+            return 0
+        fi
+    done < <(find_wezterm_socket_candidates)
+
+    if ! command -v python3 >/dev/null 2>&1 && ! command -v jq >/dev/null 2>&1; then
+        log_debug "Cannot match wezterm pane for tty $tty: no JSON parser available (need python3 or jq)"
+    else
+        log_debug "No wezterm pane found for tty $tty"
+    fi
+    return 1
 }
 
 activate_wezterm_tab() {
@@ -375,14 +432,12 @@ activate_wezterm_tab() {
     fi
     [ -n "$tty" ] || return 0
 
-    local wezterm_pane_id=""
-    wezterm_pane_id="$(find_wezterm_pane_id_by_tty "$tty" 2>/dev/null || true)"
-    [ -n "$wezterm_pane_id" ] || return 0
+    find_wezterm_pane_id_by_tty "$tty" || return 0
 
-    if wezterm cli activate-pane --pane-id "$wezterm_pane_id" 2>/dev/null; then
-        log_debug "Activated wezterm pane $wezterm_pane_id (tty $tty)"
+    if WEZTERM_UNIX_SOCKET="$WEZTERM_SOCKET_USED" wezterm cli activate-pane --pane-id "$WEZTERM_PANE_ID" 2>/dev/null; then
+        log_debug "Activated wezterm pane $WEZTERM_PANE_ID (tty $tty via $WEZTERM_SOCKET_USED)"
     else
-        log_debug "Failed to activate wezterm pane $wezterm_pane_id"
+        log_debug "Failed to activate wezterm pane $WEZTERM_PANE_ID (socket $WEZTERM_SOCKET_USED)"
     fi
     return 0
 }

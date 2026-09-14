@@ -299,7 +299,7 @@ CLI flags override environment variables where applicable.
 - `TMUX_NOTIFY_TMUX_STATUS`: append Inbox counts to tmux `status-right`
   (`0` disables; default: `1`).
 - `TMUX_NOTIFY_CLASS` / `TMUX_NOTIFY_CLASSES`: terminal window class(es) used by `xdotool search --class`
-- `TMUX_NOTIFY_WEZTERM_TAB`: on Linux, after focusing the terminal window, also switch to the wezterm tab/pane that hosts the tmux client (matched via `wezterm cli list` by tty; `0` disables; default: `1`). Requires `python3` or `jq` for JSON parsing; silently skipped when neither is available, when `--no-activate` is set, or when the terminal is not wezterm.
+- `TMUX_NOTIFY_WEZTERM_TAB`: on Linux, after focusing the terminal window, also switch to the wezterm tab/pane that hosts the tmux client (matched via `wezterm cli list` by tty; `0` disables; default: `1`). Requires `python3` or `jq` for JSON parsing; silently skipped when neither is available, when `--no-activate` is set, or when the terminal is not wezterm. The GUI IPC socket path embeds the GUI pid; when `WEZTERM_UNIX_SOCKET` is unset or stale, the socket is rediscovered from `XDG_RUNTIME_DIR/wezterm` (the `x11-$DISPLAY-org.wezfurlong.wezterm` symlink, then the newest `gui-sock-*`), so restarting WezTerm does not break tab switching.
 - `TMUX_NOTIFY_BUNDLE_ID` / `TMUX_NOTIFY_BUNDLE_IDS`: macOS terminal bundle id(s) for `osascript` activation (overrides auto-detection; e.g. kitty is `net.kovidgoyal.kitty`)
 - `TMUX_NOTIFY_UI`: default for `--ui` (`notification` or `dialog`)
 - `TMUX_NOTIFY_TIMEOUT`: default notification timeout in ms
@@ -759,5 +759,6 @@ Notes:
   - Linux/X11: set `TMUX_NOTIFY_WINDOW_ID`, pass `--class/--classes`, or use `--no-activate`.
 - No terminal window found: set `TMUX_NOTIFY_WINDOW_ID`, pass `--class/--classes`, or use `--no-activate`.
 - Find the right terminal class: run `xprop | rg WM_CLASS` and click your terminal window; use the second string as the class (e.g. `org.wezfurlong.wezterm`).
+- WezTerm tab switch stopped working after restarting WezTerm: a tmux server started inside the previous GUI keeps exporting the old (dead) `WEZTERM_UNIX_SOCKET`, which used to make `wezterm cli list` unreachable. tmux-notify-jump now falls back to socket discovery automatically; if clicks still do not switch tabs, check `TMUX_NOTIFY_WEZTERM_TAB` is not `0` and that `wezterm cli list` prints panes from a shell with the same environment.
 - Wayland session: terminal focusing is auto-disabled; use X11 if you need focus behavior.
 - tmux server not running: start tmux or run the script from within an existing tmux session (or use `--focus-only` to just focus the terminal).

@@ -631,6 +631,145 @@ FAKE
     [ ! -f "$TEST_TEMP_DIR/wezterm.args" ]
 }
 
+@test "tmux-notify-jump-linux.sh: stale WEZTERM_UNIX_SOCKET falls back to discovered gui socket" {
+    fake_bin="$TEST_TEMP_DIR/bin"
+    mkdir -p "$fake_bin"
+
+    cat >"$fake_bin/zenity" <<'FAKE'
+#!/usr/bin/env bash
+exit 0
+FAKE
+    chmod +x "$fake_bin/zenity"
+
+    cat >"$fake_bin/xdotool" <<'FAKE'
+#!/usr/bin/env bash
+case "$1" in
+    search)
+        printf '12345\n'
+        exit 0
+        ;;
+    windowactivate)
+        exit 0
+        ;;
+esac
+exit 0
+FAKE
+    chmod +x "$fake_bin/xdotool"
+
+    cat >"$fake_bin/xprop" <<'FAKE'
+#!/usr/bin/env bash
+if [ "$3" = "WM_STATE" ]; then
+    printf 'WM_STATE(WM_STATE):\n'
+    exit 0
+fi
+exit 1
+FAKE
+    chmod +x "$fake_bin/xprop"
+
+    cat >"$fake_bin/wezterm" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$WEZTERM_UNIX_SOCKET" >>"$TEST_TEMP_DIR/wezterm.sockets"
+if [ "$1" = "cli" ] && [ "$2" = "list" ]; then
+    printf '[{"pane_id":7,"tab_id":3,"tty_name":"/dev/pts/77"}]'
+    exit 0
+fi
+if [ "$1" = "cli" ] && [ "$2" = "activate-pane" ]; then
+    printf '%s\n' "$*" >"$TEST_TEMP_DIR/wezterm.args"
+    exit 0
+fi
+exit 1
+FAKE
+    chmod +x "$fake_bin/wezterm"
+
+    # A real unix socket file so the candidate liveness check passes.
+    runtime_dir="$TEST_TEMP_DIR/xdgrt"
+    mkdir -p "$runtime_dir/wezterm"
+    python3 -c 'import socket, sys; s = socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' \
+        "$runtime_dir/wezterm/gui-sock-4242"
+    ln -s "$runtime_dir/wezterm/gui-sock-4242" "$runtime_dir/wezterm/x11-:9-org.wezfurlong.wezterm"
+
+    run env PATH="$fake_bin:$PATH" TEST_TEMP_DIR="$TEST_TEMP_DIR" \
+        XDG_RUNTIME_DIR="$runtime_dir" DISPLAY=":9" \
+        WEZTERM_UNIX_SOCKET="$TEST_TEMP_DIR/stale-gui-sock-1" \
+        "$PROJECT_ROOT/tmux-notify-jump-linux.sh" \
+        --focus-only \
+        --sender-tty /dev/pts/77 \
+        --dedupe-ms 0 \
+        --ui dialog \
+        --title "hello" \
+        --body "world"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Focused terminal"* ]]
+    run cat "$TEST_TEMP_DIR/wezterm.args"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"--pane-id 7"* ]]
+    # The dead env socket is skipped without a CLI invocation; discovery wins.
+    run sort -u "$TEST_TEMP_DIR/wezterm.sockets"
+    [ "$status" -eq 0 ]
+    [[ "$output" == "$runtime_dir/wezterm/gui-sock-4242" ]]
+}
+
+@test "tmux-notify-jump-linux.sh: unreachable wezterm socket skips tab activation" {
+    fake_bin="$TEST_TEMP_DIR/bin"
+    mkdir -p "$fake_bin"
+
+    cat >"$fake_bin/zenity" <<'FAKE'
+#!/usr/bin/env bash
+exit 0
+FAKE
+    chmod +x "$fake_bin/zenity"
+
+    cat >"$fake_bin/xdotool" <<'FAKE'
+#!/usr/bin/env bash
+case "$1" in
+    search)
+        printf '12345\n'
+        exit 0
+        ;;
+    windowactivate)
+        exit 0
+        ;;
+esac
+exit 0
+FAKE
+    chmod +x "$fake_bin/xdotool"
+
+    cat >"$fake_bin/xprop" <<'FAKE'
+#!/usr/bin/env bash
+if [ "$3" = "WM_STATE" ]; then
+    printf 'WM_STATE(WM_STATE):\n'
+    exit 0
+fi
+exit 1
+FAKE
+    chmod +x "$fake_bin/xprop"
+
+    cat >"$fake_bin/wezterm" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TEMP_DIR/wezterm.args"
+exit 1
+FAKE
+    chmod +x "$fake_bin/wezterm"
+
+    mkdir -p "$TEST_TEMP_DIR/empty-xdgrt/wezterm"
+
+    run env PATH="$fake_bin:$PATH" TEST_TEMP_DIR="$TEST_TEMP_DIR" \
+        XDG_RUNTIME_DIR="$TEST_TEMP_DIR/empty-xdgrt" DISPLAY=":9" \
+        WEZTERM_UNIX_SOCKET="$TEST_TEMP_DIR/stale-gui-sock-1" \
+        "$PROJECT_ROOT/tmux-notify-jump-linux.sh" \
+        --focus-only \
+        --sender-tty /dev/pts/77 \
+        --dedupe-ms 0 \
+        --ui dialog \
+        --title "hello" \
+        --body "world"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Focused terminal"* ]]
+    [ ! -f "$TEST_TEMP_DIR/wezterm.args" ]
+}
+
 @test "tmux-notify-jump-linux.sh: goto without wezterm on PATH stays silent" {
     fake_bin="$TEST_TEMP_DIR/bin"
     mkdir -p "$fake_bin"
