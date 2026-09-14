@@ -580,7 +580,16 @@ exit 1
 FAKE
     chmod +x "$fake_bin/wezterm"
 
-    run env PATH="$fake_bin:$PATH" TEST_TEMP_DIR="$TEST_TEMP_DIR" \
+    # Real socket + explicit runtime dir so the test does not depend on the
+    # host's WezTerm state (or lack thereof) for candidate discovery.
+    runtime_dir="$TEST_TEMP_DIR/xdgrt"
+    mkdir -p "$runtime_dir/wezterm"
+    python3 -c 'import socket, sys; s = socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' \
+        "$runtime_dir/wezterm/gui-sock-4242"
+    ln -s "$runtime_dir/wezterm/gui-sock-4242" "$runtime_dir/wezterm/x11-:9-org.wezfurlong.wezterm"
+
+    run env -u WEZTERM_UNIX_SOCKET PATH="$fake_bin:$PATH" TEST_TEMP_DIR="$TEST_TEMP_DIR" \
+        XDG_RUNTIME_DIR="$runtime_dir" DISPLAY=":9" \
         "$PROJECT_ROOT/tmux-notify-jump-linux.sh" \
         --focus-only \
         --sender-tty /dev/pts/77 \
