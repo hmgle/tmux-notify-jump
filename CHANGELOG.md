@@ -2,6 +2,22 @@
 
 Notable changes to tmux-notify-jump are documented in this file.
 
+## [1.2.1] - 2026-09-14
+
+### Fixed
+
+- Linux WezTerm tab switching survives restarting WezTerm. The GUI IPC socket
+  path embeds the GUI pid, so a tmux server started inside a previous GUI
+  instance keeps exporting a dead `WEZTERM_UNIX_SOCKET` and `wezterm cli list`
+  stayed unreachable. Jumping now probes candidate sockets in order —
+  `WEZTERM_UNIX_SOCKET`, the `x11-$DISPLAY-org.wezfurlong.wezterm` symlink in
+  `XDG_RUNTIME_DIR/wezterm`, then the newest `gui-sock-*` — skips socket files
+  that no longer exist before invoking the CLI, and reuses the socket that
+  answered for `activate-pane`.
+- The wezterm goto smoke test runs against a fake socket under a private
+  `XDG_RUNTIME_DIR`, keeping the automated suite independent of host GUI
+  state; the suite now contains 324 tests.
+
 ## [1.2.0] - 2026-09-11
 
 ### Added
@@ -30,6 +46,7 @@ Notable changes to tmux-notify-jump are documented in this file.
   terminal emulator controls the audible or visual effect. The `alert-bell`
   wrapper defaults to no additional bell unless explicitly given `--bell`.
 
+[1.2.1]: https://github.com/hmgle/tmux-notify-jump/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/hmgle/tmux-notify-jump/compare/v1.1.0...v1.2.0
 
 ## [1.1.0] - 2026-08-24
