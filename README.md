@@ -276,6 +276,11 @@ macOS note: in `--ui notification` mode, if the script is detached (or `terminal
 CLI flags override environment variables where applicable.
 
 - `TMUX_NOTIFY_CONFIG`: optional env file to load before running (default: `~/.config/tmux-notify-jump/env`)
+- `TMUX_NOTIFY_JUMP_SH`: override the notification executable (a path or command
+  on `PATH`). Pointing it at `tmux-notify-jump` itself, including a symlink or
+  hardlink, uses normal platform dispatch. If a custom executable calls the
+  entrypoint again, that invocation uses normal platform dispatch too, preventing
+  recursive overrides. Arguments are forwarded unchanged.
 - `TMUX_NOTIFY_BELL`: add a terminal BEL for all ordinary clients attached to the target tmux session (`0` by default). See [Terminal bell over SSH](#terminal-bell-over-ssh) for per-agent overrides and terminal settings.
 - `TMUX_NOTIFY_DEBUG`: write diagnostic details, including failures from detached
   notification processes, when set to `1`.
