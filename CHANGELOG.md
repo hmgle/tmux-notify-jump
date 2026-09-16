@@ -2,6 +2,23 @@
 
 Notable changes to tmux-notify-jump are documented in this file.
 
+## [1.2.2] - 2026-09-16
+
+### Fixed
+
+- The entry point no longer re-execs itself forever when
+  `TMUX_NOTIFY_JUMP_SH` points back at `tmux-notify-jump` itself —
+  directly, via a symlink or hardlink, or through a custom wrapper that
+  calls the entrypoint again. Such overrides previously looped under the
+  same PID at roughly 90 execs per second, burning a full core without
+  ever reaching platform dispatch; an orphaned instance was observed
+  holding ~85% CPU for over four days. Self-references now fall back to
+  normal platform dispatch, custom overrides apply exactly once per
+  chain, and arguments are forwarded unchanged. Fixes #1.
+- New entry dispatch smoke tests cover path aliases, config-loaded
+  overrides, indirect loops, argument forwarding, and failing overrides
+  with bounded runtimes; the suite now contains 336 tests.
+
 ## [1.2.1] - 2026-09-14
 
 ### Fixed
