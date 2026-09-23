@@ -211,6 +211,41 @@ FAKE
     [ ! -e "$TEST_TEMP_DIR/home/.stepcode/agent/extensions/tmux-notify-jump.ts" ]
 }
 
+@test "configure-step: a second run is idempotent without readlink -f or python3" {
+    install_step
+    [ "$status" -eq 0 ]
+
+    fake_bin="$TEST_TEMP_DIR/limited-install-bin"
+    mkdir -p "$fake_bin"
+
+    cat >"$fake_bin/readlink" <<'FAKE'
+#!/usr/bin/env bash
+if [ "${1:-}" = "-f" ]; then
+    exit 1
+fi
+exec /usr/bin/readlink "$@"
+FAKE
+    chmod +x "$fake_bin/readlink"
+
+    cat >"$fake_bin/python3" <<'FAKE'
+#!/usr/bin/env bash
+exit 127
+FAKE
+    chmod +x "$fake_bin/python3"
+
+    ext_dir="$TEST_TEMP_DIR/home/.stepcode/agent/extensions"
+    run env \
+        -u STEP_EXTENSION_PATH -u STEP_CODING_AGENT_DIR -u STEPCODE_CONFIG_DIR \
+        PATH="$fake_bin:$PATH" \
+        HOME="$TEST_TEMP_DIR/home" \
+        "$PROJECT_ROOT/install.sh" \
+        --prefix "$TEST_TEMP_DIR/prefix" --symlink --configure-step
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Step Code extension already installed"* ]]
+    [ -z "$(find "$ext_dir" -maxdepth 1 -name 'tmux-notify-jump.ts.bak.*' -print -quit)" ]
+}
+
 @test "configure-step: uninstall keeps an extension it did not install" {
     install_step
     [ "$status" -eq 0 ]

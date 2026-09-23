@@ -710,6 +710,10 @@ configure_step() {
     mkdir -p "$ext_dir"
 
     if [ -f "$ext_dst" ] || [ -L "$ext_dst" ]; then
+        if step_extension_is_ours "$ext_src" "$ext_dst"; then
+            echo "Step Code extension already installed: $ext_dst"
+            return 0
+        fi
         local existing_target=""
         if [ -L "$ext_dst" ]; then
             # readlink -f is GNU-only; fall back to portable resolution
