@@ -82,6 +82,33 @@ install_step() {
     [ ! -e "$TEST_TEMP_DIR/custom-agent/extensions" ]
 }
 
+@test "configure-step: whitespace-only STEP_CODING_AGENT_DIR falls back to the default" {
+    install_step 'STEP_CODING_AGENT_DIR=   '
+
+    [ "$status" -eq 0 ]
+    # step trims before reading the value, so a blank override is ignored
+    # rather than becoming a path relative to the filesystem root.
+    link="$TEST_TEMP_DIR/home/.stepcode/agent/extensions/tmux-notify-jump.ts"
+    [ -L "$link" ]
+    [ ! -e "/extensions" ]
+}
+
+@test "configure-step: whitespace-only STEPCODE_CONFIG_DIR keeps .stepcode" {
+    install_step 'STEPCODE_CONFIG_DIR=  '
+
+    [ "$status" -eq 0 ]
+    link="$TEST_TEMP_DIR/home/.stepcode/agent/extensions/tmux-notify-jump.ts"
+    [ -L "$link" ]
+}
+
+@test "configure-step: surrounding whitespace is trimmed from the agent dir" {
+    install_step "STEP_CODING_AGENT_DIR=  $TEST_TEMP_DIR/padded-agent  "
+
+    [ "$status" -eq 0 ]
+    link="$TEST_TEMP_DIR/padded-agent/extensions/tmux-notify-jump.ts"
+    [ -L "$link" ]
+}
+
 @test "configure-step: an existing foreign extension is backed up, not deleted" {
     mkdir -p "$TEST_TEMP_DIR/home/.stepcode/agent/extensions"
     echo '// mine' >"$TEST_TEMP_DIR/home/.stepcode/agent/extensions/tmux-notify-jump.ts"
@@ -121,6 +148,67 @@ install_step() {
     [[ "$output" == *"Removed Step Code extension"* ]]
     [ ! -e "$TEST_TEMP_DIR/home/.stepcode/agent/extensions/tmux-notify-jump.ts" ]
     [ ! -e "$TEST_TEMP_DIR/prefix/bin/notify-step.sh" ]
+}
+
+@test "configure-step: uninstall removes a --copy install too" {
+    run env \
+        -u STEP_EXTENSION_PATH -u STEP_CODING_AGENT_DIR -u STEPCODE_CONFIG_DIR \
+        HOME="$TEST_TEMP_DIR/home" \
+        "$PROJECT_ROOT/install.sh" \
+        --prefix "$TEST_TEMP_DIR/prefix" --copy --configure-step
+    [ "$status" -eq 0 ]
+    ext="$TEST_TEMP_DIR/home/.stepcode/agent/extensions/tmux-notify-jump.ts"
+    [ -f "$ext" ]
+    [ ! -L "$ext" ]
+
+    run env \
+        -u STEP_EXTENSION_PATH -u STEP_CODING_AGENT_DIR -u STEPCODE_CONFIG_DIR \
+        HOME="$TEST_TEMP_DIR/home" \
+        "$PROJECT_ROOT/install.sh" \
+        --prefix "$TEST_TEMP_DIR/prefix" --symlink --uninstall --configure-step
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Removed Step Code extension"* ]]
+    [ ! -e "$ext" ]
+}
+
+@test "configure-step: uninstall works without readlink -f or python3" {
+    install_step
+    [ "$status" -eq 0 ]
+
+    fake_bin="$TEST_TEMP_DIR/limited-bin"
+    mkdir -p "$fake_bin"
+
+    # A readlink that rejects -f (BSD-style) plus a broken python3: neither
+    # can resolve a path the way GNU readlink -f does, so ownership has to be
+    # decided without them.
+    cat >"$fake_bin/readlink" <<'FAKE'
+#!/usr/bin/env bash
+if [ "${1:-}" = "-f" ]; then
+    echo "readlink: illegal option -- f" >&2
+    exit 1
+fi
+exec /usr/bin/readlink "$@"
+FAKE
+    chmod +x "$fake_bin/readlink"
+
+    cat >"$fake_bin/python3" <<'FAKE'
+#!/usr/bin/env bash
+echo "python3 unavailable" >&2
+exit 127
+FAKE
+    chmod +x "$fake_bin/python3"
+
+    run env \
+        -u STEP_EXTENSION_PATH -u STEP_CODING_AGENT_DIR -u STEPCODE_CONFIG_DIR \
+        PATH="$fake_bin:$PATH" \
+        HOME="$TEST_TEMP_DIR/home" \
+        "$PROJECT_ROOT/install.sh" \
+        --prefix "$TEST_TEMP_DIR/prefix" --symlink --uninstall --configure-step
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Removed Step Code extension"* ]]
+    [ ! -e "$TEST_TEMP_DIR/home/.stepcode/agent/extensions/tmux-notify-jump.ts" ]
 }
 
 @test "configure-step: uninstall keeps an extension it did not install" {

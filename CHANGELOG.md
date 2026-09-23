@@ -32,6 +32,25 @@ Notable changes to tmux-notify-jump are documented in this file.
   bridge payload and the wrapper's attention routing; the suite now contains
   362 tests.
 
+### Fixed
+
+- `--uninstall --configure-step` now removes an extension installed with
+  `--copy`. Removal previously required the installed file to resolve to the
+  repository source, which a copy never does, so a copied extension survived
+  uninstallation and kept loading. Ownership is now decided without assuming
+  an install mode.
+- Step Code extension-directory resolution no longer depends on GNU
+  `readlink -f` or python3 for the direct symlink the installer creates: the
+  raw link target is compared first, so a repository symlink is recognized on
+  hosts that provide neither tool.
+- `STEP_CODING_AGENT_DIR` and `STEPCODE_CONFIG_DIR` are trimmed before use,
+  matching step. A whitespace-only value previously produced a path such as
+  `/extensions` or `~//  /agent/extensions`; step ignores such values and falls
+  back to its defaults.
+- `tests/notify_step_smoke.bats` isolates `HOME` so a developer's real
+  `~/.config/tmux-notify-jump/env` cannot override the event lists the tests
+  set. The suite now contains 367 tests.
+
 ## [1.2.2] - 2026-09-16
 
 ### Fixed

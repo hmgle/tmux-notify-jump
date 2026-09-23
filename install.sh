@@ -179,6 +179,15 @@ ensure_parent_dir() {
     mkdir -p "$(dirname "$path")"
 }
 
+# Trim leading and trailing whitespace only, the way step normalizes its
+# STEP_CODING_AGENT_DIR / STEPCODE_CONFIG_DIR values before using them.
+trim_ws() {
+    local value="${1:-}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    printf '%s' "$value"
+}
+
 configure_codex() {
     local notify_cmd="$1"
     local cfg="${CODEX_CONFIG_PATH:-$HOME/.codex/config.toml}"
@@ -656,15 +665,17 @@ configure_pi() {
 # STEPCODE_CONFIG_DIR, while STEP_CODING_AGENT_DIR overrides the agent directory
 # itself and is expanded with a leading `~` like step does. Unlike omp, step has
 # no profiles.
+# Both variables are trimmed first, exactly like step: a value that is empty
+# after trimming falls back to the default rather than becoming a directory.
 # Prints the directory on stdout.
 resolve_step_extension_dir() {
-    local config_dir="${STEPCODE_CONFIG_DIR:-.stepcode}"
-    local agent_dir="${STEP_CODING_AGENT_DIR:-}"
+    local config_dir=""
+    config_dir="$(trim_ws "${STEPCODE_CONFIG_DIR:-}")"
+    [ -n "$config_dir" ] || config_dir=".stepcode"
 
+    local agent_dir=""
+    agent_dir="$(trim_ws "${STEP_CODING_AGENT_DIR:-}")"
     if [ -n "$agent_dir" ]; then
-        # step trims surrounding whitespace before using the value.
-        agent_dir="${agent_dir#"${agent_dir%%[![:space:]]*}"}"
-        agent_dir="${agent_dir%"${agent_dir##*[![:space:]]}"}"
         # step expands a leading tilde like the shell would (normalizePath).
         case "$agent_dir" in
             \~)
@@ -732,9 +743,56 @@ configure_step() {
     echo "Ensure notify-step.sh is on your PATH"
 }
 
+# Resolve a path for comparison. GNU `readlink -f` and python3 are both
+# optional capabilities, so print nothing when neither is available.
+resolve_path_portable() {
+    local path="$1" resolved=""
+    resolved="$(readlink -f "$path" 2>/dev/null || true)"
+    if [ -n "$resolved" ]; then
+        printf '%s\n' "$resolved"
+        return 0
+    fi
+    resolved="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$path" 2>/dev/null || true)"
+    if [ -n "$resolved" ]; then
+        printf '%s\n' "$resolved"
+        return 0
+    fi
+    return 1
+}
+
+# Decide whether an installed Step Code extension still belongs to this
+# repository. The installer creates a direct symlink to $ext_src, so comparing
+# the raw link target is checked first and needs no external tool; realpath
+# resolution then covers indirect links, and a content comparison covers
+# --copy installs, which are byte-identical regular files.
+step_extension_is_ours() {
+    local ext_src="$1" ext_dst="$2" link_target="" canonical_src="" canonical_dst=""
+
+    link_target="$(readlink "$ext_dst" 2>/dev/null || true)"
+    if [ -n "$link_target" ] && [ "$link_target" = "$ext_src" ]; then
+        return 0
+    fi
+
+    canonical_src="$(resolve_path_portable "$ext_src" || true)"
+    canonical_dst="$(resolve_path_portable "$ext_dst" || true)"
+    if [ -n "$canonical_src" ] && [ -n "$canonical_dst" ] \
+        && [ "$canonical_src" = "$canonical_dst" ]; then
+        return 0
+    fi
+
+    if [ -f "$ext_dst" ] && [ ! -L "$ext_dst" ] \
+        && cmp -s "$ext_src" "$ext_dst" 2>/dev/null; then
+        return 0
+    fi
+
+    return 1
+}
+
 # Remove the Step Code extension installed by configure_step(). Only entries
-# that still resolve to this repository's source are deleted, so a file the user
-# replaced with their own extension is left untouched.
+# that still belong to this repository are deleted, so a file the user replaced
+# with their own extension is left untouched. Removal is about ownership rather
+# than about which install mode produced the file, so a --copy install (a
+# byte-identical regular file) is recognized as well as a symlink.
 unconfigure_step() {
     local ext_dir=""
     if [ -n "$STEP_EXTENSION_PATH" ]; then
@@ -747,16 +805,8 @@ unconfigure_step() {
 
     [ -e "$ext_dst" ] || [ -L "$ext_dst" ] || return 0
 
-    local canonical_src=""
-    canonical_src="$(readlink -f "$ext_src" 2>/dev/null \
-        || python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$ext_src" 2>/dev/null \
-        || true)"
-    local canonical_dst=""
-    canonical_dst="$(readlink -f "$ext_dst" 2>/dev/null \
-        || python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$ext_dst" 2>/dev/null \
-        || true)"
-
-    if [ -z "$canonical_src" ] || [ "$canonical_src" != "$canonical_dst" ]; then
+    # Without the source there is no way to prove ownership, so keep the file.
+    if [ ! -f "$ext_src" ] || ! step_extension_is_ours "$ext_src" "$ext_dst"; then
         echo "Keeping unrelated Step Code extension: $ext_dst"
         return 0
     fi

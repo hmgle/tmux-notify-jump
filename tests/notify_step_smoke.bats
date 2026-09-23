@@ -5,6 +5,12 @@ load 'test_helper'
 
 setup() {
     setup_temp_dir
+    # The wrapper sources the user config ($HOME/.config/tmux-notify-jump/env
+    # or $TMUX_NOTIFY_CONFIG), so isolate HOME to keep a developer's real
+    # notification policy from overriding the settings these tests rely on.
+    HOME="$TEST_TEMP_DIR/home"
+    export HOME
+    mkdir -p "$HOME"
 }
 
 teardown() {
