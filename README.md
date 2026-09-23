@@ -746,10 +746,11 @@ Notes:
 
 [Step Code](https://github.com/stepfun-ai/Step-Code) (the `step` CLI) is built on the Pi coding agent and keeps its extension API, so it has no shell-command hook system either; its integration point is TypeScript extensions. Use `step-extension/tmux-notify-jump.ts`, a thin bridge that forwards Step lifecycle events as JSON on stdin to `notify-step.sh`, which calls `tmux-notify-jump` (or `TMUX_NOTIFY_JUMP_SH` if set) — same pattern as the Pi integration, with the same tmux targeting, SSH suppression, and focus-only fallback behavior as the other wrappers.
 
-The bridge subscribes to `agent_settled`, `agent_end`, `turn_end`, and
-`ui_prompt_start`. Because Step reuses Pi's event contract, the payload and the
-wrapper's behavior are identical to the Pi integration; only the directory
-layout and the `STEP_NOTIFY_*` variable names differ.
+The bridge subscribes to `agent_settled`, `agent_end`, `turn_end`, and Step's
+additional `ui_prompt_start` event. For the first three lifecycle events, Step
+reuses Pi's event contract, so their payloads and wrapper behavior match the Pi
+integration. Step-specific behavior includes `ui_prompt_start`, the notify
+source label, the directory layout, and the `STEP_NOTIFY_*` variable names.
 
 Install the scripts and the extension:
 
