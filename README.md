@@ -31,6 +31,8 @@ This repo contains:
 - `opencode-plugin/tmux-notify-jump.ts`: OpenCode plugin (bridges events to `notify-opencode.sh`)
 - `pi-extension/tmux-notify-jump.ts`: Pi coding agent extension (bridges events to `notify-pi.sh`)
 - `notify-pi.sh`: Pi wrapper (reads JSON from stdin)
+- `step-extension/tmux-notify-jump.ts`: Step Code (`step`) extension (bridges events to `notify-step.sh`)
+- `notify-step.sh`: Step Code wrapper (reads JSON from stdin)
 - `omp-extension/tmux-notify-jump.ts`: omp coding agent extension (bridges events to `notify-omp.sh`)
 - `notify-omp.sh`: omp wrapper (reads JSON from stdin)
 
@@ -53,9 +55,9 @@ This repo contains:
 - `xdotool` for focusing the terminal window before jumping (the script auto-disables focusing if missing)
 - `python3` for safer Unicode truncation
 
-### Wrappers (Codex/Claude/Kimi/Grok/OpenCode/Pi/omp hooks)
+### Wrappers (Codex/Claude/Kimi/Grok/OpenCode/Pi/Step/omp hooks)
 
-- `jq` (required by the Codex, Claude, Kimi, Grok, OpenCode, Pi, and omp wrappers; if missing, the wrappers no-op)
+- `jq` (required by the Codex, Claude, Kimi, Grok, OpenCode, Pi, Step Code, and omp wrappers; if missing, the wrappers no-op)
 
 ## Install
 
@@ -74,6 +76,8 @@ Optional: configure hooks (makes backups; won’t overwrite existing `notify=` /
 ./install.sh --prefix "$HOME/.local" --symlink --configure-grok
 ./install.sh --prefix "$HOME/.local" --symlink --configure-opencode
 ./install.sh --prefix "$HOME/.local" --symlink --configure-pi
+./install.sh --prefix "$HOME/.local" --symlink --configure-step
+./install.sh --prefix "$HOME/.local" --symlink --configure-omp
 ./install.sh --prefix "$HOME/.local" --symlink --configure-tmux
 ```
 
@@ -86,7 +90,7 @@ Uninstall:
 Or run from the repo (no install):
 
 ```bash
-chmod +x tmux-notify-jump tmux-notify-jump-linux.sh tmux-notify-jump-macos.sh tmux-notify-jump-hook.sh notify-codex.sh notify-claude-code.sh notify-kimi-code.sh notify-grok.sh notify-opencode.sh notify-pi.sh notify-omp.sh
+chmod +x tmux-notify-jump tmux-notify-jump-linux.sh tmux-notify-jump-macos.sh tmux-notify-jump-hook.sh notify-codex.sh notify-claude-code.sh notify-kimi-code.sh notify-grok.sh notify-opencode.sh notify-pi.sh notify-step.sh notify-omp.sh
 ```
 
 ## Usage
@@ -166,7 +170,8 @@ OMP_NOTIFY_BELL=0  # Keep omp's built-in sound without adding another bell
 
 Per-agent overrides are `CODEX_NOTIFY_BELL`, `CLAUDE_NOTIFY_BELL`,
 `KIMI_NOTIFY_BELL`, `GROK_NOTIFY_BELL`, `OPENCODE_NOTIFY_BELL`, `PI_NOTIFY_BELL`,
-and `OMP_NOTIFY_BELL`. Unset or empty values inherit the global setting.
+`STEP_NOTIFY_BELL`, and `OMP_NOTIFY_BELL`. Unset or empty values inherit the
+global setting.
 Use `0` to disable, or `1`, `true`, `yes`, or `on` to enable (uppercase words
 also work); other values disable. Wrappers forward an explicit per-agent
 override as `--bell` or `--no-bell`, taking precedence over the global setting.
@@ -736,6 +741,96 @@ Notes:
 - The installer derives the extension directory the same way omp does: `--omp-extension-path` wins outright; otherwise a named profile (`OMP_PROFILE`, falling back to `PI_PROFILE`; edge-trimmed, an explicitly empty value or `default` selects the default profile; names must satisfy omp's rules, e.g. lowercase start and no Windows-reserved aliases) targets `~/.omp/profiles/<name>/agent/extensions` and ignores `PI_CODING_AGENT_DIR`, while the default profile honors `PI_CODING_AGENT_DIR` (absolute path required — omp resolves relative values against each session's working directory); `PI_CONFIG_DIR` replaces `.omp` throughout.
 - If you enable multiple events (e.g. `agent_end,session_stop`), a settled run may emit two notifications back-to-back; their titles differ, so the built-in dedupe does not merge them.
 - See the [official omp extension documentation](https://github.com/can1357/oh-my-pi/blob/main/docs/extensions.md) for the event contract.
+
+## Step Code integration
+
+[Step Code](https://github.com/stepfun-ai/Step-Code) (the `step` CLI) is built on the Pi coding agent and keeps its extension API, so it has no shell-command hook system either; its integration point is TypeScript extensions. Use `step-extension/tmux-notify-jump.ts`, a thin bridge that forwards Step lifecycle events as JSON on stdin to `notify-step.sh`, which calls `tmux-notify-jump` (or `TMUX_NOTIFY_JUMP_SH` if set) — same pattern as the Pi integration, with the same tmux targeting, SSH suppression, and focus-only fallback behavior as the other wrappers.
+
+The bridge subscribes to `agent_settled`, `agent_end`, `turn_end`, and
+`ui_prompt_start`. Because Step reuses Pi's event contract, the payload and the
+wrapper's behavior are identical to the Pi integration; only the directory
+layout and the `STEP_NOTIFY_*` variable names differ.
+
+Install the scripts and the extension:
+
+```bash
+./install.sh --prefix "$HOME/.local" --symlink --configure-step
+```
+
+Or manually:
+
+```bash
+cp step-extension/tmux-notify-jump.ts ~/.stepcode/agent/extensions/
+# and ensure notify-step.sh is on your PATH
+```
+
+Extensions are auto-discovered from `~/.stepcode/agent/extensions/` (user-level) or `<project>/.stepcode/extensions/` (project-level, loaded once the project is trusted). You can also list the file explicitly in the `extensions` array of `~/.stepcode/config.toml` or `<project>/.stepcode/config.toml`.
+
+Default events: `agent_settled` (Step is fully idle — no auto-retry, compaction, or queued follow-up left). Additional events (`agent_end`, `turn_end`) can be enabled via filtering.
+
+Optional event filtering (comma-separated lists; `*` = all):
+
+- `STEP_NOTIFY_EVENTS`: whitelist (empty = default: `agent_settled`)
+- `STEP_NOTIFY_EXCLUDE_EVENTS`: blacklist (set to `*` to disable all)
+- `STEP_NOTIFY_SHOW_EVENT_TYPE`: include `[event]` in title (`1`/`0`; default: `1`)
+
+Optional UI/timeout routing (per-event):
+
+- `STEP_NOTIFY_UI_BY_EVENT`: per-event UI override (e.g. `agent_settled:notification,agent_end:dialog`)
+- `STEP_NOTIFY_TIMEOUT_MS_BY_EVENT`: per-event timeout override (e.g. `agent_settled:10000,agent_end:0`)
+- `STEP_NOTIFY_UI`: wrapper default UI override (falls back to `TMUX_NOTIFY_UI` if unset)
+- `STEP_NOTIFY_TIMEOUT_MS`: default notification timeout (default: `0`, sticky; daemon-dependent)
+
+UI override precedence: `STEP_NOTIFY_UI_BY_EVENT` → `STEP_NOTIFY_UI` → `TMUX_NOTIFY_UI`/default.
+
+Extension-level options:
+
+- `STEP_NOTIFY_CMD`: bridge command (default: `notify-step.sh` on PATH)
+- `STEP_NOTIFY_HEADLESS`: also notify when step runs without UI, i.e. print (`-p`) and JSON event-stream modes (`1` enables; default: `0`). TUI and RPC (editor-driven) modes always notify — step reports `ctx.hasUI` as true there.
+
+Notifying when step waits for approval:
+
+Step's own tool-approval prompt (`Approve run_command [id]`) is implemented as a
+built-in extension dialog, so the extension runner broadcasts `ui_prompt_start`
+to every extension, including this bridge. Add it to the event list to hear about
+it:
+
+```bash
+export STEP_NOTIFY_EVENTS="agent_settled,ui_prompt_start"
+```
+
+The prompt title is forwarded with the event and becomes the notification body,
+so the notification reads `Step [ui_prompt_start]: Waiting For You` /
+`Approve run_command [abcd1234]`, and is routed with `--notify-kind attention`.
+
+Notes on this event:
+
+- It only fires when a UI is available (TUI and `--mode rpc`). In print (`-p`)
+  and JSON modes step fails closed instead of prompting, so there is nothing to
+  report — `STEP_NOTIFY_HEADLESS` cannot enable it there.
+- It is a generic "step is waiting for you" signal: any blocking extension
+  dialog (`confirm`, `input`, `select`, `editor`, `custom`) emits it, not only
+  permission prompts. Disable it again by dropping it from
+  `STEP_NOTIFY_EVENTS` if other dialogs are too chatty.
+- Step's default approval policy is bypass — tools run without prompts — so in
+  practice this only fires for dangerous commands, or after `--approval-mode
+  confirm` (or `STEP_APPROVAL_MODE=confirm`) and `/permissions ask`.
+
+Notes:
+
+- Run step inside tmux so `TMUX_PANE` identifies the originating pane.
+- SSH-attached clients use the tmux Inbox by default, so no desktop notification
+  daemon is required on the remote host. Use `TMUX_NOTIFY_REMOTE_MODE` to change
+  the routing policy.
+- If the extension runs without tmux env but a tmux server is running, set `STEP_NOTIFY_FALLBACK_TARGET=1` (or `TMUX_NOTIFY_FALLBACK_TARGET=1`) to target the most recently active tmux client pane.
+- If tmux isn't available/running, the wrapper falls back to `--focus-only` by default (set `STEP_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0` to restore no-op).
+- On macOS (and on Linux if you have `zenity`/`kdialog`/`yad`), set `STEP_NOTIFY_UI=dialog` (or `TMUX_NOTIFY_UI=dialog`) to use a modal "Jump/Dismiss" dialog that stays until clicked.
+- Requires `jq` (otherwise the wrapper no-ops; set `STEP_NOTIFY_DEBUG=1` to see why in logs).
+- Set `STEP_NOTIFY_DEBUG=1` to log diagnostics to `~/.stepcode/agent/logs/notify-step.log` (override with `STEP_NOTIFY_DEBUG_LOG`; the default path does not follow `STEP_CODING_AGENT_DIR` or `STEPCODE_CONFIG_DIR`).
+- If you already use Pi, note that the two integrations are independent: `--configure-pi` writes to `~/.pi/agent/extensions/`, which `step` never reads, so a Pi-style install is invisible to `step` and vice versa.
+- The installer derives the extension directory the same way step does: `--step-extension-path` wins outright; otherwise `STEP_CODING_AGENT_DIR` (a leading `~` is expanded) overrides the agent directory, and the project directory is `~/.stepcode` unless `STEPCODE_CONFIG_DIR` replaces it — unlike Pi and omp, step has no profiles.
+- If you enable multiple events (e.g. `agent_end,agent_settled`), a settled run may emit two notifications back-to-back; their titles differ, so the built-in dedupe does not merge them.
+- See the [official Step Code extensions documentation](https://github.com/stepfun-ai/Step-Code/blob/main/packages/coding-agent/docs/extensions.md) for the event contract.
 
 ## Tests
 

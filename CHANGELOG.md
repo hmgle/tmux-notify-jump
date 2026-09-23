@@ -2,6 +2,36 @@
 
 Notable changes to tmux-notify-jump are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Step Code integration: `step-extension/tmux-notify-jump.ts` extension bridge
+  and `notify-step.sh` wrapper, plus `--configure-step` /
+  `--step-extension-path` installer support. Step Code is built on the Pi
+  coding agent and keeps its extension API, so the bridge forwards the same
+  `agent_settled` / `agent_end` / `turn_end` events and the wrapper keeps Pi's
+  policy, renamed into the `STEP_NOTIFY_*` namespace. The installer resolves the
+  extension directory with step's own rules (`STEP_CODING_AGENT_DIR` with
+  tilde expansion, then `~/.stepcode/agent/extensions`, with
+  `STEPCODE_CONFIG_DIR` replacing `.stepcode`); step has no profiles, unlike
+  Pi and omp. `--uninstall --configure-step` removes an extension that still
+  resolves to this repository and leaves unrelated files in place.
+- Step Code approval-prompt notifications: the bridge also forwards
+  `ui_prompt_start` together with the prompt title, and `notify-step.sh` maps it
+  to a "Waiting For You" notification with `--notify-kind attention`. Step's
+  built-in `Approve <tool>` prompt is an extension dialog, so the extension
+  runner broadcasts the event to every extension. The event stays opt-in via
+  `STEP_NOTIFY_EVENTS` (`agent_settled,ui_prompt_start`) and only fires when a
+  UI is available — print and JSON modes fail closed instead of prompting.
+
+### Tests
+
+- New `tests/notify_step_smoke.bats`, `tests/step_bridge.bats`, and
+  `tests/install_step.bats`, including `ui_prompt_start` coverage for the
+  bridge payload and the wrapper's attention routing; the suite now contains
+  362 tests.
+
 ## [1.2.2] - 2026-09-16
 
 ### Fixed

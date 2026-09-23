@@ -11,6 +11,7 @@ CONFIGURE_KIMI=0
 CONFIGURE_GROK=0
 CONFIGURE_OPENCODE=0
 CONFIGURE_PI=0
+CONFIGURE_STEP=0
 CONFIGURE_OMP=0
 CONFIGURE_TMUX=0
 CODEX_CONFIG_PATH="${CODEX_CONFIG_PATH:-}"
@@ -19,6 +20,7 @@ KIMI_CONFIG_PATH="${KIMI_CONFIG_PATH:-}"
 GROK_HOOKS_PATH="${GROK_HOOKS_PATH:-}"
 OPENCODE_PLUGIN_PATH="${OPENCODE_PLUGIN_PATH:-}"
 PI_EXTENSION_PATH="${PI_EXTENSION_PATH:-}"
+STEP_EXTENSION_PATH="${STEP_EXTENSION_PATH:-}"
 OMP_EXTENSION_PATH="${OMP_EXTENSION_PATH:-}"
 TMUX_CONFIG_PATH="${TMUX_CONFIG_PATH:-$HOME/.tmux.conf}"
 TMUX_KEY="${TMUX_KEY:-N}"
@@ -39,6 +41,7 @@ Options:
   --configure-grok  Configure Grok Build hooks (opt-in)
   --configure-opencode Configure OpenCode plugin (opt-in)
   --configure-pi    Configure Pi coding agent extension (opt-in)
+  --configure-step  Configure Step Code (step) extension (opt-in)
   --configure-omp   Configure omp coding agent extension (opt-in)
   --configure-tmux  Configure tmux status, hooks, and prefix key (opt-in)
   --codex-config <path>  Codex config.toml path (default: ~/.codex/config.toml)
@@ -47,6 +50,9 @@ Options:
   --grok-hooks-path <path> Grok hooks dir (default: \$GROK_HOME/hooks or ~/.grok/hooks)
   --opencode-plugin-path <path> OpenCode plugins dir (default: ~/.config/opencode/plugins)
   --pi-extension-path <path> Pi extensions dir (default: ~/.pi/agent/extensions)
+  --step-extension-path <path> Step Code extensions dir (default: derived from
+                    STEP_CODING_AGENT_DIR, STEPCODE_CONFIG_DIR; usually
+                    ~/.stepcode/agent/extensions)
   --omp-extension-path <path> omp extensions dir (default: derived from
                     OMP_PROFILE/PI_PROFILE, PI_CODING_AGENT_DIR (absolute
                     path required), PI_CONFIG_DIR; usually ~/.omp/agent/extensions)
@@ -66,6 +72,7 @@ Examples:
   $0 --prefix "\$HOME/.local" --symlink --configure-grok
   $0 --prefix "\$HOME/.local" --symlink --configure-opencode
   $0 --prefix "\$HOME/.local" --symlink --configure-pi
+  $0 --prefix "\$HOME/.local" --symlink --configure-step
   $0 --prefix "\$HOME/.local" --symlink --configure-omp
 EOF
 }
@@ -643,6 +650,121 @@ configure_pi() {
     echo "Ensure notify-pi.sh is on your PATH"
 }
 
+# Resolve the Step Code (step) user-level extensions directory using step's own
+# rules (packages/coding-agent/src/config.ts and step/environment.ts): the
+# canonical project directory is `.stepcode` and can be replaced wholesale by
+# STEPCODE_CONFIG_DIR, while STEP_CODING_AGENT_DIR overrides the agent directory
+# itself and is expanded with a leading `~` like step does. Unlike omp, step has
+# no profiles.
+# Prints the directory on stdout.
+resolve_step_extension_dir() {
+    local config_dir="${STEPCODE_CONFIG_DIR:-.stepcode}"
+    local agent_dir="${STEP_CODING_AGENT_DIR:-}"
+
+    if [ -n "$agent_dir" ]; then
+        # step trims surrounding whitespace before using the value.
+        agent_dir="${agent_dir#"${agent_dir%%[![:space:]]*}"}"
+        agent_dir="${agent_dir%"${agent_dir##*[![:space:]]}"}"
+        # step expands a leading tilde like the shell would (normalizePath).
+        case "$agent_dir" in
+            \~)
+                agent_dir="${HOME:-}"
+                ;;
+            \~/*)
+                agent_dir="${HOME:-}/${agent_dir#\~/}"
+                ;;
+        esac
+        printf '%s\n' "$agent_dir/extensions"
+        return 0
+    fi
+
+    printf '%s\n' "$HOME/$config_dir/agent/extensions"
+}
+
+configure_step() {
+    local ext_dir=""
+    if [ -n "$STEP_EXTENSION_PATH" ]; then
+        ext_dir="$STEP_EXTENSION_PATH"
+    else
+        ext_dir="$(resolve_step_extension_dir)"
+    fi
+    local ext_src="$REPO_DIR/step-extension/tmux-notify-jump.ts"
+    local ext_dst="$ext_dir/tmux-notify-jump.ts"
+
+    if [ ! -f "$ext_src" ]; then
+        echo "Warning: Step Code extension source not found: $ext_src"
+        return 0
+    fi
+
+    mkdir -p "$ext_dir"
+
+    if [ -f "$ext_dst" ] || [ -L "$ext_dst" ]; then
+        local existing_target=""
+        if [ -L "$ext_dst" ]; then
+            # readlink -f is GNU-only; fall back to portable resolution
+            existing_target="$(readlink -f "$ext_dst" 2>/dev/null \
+                || python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$ext_dst" 2>/dev/null \
+                || true)"
+        fi
+        local canonical_src=""
+        canonical_src="$(readlink -f "$ext_src" 2>/dev/null \
+            || python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$ext_src" 2>/dev/null \
+            || true)"
+        if [ -n "$existing_target" ] && [ -n "$canonical_src" ] \
+            && [ "$existing_target" = "$canonical_src" ]; then
+            echo "Step Code extension already installed: $ext_dst"
+            return 0
+        fi
+        backup_file "$ext_dst"
+    fi
+
+    case "$MODE" in
+        symlink)
+            ln -sf "$ext_src" "$ext_dst"
+            ;;
+        copy)
+            rm -f "$ext_dst"
+            cp -f "$ext_src" "$ext_dst"
+            ;;
+    esac
+
+    echo "Installed Step Code extension: $ext_dst"
+    echo "Ensure notify-step.sh is on your PATH"
+}
+
+# Remove the Step Code extension installed by configure_step(). Only entries
+# that still resolve to this repository's source are deleted, so a file the user
+# replaced with their own extension is left untouched.
+unconfigure_step() {
+    local ext_dir=""
+    if [ -n "$STEP_EXTENSION_PATH" ]; then
+        ext_dir="$STEP_EXTENSION_PATH"
+    else
+        ext_dir="$(resolve_step_extension_dir)"
+    fi
+    local ext_src="$REPO_DIR/step-extension/tmux-notify-jump.ts"
+    local ext_dst="$ext_dir/tmux-notify-jump.ts"
+
+    [ -e "$ext_dst" ] || [ -L "$ext_dst" ] || return 0
+
+    local canonical_src=""
+    canonical_src="$(readlink -f "$ext_src" 2>/dev/null \
+        || python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$ext_src" 2>/dev/null \
+        || true)"
+    local canonical_dst=""
+    canonical_dst="$(readlink -f "$ext_dst" 2>/dev/null \
+        || python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$ext_dst" 2>/dev/null \
+        || true)"
+
+    if [ -z "$canonical_src" ] || [ "$canonical_src" != "$canonical_dst" ]; then
+        echo "Keeping unrelated Step Code extension: $ext_dst"
+        return 0
+    fi
+
+    rm -f "$ext_dst"
+    echo "Removed Step Code extension: $ext_dst"
+}
+
 # Resolve omp's user-level extensions directory using omp's own rules
 # (pi-utils dirs.ts): a named profile (OMP_PROFILE, falling back to
 # PI_PROFILE; edge-trimmed, empty or "default" selects the default profile)
@@ -786,6 +908,9 @@ while [ $# -gt 0 ]; do
         --configure-pi)
             CONFIGURE_PI=1
             ;;
+        --configure-step)
+            CONFIGURE_STEP=1
+            ;;
         --configure-omp)
             CONFIGURE_OMP=1
             ;;
@@ -821,6 +946,11 @@ while [ $# -gt 0 ]; do
             shift
             [ $# -gt 0 ] || die "--pi-extension-path requires a path"
             PI_EXTENSION_PATH="$1"
+            ;;
+        --step-extension-path)
+            shift
+            [ $# -gt 0 ] || die "--step-extension-path requires a path"
+            STEP_EXTENSION_PATH="$1"
             ;;
         --omp-extension-path)
             shift
@@ -878,6 +1008,7 @@ FILES=(
     notify-grok.sh
     notify-opencode.sh
     notify-pi.sh
+    notify-step.sh
     notify-omp.sh
 )
 
@@ -895,6 +1026,9 @@ if [ "$UNINSTALL" -eq 1 ]; then
     done
     if [ "$CONFIGURE_TMUX" -eq 1 ]; then
         unconfigure_tmux
+    fi
+    if [ "$CONFIGURE_STEP" -eq 1 ]; then
+        unconfigure_step
     fi
     echo "Uninstalled from: $BINDIR"
     exit 0
@@ -952,6 +1086,10 @@ fi
 
 if [ "$CONFIGURE_PI" -eq 1 ]; then
     configure_pi
+fi
+
+if [ "$CONFIGURE_STEP" -eq 1 ]; then
+    configure_step
 fi
 
 if [ "$CONFIGURE_OMP" -eq 1 ]; then
