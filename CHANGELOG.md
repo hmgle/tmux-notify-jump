@@ -2,7 +2,7 @@
 
 Notable changes to tmux-notify-jump are documented in this file.
 
-## [Unreleased]
+## [1.3.0] - 2026-09-23
 
 ### Added
 
@@ -15,8 +15,7 @@ Notable changes to tmux-notify-jump are documented in this file.
   extension directory with step's own rules (`STEP_CODING_AGENT_DIR` with
   tilde expansion, then `~/.stepcode/agent/extensions`, with
   `STEPCODE_CONFIG_DIR` replacing `.stepcode`); step has no profiles, unlike
-  Pi and omp. `--uninstall --configure-step` removes an extension that still
-  resolves to this repository and leaves unrelated files in place.
+  Pi and omp.
 - Step Code approval-prompt notifications: the bridge also forwards
   `ui_prompt_start` together with the prompt title, and `notify-step.sh` maps it
   to a "Waiting For You" notification with `--notify-kind attention`. Step's
@@ -24,13 +23,6 @@ Notable changes to tmux-notify-jump are documented in this file.
   runner broadcasts the event to every extension. The event stays opt-in via
   `STEP_NOTIFY_EVENTS` (`agent_settled,ui_prompt_start`) and only fires when a
   UI is available — print and JSON modes fail closed instead of prompting.
-
-### Tests
-
-- New `tests/notify_step_smoke.bats`, `tests/step_bridge.bats`, and
-  `tests/install_step.bats`, including `ui_prompt_start` coverage for the
-  bridge payload and the wrapper's attention routing; the suite now contains
-  362 tests.
 
 ### Fixed
 
@@ -43,13 +35,21 @@ Notable changes to tmux-notify-jump are documented in this file.
   `readlink -f` or python3 for the direct symlink the installer creates: the
   raw link target is compared first, so a repository symlink is recognized on
   hosts that provide neither tool.
+- A repeated `--configure-step` install recognizes the repository's direct
+  symlink without optional path-resolution tools, avoiding unnecessary backup
+  and recreation of an identical extension.
 - `STEP_CODING_AGENT_DIR` and `STEPCODE_CONFIG_DIR` are trimmed before use,
   matching step. A whitespace-only value previously produced a path such as
   `/extensions` or `~//  /agent/extensions`; step ignores such values and falls
   back to its defaults.
-- `tests/notify_step_smoke.bats` isolates `HOME` so a developer's real
-  `~/.config/tmux-notify-jump/env` cannot override the event lists the tests
-  set. The suite now contains 367 tests.
+
+### Tests
+
+- New `tests/notify_step_smoke.bats`, `tests/step_bridge.bats`, and
+  `tests/install_step.bats`, including `ui_prompt_start` coverage for the
+  bridge payload and the wrapper's attention routing. The smoke tests isolate
+  `HOME` and Step policy settings from the host, and the suite now contains
+  368 tests.
 
 ## [1.2.2] - 2026-09-16
 
