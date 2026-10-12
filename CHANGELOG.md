@@ -2,6 +2,32 @@
 
 Notable changes to tmux-notify-jump are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Searchable tmux Inbox via `--inbox-pick`: optional fzf popup, bounded pane
+  preview, kind/source/session/recency filters and paginated menu fallback.
+  The installed `prefix+N` quick-jump binding is retained.
+- Read-only `--doctor` diagnostics for dependencies, tmux capabilities,
+  configuration/socket paths, Inbox permissions, hooks, status and key binding.
+- Pane target resolution through process ancestry when a wrapper lacks
+  `TMUX_PANE`, using one pane inventory and one optional process inventory.
+
+### Changed
+
+- Ambient/current-client pane fallback now requires an explicit
+  `*_NOTIFY_FALLBACK_TARGET` setting; `TMUX` alone identifies a server.
+- All Agent wrappers share priority normalization through the library.
+
+### Fixed
+
+- Inbox selection follows moved panes using live session/window IDs and refuses
+  to redirect a detached sender's jump to another terminal. Outside tmux,
+  ambiguous picker ownership requires an explicit sender TTY.
+- Claude, Kimi and Grok focus-only default-message rewrites preserve source
+  and priority metadata.
+
 ## [1.3.0] - 2026-09-23
 
 ### Added
