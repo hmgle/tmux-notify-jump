@@ -2151,8 +2151,11 @@ tmux_notify_inbox_pick() {
     if [ "$menu" -eq 0 ] && tmux_notify_fzf_supported; then
         if [ "$inline" -eq 0 ] && tmux_notify_tmux_version_at_least 3 2; then
             command="$(tmux_notify_inbox_command --inbox-pick --inline "${filters[@]}")"
-            tmux_cmd display-popup -c "$client" -E -w '85%' -h '75%' -T 'Inbox' "$command"
-            return $?
+            local -a popup_args=(-c "$client" -E -w '85%' -h '75%')
+            # Popups exist in 3.2, but their title option arrived in 3.3.
+            if tmux_notify_tmux_version_at_least 3 3; then popup_args+=(-T 'Inbox'); fi
+            if tmux_cmd display-popup "${popup_args[@]}" "$command"; then return 0; fi
+            warn 'Inbox popup failed; falling back to the menu'
         elif [ "$inline" -eq 1 ]; then
             local selected="" result=0 preview=""
             preview="$(tmux_notify_inbox_command --inbox-preview) {2} $(tmux_notify_shell_command --tmux-socket "${TMUX_NOTIFY_TMUX_SOCKET:-}")"

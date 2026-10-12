@@ -255,8 +255,9 @@ Picker options:
   and server explicitly. The selected socket takes precedence over configuration
   throughout menu, popup and preview callbacks.
 
-fzf is optional. Popups need tmux 3.2; tmux 3.0–3.1 or an unavailable or
-incompatible fzf falls back to the menu. Older tmux prints the filtered list;
+fzf is optional. Popups need tmux 3.2 (popup titles need 3.3). tmux 3.0–3.1,
+an unavailable or incompatible fzf, or a failed popup falls back to the menu.
+Older tmux prints the filtered list;
 `--inline` with fzf and `--inbox-next` remain available. A picker invoked outside a client needs
 `--sender-tty` if several ordinary terminals are attached. An explicitly named
 client that has detached is never replaced with another terminal.

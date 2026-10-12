@@ -32,6 +32,8 @@ Notable changes to tmux-notify-jump are documented in this file.
 
 ### Fixed
 
+- Inbox popups omit the unsupported title option on tmux 3.2 and fall back to
+  the menu if popup creation fails.
 - Inbox menu, popup and preview callbacks retain the explicitly selected tmux
   socket even when user configuration names another server.
 - Inbox selection follows moved panes using live session/window IDs and refuses

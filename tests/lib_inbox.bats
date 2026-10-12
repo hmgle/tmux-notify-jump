@@ -34,6 +34,7 @@ setup() {
     FAKE_WINDOW_EXISTS=1
     FAKE_SESSION_EXISTS=1
     FAKE_DISPLAY_FAIL=0
+    FAKE_POPUP_FAIL=0
     FAKE_INVENTORY_FAIL=0
     FAKE_PANE_ROWS='%9|$1|@2|3|0|work'
 }
@@ -104,6 +105,7 @@ tmux_cmd() {
             ;;
         display-menu|display-popup)
             printf '%s\n' "$@" >"$TEST_TEMP_DIR/picker.args"
+            [ "$cmd" != display-popup ] || return "$FAKE_POPUP_FAIL"
             ;;
         capture-pane)
             printf 'recent pane output\n'
@@ -1459,6 +1461,34 @@ FAKE
     tmux_notify_inbox_pick --sender-tty /dev/pts/2
     [ "$(head -n 1 "$TEST_TEMP_DIR/picker.args")" = display-menu ]
     [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 1 ]
+}
+
+@test "Inbox popup omits titles on tmux 3.2 and enables them on 3.3" {
+    write_picker_fzf_fake
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    for version in 'tmux 3.2' 'tmux 3.2a' 'tmux 3.3'; do
+        FAKE_TMUX_VERSION="$version"
+        tmux_notify_inbox_pick --sender-tty /dev/pts/2
+        [ "$(head -n 1 "$TEST_TEMP_DIR/picker.args")" = display-popup ]
+        run rg -x -- '-T' "$TEST_TEMP_DIR/picker.args"
+        if [ "$version" = 'tmux 3.3' ]; then
+            [ "$status" -eq 0 ]
+        else
+            [ "$status" -eq 1 ]
+        fi
+    done
+}
+
+@test "Inbox picker falls back to menu after a failed popup without consuming entries" {
+    write_picker_fzf_fake
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    FAKE_POPUP_FAIL=1
+
+    tmux_notify_inbox_pick --sender-tty /dev/pts/2
+    [ "$(head -n 1 "$TEST_TEMP_DIR/picker.args")" = display-menu ]
+    [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 1 ]
+    run rg '^display-popup' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
 }
 
 @test "Inbox picker menu paginates beyond its shortcut keys" {
