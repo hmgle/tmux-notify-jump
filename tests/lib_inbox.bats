@@ -56,11 +56,11 @@ tmux_cmd() {
                 printf '%s\n' "${FAKE_TMUX_VERSION#tmux }"
             elif [ "${2:-}" = "-p" ] && [ "${3:-}" = "-t" ]; then
                 case "${5:-}" in
-                    '#{session_id}|#{window_id}|#{pane_id}|#{session_name}|#{window_index}')
+                    '#{session_id}|#{window_id}|#{pane_id}|#{window_index}|#{session_name}')
                         printf '%s|%s|%s|%s|%s\n' \
                             "$FAKE_TARGET_SESSION_ID" "$FAKE_TARGET_WINDOW_ID" \
-                            "$FAKE_TARGET_PANE_ID" "$FAKE_TARGET_SESSION_NAME" \
-                            "$FAKE_TARGET_WINDOW_INDEX"
+                            "$FAKE_TARGET_PANE_ID" "$FAKE_TARGET_WINDOW_INDEX" \
+                            "$FAKE_TARGET_SESSION_NAME"
                         ;;
                     '#{pane_id}')
                         [ "$FAKE_PANE_EXISTS" -eq 1 ] && [ "${4:-}" = "$FAKE_TARGET_PANE_ID" ] \
@@ -1130,6 +1130,60 @@ bind-key -T prefix A run-shell -b "tmux-notify-jump --inbox-next"'
     [ -z "$output" ]
 }
 
+@test "Inbox next skips current pane while the picker marks it without changing IDs" {
+    FAKE_TARGET_PANE_ID='%1'
+    tmux_notify_inbox_enqueue '%1' attention Claude 'Current permission'
+    FAKE_TARGET_PANE_ID='%9'
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Other done'
+    FAKE_PANE_ROWS=$'%1|$1|@2|3|0|work\n%9|$1|@2|3|1|work'
+
+    tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+    [[ "$(cat "$TEST_TEMP_DIR/picker.args")" == *'work:3.0 [current]'* ]]
+    tmux_notify_inbox_next /dev/pts/2
+    [ "$TMUX_NOTIFY_INBOX_ATTENTION" -eq 1 ]
+    [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 0 ]
+    run rg 'select-pane -t %9' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+}
+
+@test "Inbox next leaves notices pending when only the current pane has entries" {
+    FAKE_TARGET_PANE_ID='%1'
+    tmux_notify_inbox_enqueue '%1' attention Claude 'Permission'
+    tmux_notify_inbox_enqueue '%1' complete Claude 'Done'
+    : >"$TMUX_LOG"
+
+    tmux_notify_inbox_next /dev/pts/2
+    [ "$TMUX_NOTIFY_INBOX_ATTENTION" -eq 1 ]
+    [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 1 ]
+    run rg '^switch-client' "$TMUX_LOG"
+    [ "$status" -eq 1 ]
+}
+
+@test "Inbox metadata and picker filters preserve pipes in session names" {
+    FAKE_TARGET_SESSION_NAME='work|qa|'
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    root="$(tmux_notify_inbox_root)"
+    id="$(printf '%s' '%9|complete' | sha256_hex_stdin)"
+    [ "$(cat "$root/$id/session_name")" = 'work|qa|' ]
+    [ "$(cat "$root/$id/window_index")" = 3 ]
+    FAKE_PANE_ROWS='%9|$1|@2|8|1|work|qa|'
+
+    run tmux_notify_inbox_picker_rows '' '' 'work|qa|'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *$'\twork|qa|:8.1\t'* ]]
+    tmux_notify_inbox_select "$id" /dev/pts/2
+    [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 0 ]
+}
+
+@test "Inbox menu truncates long labels before escaping tmux format markers" {
+    title="$(printf '%0500d' 0)"
+    tmux_notify_inbox_enqueue '%9' complete Codex "$title"
+    tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+    label="$(sed -n '10p' "$TEST_TEMP_DIR/picker.args")"
+    [ "${#label}" -le 60 ]
+    [[ "$label" == *'...' ]]
+}
+
 @test "Inbox picker menu escapes tmux formats and carries config cache socket" {
     tmux_notify_inbox_enqueue '%9' complete Codex '#{pane_id}'
     TMUX_NOTIFY_ENTRYPOINT="$TEST_TEMP_DIR/path with quotes' and spaces/tmux-notify-jump"
@@ -1151,6 +1205,13 @@ write_picker_fzf_fake() {
     cat >"$TEST_TEMP_DIR/bin/fzf" <<'FAKE'
 #!/usr/bin/env bash
 [ -z "$FZF_DEFAULT_OPTS$FZF_DEFAULT_OPTS_FILE$FZF_DEFAULT_COMMAND" ] || exit 99
+for arg in "$@"; do
+    if [ "$arg" = --filter=probe ]; then
+        [ "${FZF_PROBE_FAIL:-0}" -eq 0 ] || exit 2
+        cat
+        exit 0
+    fi
+done
 printf '%s\n' "$@" >"$TEST_TEMP_DIR/fzf.args"
 cat >"$TEST_TEMP_DIR/fzf.rows"
 [ "${FZF_TEST_EXIT:-0}" -eq 0 ] || exit "$FZF_TEST_EXIT"
@@ -1204,6 +1265,15 @@ FAKE
     run tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
     [ "$status" -eq 0 ]
     [[ "$output" == *'%9'* ]]
+}
+
+@test "Inbox picker falls back to menu when fzf lacks required options" {
+    write_picker_fzf_fake
+    export FZF_PROBE_FAIL=1
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    tmux_notify_inbox_pick --sender-tty /dev/pts/2
+    [ "$(head -n 1 "$TEST_TEMP_DIR/picker.args")" = display-menu ]
+    [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 1 ]
 }
 
 @test "Inbox picker menu paginates beyond its shortcut keys" {

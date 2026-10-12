@@ -246,14 +246,14 @@ Picker options:
 - `--sender-tty <tty>` and `--tmux-socket <path>`: identify the invoking client
   and server explicitly.
 
-fzf is optional. Popups need tmux 3.2; tmux 3.0–3.1 or a missing fzf falls back
-to the menu. Older tmux prints the filtered list; `--inline` with fzf and
-`--inbox-next` remain available. A picker invoked outside a client needs
+fzf is optional. Popups need tmux 3.2; tmux 3.0–3.1 or an unavailable or
+incompatible fzf falls back to the menu. Older tmux prints the filtered list;
+`--inline` with fzf and `--inbox-next` remain available. A picker invoked outside a client needs
 `--sender-tty` if several ordinary terminals are attached. An explicitly named
 client that has detached is never replaced with another terminal.
 
 Examples and an optional second binding (the installed `prefix+N` stays a quick
-jump to the oldest item):
+jump to the oldest item outside the invoking client's current pane):
 
 ```bash
 tmux-notify-jump --inbox-pick --kind attention --session work --since 3600
@@ -264,6 +264,11 @@ tmux bind-key n run-shell -b 'TMUX_NOTIFY_SENDER_TTY="#{client_tty}" tmux-notify
 Inbox routing is active even before `--configure-tmux` installs its status,
 hooks, and binding. Set `TMUX_NOTIFY_REMOTE_MODE=desktop` to disable tmux Inbox
 storage and use desktop delivery only.
+
+`--inbox-next` skips the invoking client's current pane and leaves its entries
+pending. The picker marks that pane with `[current]` and lets you select it
+explicitly. Inbox list/picker/next operations maintain private permissions,
+expire old items and update counts as applicable; `--doctor` only reads state.
 
 Initialization pins the resolved Inbox directory in the tmux server so agent
 processes and `run-shell` hooks use the same location. To customize

@@ -30,8 +30,8 @@ case "$1" in
         case "${*: -1}" in
             '#S:#I.#P') echo work:0.0 ;;
             '#{session_id}|#{pane_id}') printf '$1|%%9\n' ;;
-            '#{session_id}|#{window_id}|#{pane_id}|#{session_name}|#{window_index}')
-                printf '$1|@1|%%9|work|0\n' ;;
+            '#{session_id}|#{window_id}|#{pane_id}|#{window_index}|#{session_name}')
+                printf '$1|@1|%%9|0|work\n' ;;
             '#{socket_path}') printf '%s\n' "$TMUX_NOTIFY_TMUX_SOCKET" ;;
             '#{pid}') echo 987654 ;;
         esac ;;

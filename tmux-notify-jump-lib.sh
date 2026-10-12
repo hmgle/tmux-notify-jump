@@ -1601,7 +1601,8 @@ tmux_notify_inbox_gc() {
 
 tmux_notify_inbox_target_info() {
     local target="$1"
-    tmux_cmd display-message -p -t "$target" '#{session_id}|#{window_id}|#{pane_id}|#{session_name}|#{window_index}' 2>/dev/null || true
+    # Keep the human label last: read's final field preserves embedded pipes.
+    tmux_cmd display-message -p -t "$target" '#{session_id}|#{window_id}|#{pane_id}|#{window_index}|#{session_name}' 2>/dev/null || true
 }
 
 tmux_notify_inbox_acquire_lock() {
@@ -1624,7 +1625,7 @@ tmux_notify_inbox_enqueue() {
     info="$(tmux_notify_inbox_target_info "$target")"
     [ -n "$info" ] || return 1
     local session_id window_id pane_id session_name window_index
-    IFS='|' read -r session_id window_id pane_id session_name window_index <<<"$info"
+    IFS='|' read -r session_id window_id pane_id window_index session_name <<<"$info"
     [ -n "$pane_id" ] || return 1
     local root="" now=""
     root="$(tmux_notify_inbox_root)"
@@ -1782,7 +1783,7 @@ tmux_notify_route_notification() {
     local session_id="" window_id="" pane_id="" session_name="" window_index=""
     local target_info_available=0
     if [ -n "$info" ]; then
-        IFS='|' read -r session_id window_id pane_id session_name window_index <<<"$info"
+        IFS='|' read -r session_id window_id pane_id window_index session_name <<<"$info"
         if [ -n "$session_id" ] && is_pane_id "$pane_id"; then
             target_info_available=1
         fi
@@ -1860,15 +1861,22 @@ tmux_notify_target_id_exists() {
 }
 
 tmux_notify_inbox_next() {
-    local sender_tty="${1:-}" root="" list="" dir
+    local sender_tty="${1:-}" root="" list="" dir row="" current_pane=""
     root="$(tmux_notify_inbox_root)"
     local now=""
     now="$(now_ms)"
     tmux_notify_inbox_secure_dir "$root" 1 || return 1
     tmux_notify_inbox_gc "$root" "$now"
+    row="$(tmux_notify_inbox_client "$sender_tty" || true)"
+    if [ -n "$row" ]; then
+        read_tmux_client_row "$row"
+        current_pane="$CLIENT_PANE_ID"
+        sender_tty="${sender_tty:-$CLIENT_TTY}"
+    fi
     for dir in "$root"/*; do
         tmux_notify_inbox_entry_dir_is_valid "$dir" || continue
         tmux_notify_inbox_entry_read "$dir"
+        [ -z "$current_pane" ] || [ "$INBOX_PANE_ID" != "$current_pane" ] || continue
         local rank=1
         [ "${INBOX_KIND:-complete}" = "attention" ] && rank=0
         list+="$rank|${INBOX_FIRST_MS:-0}|${dir##*/}"$'\n'
@@ -1890,7 +1898,7 @@ tmux_notify_inbox_select() {
     # A pane may have moved or its session may have been renamed since enqueue.
     local info="" sid wid pane name index client="" row="" target_pane="" target_window=""
     info="$(tmux_notify_inbox_target_info "$INBOX_PANE_ID")"
-    IFS='|' read -r sid wid pane name index <<<"$info"
+    IFS='|' read -r sid wid pane index name <<<"$info"
     if [ "$pane" = "$INBOX_PANE_ID" ]; then
         INBOX_SESSION_ID="$sid"
         INBOX_WINDOW_ID="$wid"
@@ -1984,9 +1992,12 @@ tmux_notify_inbox_client() {
 }
 
 # id, pane, kind, source, live location, age, count, title. One pane inventory
-# serves the entire list; keep IDs separate from all human-facing labels.
+# serves the entire list; the final human label may contain the separator.
+# Listing maintains private permissions, expiry and counts; only doctor is
+# strictly read-only.
 tmux_notify_inbox_picker_rows() {
     local kind="${1:-}" source="${2:-}" session="${3:-}" since="${4:-0}"
+    local current_pane="${5:-}"
     local root="" inventory="" now="" dir rows="" rank age last
     root="$(tmux_notify_inbox_root)"
     tmux_notify_inbox_secure_dir "$root" || return 1
@@ -2020,6 +2031,7 @@ tmux_notify_inbox_picker_rows() {
             location="$name:${INBOX_WINDOW_INDEX:-?} [closed pane]"
         fi
         [ -z "$session" ] || [ "$session" = "$sid" ] || [ "$session" = "$name" ] || continue
+        [ -z "$current_pane" ] || [ "$INBOX_PANE_ID" != "$current_pane" ] || location+=' [current]'
         last="${INBOX_LAST_MS:-0}"
         is_integer "$last" || last=0
         age=0
@@ -2039,7 +2051,21 @@ tmux_notify_inbox_picker_rows() {
 
 tmux_notify_inbox_preview() {
     is_pane_id "${1:-}" || return 1
+    # -S includes history plus the visible screen; tail bounds the total rows.
     tmux_cmd capture-pane -p -t "$1" -S -80 2>/dev/null | tail -n 80 || printf 'Pane is no longer available.\n'
+}
+
+# Probe the options used by the picker without opening a UI or running preview.
+# Ignore personal defaults just as the actual picker does.
+tmux_notify_fzf_supported() {
+    command -v fzf >/dev/null 2>&1 || return 1
+    local row=$'id\tprobe' selected=""
+    selected="$(printf '%s\n' "$row" | env FZF_DEFAULT_OPTS= FZF_DEFAULT_OPTS_FILE= FZF_DEFAULT_COMMAND= SHELL=/bin/sh \
+        fzf --filter=probe --delimiter=$'\t' --with-nth=2.. --no-sort --reverse --query='' \
+            --prompt='Inbox> ' --header='probe' --preview=':' \
+            --preview-window='down:40%:wrap' 2>/dev/null)" || return 1
+    # Some fzf versions print the transformed --with-nth fields in filter mode.
+    [ -n "$selected" ]
 }
 
 # auto: fzf popup on tmux >= 3.2, otherwise a paginated tmux >= 3.0 menu.
@@ -2079,15 +2105,21 @@ tmux_notify_inbox_pick() {
     ensure_tmux_notify_socket_from_env
     require_tool tmux
     local rows="" row="" client="" command=""
-    rows="$(tmux_notify_inbox_picker_rows "$kind" "$source" "$session" "$since")" || return 1
+    row="$(tmux_notify_inbox_client "$sender_tty" || true)"
+    local current_pane=""
+    if [ -n "$row" ]; then
+        read_tmux_client_row "$row"
+        current_pane="$CLIENT_PANE_ID"
+    fi
+    rows="$(tmux_notify_inbox_picker_rows "$kind" "$source" "$session" "$since" "$current_pane")" || return 1
     if [ -z "$rows" ]; then printf 'Inbox has no matching items.\n'; return 0; fi
-    row="$(tmux_notify_inbox_client "$sender_tty")" || { warn 'Inbox picker needs an ordinary tmux client; pass --sender-tty'; return 1; }
+    [ -n "$row" ] || { warn 'Inbox picker needs an ordinary tmux client; pass --sender-tty'; return 1; }
     read_tmux_client_row "$row"
     client="$CLIENT_NAME"
     sender_tty="$CLIENT_TTY"
     local -a filters=(--source "$source" --session "$session" --since "$since" --query "$query" --sender-tty "$sender_tty")
     [ -z "$kind" ] || filters+=(--kind "$kind")
-    if [ "$menu" -eq 0 ] && command -v fzf >/dev/null 2>&1; then
+    if [ "$menu" -eq 0 ] && tmux_notify_fzf_supported; then
         if [ "$inline" -eq 0 ] && tmux_notify_tmux_version_at_least 3 2; then
             command="$(tmux_notify_inbox_command --inbox-pick --inline "${filters[@]}")"
             tmux_cmd display-popup -c "$client" -E -w '85%' -h '75%' -T 'Inbox' "$command"
@@ -2097,7 +2129,7 @@ tmux_notify_inbox_pick() {
             preview="$(tmux_notify_inbox_command --inbox-preview) {2}"
             selected="$(printf '%s\n' "$rows" | env FZF_DEFAULT_OPTS= FZF_DEFAULT_OPTS_FILE= FZF_DEFAULT_COMMAND= SHELL=/bin/sh \
                 fzf --delimiter=$'\t' --with-nth=2.. --no-sort --reverse --query="$query" \
-                    --prompt='Inbox> ' --header='Enter: jump  Esc: cancel | pane kind agent session age count title' \
+                    --prompt='Inbox> ' --header='Enter: jump  Esc: cancel | pane kind agent location age count title' \
                     --preview="$preview" --preview-window='down:40%:wrap')" || result=$?
             case "$result" in 0) ;; 1|130) return 0 ;; *) return "$result" ;; esac
             [ -n "$selected" ] || return 0
@@ -2121,6 +2153,7 @@ tmux_notify_inbox_pick() {
         [ "$n" -gt "$start" ] || continue
         if [ "$shown" -ge 35 ]; then more=1; break; fi
         label="$kind $agent $location ($age, x$count) $title"
+        label="$(truncate_text 60 "$label")"
         label="${label//#/##}"
         command="$(tmux_notify_inbox_command --inbox-select "$id" --sender-tty "$sender_tty")"
         items+=("$label" "${keys[$shown]}" "run-shell -b $(tmux_notify_shell_command "$command")")
