@@ -18,6 +18,8 @@ Notable changes to tmux-notify-jump are documented in this file.
 - Doctor checks all eight wrapper executables, agent configuration text
   references and required fzf options. Repeat `--agent-config <agent=path>`
   for custom profile/project files; references do not prove hook registration.
+  Invalid specifications fail before diagnostics; unreachable tmux servers
+  are reported before optional tool and agent configuration checks.
 
 ### Changed
 

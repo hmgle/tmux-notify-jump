@@ -362,6 +362,9 @@ Inbox paths or permissions are invalid; the exit status is then `1`. Successful
 checks, including warnings, return `0`. Pass `--tmux-socket <path>` to inspect a
 specific server. Notification daemon action support and GUI activation still
 need a manual click test; installed executables alone do not establish those.
+Invalid `--agent-config` specifications fail before any diagnostic output or
+tmux queries. Server reachability is checked before optional dependencies and
+agent configuration, so an unavailable server stops those further checks.
 
 Agent checks use the installer's standard user-level locations and honor
 `CODEX_CONFIG_PATH`, `CLAUDE_CONFIG_PATH`, `KIMI_CONFIG_PATH`, `GROK_HOOKS_PATH`,

@@ -2215,6 +2215,24 @@ tmux_notify_tmux_version_at_least() {
 
 # Diagnostics never create/chmod state or install hooks. Optional capabilities
 # are warnings; broken server access or unsafe/unreadable state fails the check.
+TMUX_NOTIFY_DOCTOR_AGENTS=(codex claude kimi grok opencode pi step omp)
+
+tmux_notify_doctor_agent_config_index() {
+    local spec="$1" agent="${1%%=*}" path="${1#*=}" i
+    if [ "$spec" = "$path" ] || [ -z "$path" ]; then
+        printf 'Error: --agent-config requires agent=path\n' >&2
+        return 1
+    fi
+    for i in "${!TMUX_NOTIFY_DOCTOR_AGENTS[@]}"; do
+        if [ "$agent" = "${TMUX_NOTIFY_DOCTOR_AGENTS[$i]}" ]; then
+            printf '%s' "$i"
+            return 0
+        fi
+    done
+    printf 'Error: Unknown doctor agent: %s\n' "$agent" >&2
+    return 1
+}
+
 tmux_notify_doctor_cli() {
     local -a agent_configs=()
     while [ "$#" -gt 0 ]; do
@@ -2230,6 +2248,7 @@ tmux_notify_doctor_cli() {
                     printf 'Error: --agent-config requires agent=path\n' >&2
                     return 1
                 fi
+                tmux_notify_doctor_agent_config_index "$1" >/dev/null || return 1
                 agent_configs+=("$1")
                 ;;
             *) die "Unknown doctor option: $1" ;;
@@ -2273,9 +2292,8 @@ tmux_notify_doctor_private_path() {
 # Explicit agent=path inputs let diagnostics inspect profiles/project configs
 # without copying every agent's evolving path or config precedence rules.
 tmux_notify_doctor_agents() {
-    local base="" home="${HOME:-}" i=0 spec="" agent="" path="" found=0
+    local base="" home="${HOME:-}" i=0 spec="" agent="" path=""
     base="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    local -a agents=(codex claude kimi grok opencode pi step omp)
     local -a wrappers=(notify-codex.sh notify-claude-code.sh notify-kimi-code.sh notify-grok.sh notify-opencode.sh notify-pi.sh notify-step.sh notify-omp.sh)
     local -a configs=(
         "${CODEX_CONFIG_PATH:-$home/.codex/config.toml}"
@@ -2288,26 +2306,11 @@ tmux_notify_doctor_agents() {
         "${OMP_EXTENSION_PATH:-$home/.omp/agent/extensions}/tmux-notify-jump.ts"
     )
     for spec in "$@"; do
-        agent="${spec%%=*}"
-        path="${spec#*=}"
-        if [ "$spec" = "$path" ] || [ -z "$path" ]; then
-            printf 'Error: --agent-config requires agent=path\n' >&2
-            return 1
-        fi
-        found=0
-        for i in "${!agents[@]}"; do
-            [ "$agent" = "${agents[$i]}" ] || continue
-            configs[i]="$path"
-            found=1
-            break
-        done
-        if [ "$found" -eq 0 ]; then
-            printf 'Error: Unknown doctor agent: %s\n' "$agent" >&2
-            return 1
-        fi
+        i="$(tmux_notify_doctor_agent_config_index "$spec")" || return 1
+        configs[i]="${spec#*=}"
     done
-    for i in "${!agents[@]}"; do
-        agent="${agents[$i]}"
+    for i in "${!TMUX_NOTIFY_DOCTOR_AGENTS[@]}"; do
+        agent="${TMUX_NOTIFY_DOCTOR_AGENTS[$i]}"
         path="$base/${wrappers[$i]}"
         if [ -f "$path" ] && [ -x "$path" ]; then
             tmux_notify_doctor_line OK "Wrapper $agent" "$path (executable)"
@@ -2330,6 +2333,10 @@ tmux_notify_doctor_agents() {
 }
 
 tmux_notify_doctor() {
+    local spec
+    for spec in "$@"; do
+        tmux_notify_doctor_agent_config_index "$spec" >/dev/null || return 1
+    done
     local config=""
     config="$(tmux_notify_config_path && printf '.')" || return 1
     config="${config%.}"
@@ -2348,6 +2355,21 @@ tmux_notify_doctor() {
         tmux_notify_doctor_line WARN 'Configuration' "$config (absent; using environment/defaults)"
     fi
     tmux_notify_doctor_line OK 'Routing mode' "$(tmux_notify_remote_mode)"
+    if ! command -v tmux >/dev/null 2>&1; then
+        tmux_notify_doctor_line FAIL 'tmux' 'unavailable; Inbox and jump need tmux (focus-only remains available)'
+        return 1
+    fi
+    version="$(tmux_cmd -V 2>/dev/null || true)"
+    tmux_notify_doctor_line OK 'tmux executable' "$version"
+    server="$(tmux_cmd display-message -p '#{pid}' 2>/dev/null || true)"
+    if ! is_integer "$server"; then
+        tmux_notify_doctor_line FAIL 'tmux server' "not reachable; socket=${TMUX_NOTIFY_TMUX_SOCKET:-default (or TMUX)}"
+        return 1
+    fi
+    local socket=""
+    socket="$(tmux_cmd display-message -p '#{socket_path}' 2>/dev/null || true)"
+    version="$(tmux_cmd display-message -p '#{version}' 2>/dev/null || true)"
+    tmux_notify_doctor_line OK 'tmux server' "$version pid=$server socket=$socket"
     if tmux_notify_fzf_supported; then
         tmux_notify_doctor_line OK fzf "$(command -v fzf) (picker options supported)"
     else
@@ -2371,21 +2393,6 @@ tmux_notify_doctor() {
             fi
             ;;
     esac
-    if ! command -v tmux >/dev/null 2>&1; then
-        tmux_notify_doctor_line FAIL 'tmux' 'unavailable; Inbox and jump need tmux (focus-only remains available)'
-        return 1
-    fi
-    version="$(tmux_cmd -V 2>/dev/null || true)"
-    tmux_notify_doctor_line OK 'tmux executable' "$version"
-    server="$(tmux_cmd display-message -p '#{pid}' 2>/dev/null || true)"
-    if ! is_integer "$server"; then
-        tmux_notify_doctor_line FAIL 'tmux server' "not reachable; socket=${TMUX_NOTIFY_TMUX_SOCKET:-default (or TMUX)}"
-        return 1
-    fi
-    local socket=""
-    socket="$(tmux_cmd display-message -p '#{socket_path}' 2>/dev/null || true)"
-    version="$(tmux_cmd display-message -p '#{version}' 2>/dev/null || true)"
-    tmux_notify_doctor_line OK 'tmux server' "$version pid=$server socket=$socket"
     if tmux_notify_tmux_version_at_least 3 2; then
         tmux_notify_doctor_line OK 'Inbox UI' 'popup and menu supported'
     elif tmux_notify_tmux_version_at_least 3 0; then

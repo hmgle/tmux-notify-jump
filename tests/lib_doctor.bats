@@ -132,6 +132,8 @@ tmux_cmd() {
     [ "$status" -eq 1 ]
     [[ "$output" == *'tmux server'*'not reachable'* ]]
     [[ "$output" != *'unbound variable'* ]]
+    [[ "$output" != *'Wrapper codex'* ]]
+    [[ "$output" != *'picker options supported'* ]]
 }
 
 @test "doctor supports disabled status and macOS dependencies without requiring them" {
@@ -207,6 +209,20 @@ tmux_cmd() {
     [[ "$output" == *"$cfg (wrapper text reference found; registration unverified)"* ]]
     run tmux_notify_doctor_cli --agent-config "unknown=$cfg"
     [ "$status" -eq 1 ]
+    [[ "$output" == 'Error: Unknown doctor agent: unknown' ]]
     run tmux_notify_doctor_cli --agent-config
     [ "$status" -eq 1 ]
+}
+
+@test "doctor rejects malformed config specs before printing diagnostics or querying tmux" {
+    for spec in bogus=/x codex= codex /x =/x; do
+        run tmux_notify_doctor_cli --agent-config "$spec"
+        [ "$status" -eq 1 ]
+        [[ "$output" == Error:* ]]
+        [[ "$output" != *'diagnostics'* ]]
+        [ ! -f "$TEST_TEMP_DIR/tmux.calls" ]
+    done
+    run tmux_notify_doctor bogus=/x
+    [ "$status" -eq 1 ]
+    [[ "$output" != *'diagnostics'* ]]
 }
