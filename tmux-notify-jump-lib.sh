@@ -107,11 +107,23 @@ log_debug() {
 # =============================================================================
 
 tmux_notify_config_path() {
-    if [ -n "${TMUX_NOTIFY_CONFIG:-}" ]; then
-        printf '%s' "$TMUX_NOTIFY_CONFIG"
+    local path="" directory=""
+    # An explicit empty value disables loading, including inside callbacks
+    # whose server environment may supply a different HOME.
+    if [ -n "${TMUX_NOTIFY_CONFIG+x}" ]; then
+        path="$TMUX_NOTIFY_CONFIG"
     elif [ -n "${HOME:-}" ]; then
-        printf '%s' "$HOME/.config/tmux-notify-jump/env"
+        path="$HOME/.config/tmux-notify-jump/env"
     fi
+    case "$path" in
+        ''|/*) ;;
+        *)
+            directory="$(pwd -P && printf '.')" || return 1
+            directory="${directory%$'\n'.}"
+            path="${directory%/}/$path"
+            ;;
+    esac
+    printf '%s' "$path"
 }
 
 # Load user configuration from env file
@@ -123,7 +135,12 @@ tmux_notify_config_path() {
 #   - Sources config file, setting exported variables
 load_user_config() {
     local cfg=""
-    cfg="$(tmux_notify_config_path)"
+    cfg="$(tmux_notify_config_path && printf '.')" || return 1
+    cfg="${cfg%.}"
+    # Freeze the effective path before sourcing: config files and later
+    # callbacks can change directory, and detached shells may change HOME.
+    TMUX_NOTIFY_CONFIG="$cfg"
+    export TMUX_NOTIFY_CONFIG
     [ -f "$cfg" ] || return 0
 
     set +u
@@ -1970,7 +1987,8 @@ tmux_notify_inbox_command() {
     cache="$(tmux_notify_inbox_cache_root; printf '.')"
     cache="${cache%.}"
     [ -n "$path" ] || path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tmux-notify-jump"
-    config="$(tmux_notify_config_path)"
+    config="$(tmux_notify_config_path && printf '.')" || return 1
+    config="${config%.}"
     tmux_notify_shell_command env "TMUX_NOTIFY_CONFIG=$config" "XDG_CACHE_HOME=$cache" \
         "TMUX_NOTIFY_TMUX_SOCKET=${TMUX_NOTIFY_TMUX_SOCKET:-}" "$path" "$@"
 }
@@ -2313,10 +2331,13 @@ tmux_notify_doctor_agents() {
 
 tmux_notify_doctor() {
     local config=""
-    config="$(tmux_notify_config_path)"
+    config="$(tmux_notify_config_path && printf '.')" || return 1
+    config="${config%.}"
     local result=0 version="" server="" root="" pinned="" status="" hook_table=""
     printf 'tmux-notify-jump diagnostics\n'
-    if [ -e "$config" ]; then
+    if [ -z "$config" ]; then
+        tmux_notify_doctor_line OK 'Configuration' '(unset) using environment/defaults'
+    elif [ -e "$config" ]; then
         if [ -f "$config" ] && [ -r "$config" ]; then
             tmux_notify_doctor_line OK 'Configuration' "$config"
         else

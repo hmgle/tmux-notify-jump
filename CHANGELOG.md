@@ -39,6 +39,9 @@ Notable changes to tmux-notify-jump are documented in this file.
   both priorities for a pane, including without focus hooks. Failed navigation
   retains notices; completely missing targets clear both stale entries.
 - Configuration loading, picker callbacks and doctor use one path resolver.
+- Relative configuration paths stay absolute across popup/menu working
+  directories. Explicitly empty configuration disables loading, so callbacks
+  cannot adopt another HOME's defaults when the caller had no config path.
 - Target metadata preserves session names containing pipe characters.
 - Inbox selection retains notices when target inventory queries fail or are
   incomplete, and follows a closed pane's window across session moves/links.

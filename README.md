@@ -379,7 +379,11 @@ tmux-notify-jump --doctor --agent-config omp="$HOME/.omp/profiles/work/agent/ext
 
 CLI flags override environment variables where applicable.
 
-- `TMUX_NOTIFY_CONFIG`: optional env file to load before running (default: `~/.config/tmux-notify-jump/env`)
+- `TMUX_NOTIFY_CONFIG`: env file to load before running (unset defaults to
+  `~/.config/tmux-notify-jump/env`; explicitly empty disables file loading).
+  Relative paths resolve against the invocation directory and are fixed as
+  absolute paths before loading and generating callbacks. A caller without
+  `HOME` or an explicit config passes the same absence to popup/menu callbacks.
 - `TMUX_NOTIFY_TARGET_ANCESTRY`: resolve missing `TMUX_PANE` through process
   ancestry (default: `1`). Set `0` for shared services whose launch pane does
   not identify the reporting session; explicit `TMUX_PANE` still takes priority.

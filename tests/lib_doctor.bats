@@ -153,6 +153,17 @@ tmux_cmd() {
     [[ "$output" == *'absent [31m config'* ]]
 }
 
+@test "doctor identifies missing HOME and explicit empty configuration as unset" {
+    unset HOME TMUX_NOTIFY_CONFIG
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'Configuration'*'(unset) using environment/defaults'* ]]
+    export HOME="$TEST_TEMP_DIR/home" TMUX_NOTIFY_CONFIG=''
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'Configuration'*'(unset) using environment/defaults'* ]]
+}
+
 @test "doctor probes fzf options without executing a preview or changing Inbox state" {
     run tmux_notify_doctor
     [ "$status" -eq 0 ]
