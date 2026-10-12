@@ -252,7 +252,8 @@ Picker options:
   substring filter. `[` and `]` move between pages of 35 items.
 - `--inline`: run fzf in the current terminal instead of a popup.
 - `--sender-tty <tty>` and `--tmux-socket <path>`: identify the invoking client
-  and server explicitly.
+  and server explicitly. The selected socket takes precedence over configuration
+  throughout menu, popup and preview callbacks.
 
 fzf is optional. Popups need tmux 3.2; tmux 3.0–3.1 or an unavailable or
 incompatible fzf falls back to the menu. Older tmux prints the filtered list;

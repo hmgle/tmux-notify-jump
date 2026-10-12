@@ -1322,6 +1322,90 @@ FAKE
     export PATH="$TEST_TEMP_DIR/bin:$PATH"
 }
 
+# Execute generated callbacks through the real entrypoint and config loader.
+# The external tmux stub rejects every call to the configured, wrong server.
+write_picker_callback_tmux_fake() {
+    export INBOX_CALLBACK_ROOT="$(tmux_notify_inbox_root)"
+    export INBOX_CALLBACK_SOCKET="$TMUX_NOTIFY_TMUX_SOCKET"
+    export TMUX_NOTIFY_CONFIG="$TEST_TEMP_DIR/callback.env"
+    printf "TMUX_NOTIFY_TMUX_SOCKET='%s'\n" "$TEST_TEMP_DIR/wrong.sock" >"$TMUX_NOTIFY_CONFIG"
+    mkdir -p "$TEST_TEMP_DIR/bin"
+    cat >"$TEST_TEMP_DIR/bin/tmux" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TEMP_DIR/callback.calls"
+[ "${1:-}" = -S ] && [ "${2:-}" = "$INBOX_CALLBACK_SOCKET" ] || exit 99
+shift 2
+case "$1" in
+    show-option)
+        [ "${3:-}" != @tmux-notify-jump-inbox-root ] || printf '%s\n' "$INBOX_CALLBACK_ROOT"
+        ;;
+    display-message)
+        case "${3:-}" in
+            '#{pid}') printf '4242\n' ;;
+            '#{socket_path}') printf '%s\n' "$INBOX_CALLBACK_SOCKET" ;;
+            '#{version}') printf '3.7\n' ;;
+        esac
+        ;;
+    list-clients) printf '0|10|/dev/pts/2|/dev/pts/2|222|$1|%%9|work\n' ;;
+    list-panes)
+        case "${4:-}" in
+            '#{session_id}|#{window_id}|#{pane_id}') printf '$1|@2|%%9\n' ;;
+            *) printf '%%9|$1|@2|3|0|work\n' ;;
+        esac
+        ;;
+    capture-pane) printf 'preview from requested server\n' ;;
+esac
+exit 0
+FAKE
+    chmod +x "$TEST_TEMP_DIR/bin/tmux"
+    export PATH="$TEST_TEMP_DIR/bin:$PATH"
+    TMUX_NOTIFY_TMUX_SOCKET="$TEST_TEMP_DIR/wrong.sock"
+}
+
+@test "Inbox menu callback keeps the CLI socket after configuration reload" {
+    tmux_notify_inbox_enqueue '%9' attention Claude 'Permission'
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    write_picker_callback_tmux_fake
+
+    tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2 --tmux-socket "$INBOX_CALLBACK_SOCKET"
+    callback="$(sed -n '12p' "$TEST_TEMP_DIR/picker.args")"
+    run /bin/sh -c "exec /bin/sh -c ${callback#run-shell -b }"
+    [ "$status" -eq 0 ]
+    [ ! -e "$INBOX_CALLBACK_ROOT/$(printf '%s' '%9|attention' | sha256_hex_stdin)" ]
+    [ ! -e "$INBOX_CALLBACK_ROOT/$(printf '%s' '%9|complete' | sha256_hex_stdin)" ]
+    run rg -F 'select-pane -t %9' "$TEST_TEMP_DIR/callback.calls"
+    [ "$status" -eq 0 ]
+}
+
+@test "Inbox popup callback keeps the CLI socket after configuration reload" {
+    write_picker_fzf_fake
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    write_picker_callback_tmux_fake
+
+    tmux_notify_inbox_pick --sender-tty /dev/pts/2 --tmux-socket "$INBOX_CALLBACK_SOCKET"
+    callback="$(tail -n 1 "$TEST_TEMP_DIR/picker.args")"
+    run /bin/sh -c "$callback"
+    [ "$status" -eq 0 ]
+    [ ! -e "$INBOX_CALLBACK_ROOT/$(printf '%s' '%9|complete' | sha256_hex_stdin)" ]
+    run rg -F 'select-pane -t %9' "$TEST_TEMP_DIR/callback.calls"
+    [ "$status" -eq 0 ]
+}
+
+@test "Inbox preview callback keeps the CLI socket after configuration reload" {
+    write_picker_fzf_fake
+    export FZF_TEST_EXIT=130
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    write_picker_callback_tmux_fake
+
+    tmux_notify_inbox_pick --inline --sender-tty /dev/pts/2 --tmux-socket "$INBOX_CALLBACK_SOCKET"
+    preview="$(rg '^--preview=' "$TEST_TEMP_DIR/fzf.args")"
+    preview="${preview#--preview=}"
+    run /bin/sh -c "${preview//\{2\}/\'%9\'}"
+    [ "$status" -eq 0 ]
+    [ "$output" = 'preview from requested server' ]
+    [ -e "$INBOX_CALLBACK_ROOT/$(printf '%s' '%9|complete' | sha256_hex_stdin)" ]
+}
+
 @test "Inbox fzf selection shares validated jump and isolated fzf options" {
     write_picker_fzf_fake
     tmux_notify_inbox_enqueue '%9' complete Codex 'Done'

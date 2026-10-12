@@ -32,6 +32,8 @@ Notable changes to tmux-notify-jump are documented in this file.
 
 ### Fixed
 
+- Inbox menu, popup and preview callbacks retain the explicitly selected tmux
+  socket even when user configuration names another server.
 - Inbox selection follows moved panes using live session/window IDs and refuses
   to redirect a detached sender's jump to another terminal. Outside tmux,
   ambiguous picker ownership requires an explicit sender TTY.

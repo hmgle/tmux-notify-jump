@@ -1982,6 +1982,7 @@ tmux_notify_shell_command() {
 
 # Carry the effective config, cache and socket into a popup/menu callback.
 # run-shell inherits the server environment, which may differ from this caller.
+# Callers also pass --tmux-socket so config loading cannot override the server.
 tmux_notify_inbox_command() {
     local cache="" path="${TMUX_NOTIFY_ENTRYPOINT:-}" config=""
     cache="$(tmux_notify_inbox_cache_root; printf '.')"
@@ -2145,7 +2146,7 @@ tmux_notify_inbox_pick() {
     read_tmux_client_row "$row"
     client="$CLIENT_NAME"
     sender_tty="$CLIENT_TTY"
-    local -a filters=(--source "$source" --session "$session" --since "$since" --query "$query" --sender-tty "$sender_tty")
+    local -a filters=(--source "$source" --session "$session" --since "$since" --query "$query" --sender-tty "$sender_tty" --tmux-socket "${TMUX_NOTIFY_TMUX_SOCKET:-}")
     [ -z "$kind" ] || filters+=(--kind "$kind")
     if [ "$menu" -eq 0 ] && tmux_notify_fzf_supported; then
         if [ "$inline" -eq 0 ] && tmux_notify_tmux_version_at_least 3 2; then
@@ -2154,7 +2155,7 @@ tmux_notify_inbox_pick() {
             return $?
         elif [ "$inline" -eq 1 ]; then
             local selected="" result=0 preview=""
-            preview="$(tmux_notify_inbox_command --inbox-preview) {2}"
+            preview="$(tmux_notify_inbox_command --inbox-preview) {2} $(tmux_notify_shell_command --tmux-socket "${TMUX_NOTIFY_TMUX_SOCKET:-}")"
             selected="$(printf '%s\n' "$rows" | env FZF_DEFAULT_OPTS= FZF_DEFAULT_OPTS_FILE= FZF_DEFAULT_COMMAND= SHELL=/bin/sh \
                 fzf --delimiter=$'\t' --with-nth=2.. --no-sort --reverse --query="$query" \
                     --prompt='Inbox> ' --header='Enter: jump  Esc: cancel | pane kind agent location age count title' \
@@ -2183,7 +2184,7 @@ tmux_notify_inbox_pick() {
         label="$kind $agent $location ($age, x$count) $title"
         label="$(truncate_text 60 "$label")"
         label="${label//#/##}"
-        command="$(tmux_notify_inbox_command --inbox-select "$id" --sender-tty "$sender_tty")"
+        command="$(tmux_notify_inbox_command --inbox-select "$id" --sender-tty "$sender_tty" --tmux-socket "${TMUX_NOTIFY_TMUX_SOCKET:-}")"
         items+=("$label" "${keys[$shown]}" "run-shell -b $(tmux_notify_shell_command "$command")")
         shown=$((shown + 1))
     done <<<"$rows"

@@ -77,8 +77,11 @@ case "${1:-}" in
         exit $?
         ;;
     --inbox-preview)
-        [ "$#" -eq 2 ] || die '--inbox-preview requires a pane ID'
-        tmux_notify_inbox_preview "$2"
+        [ "$#" -ge 2 ] || die '--inbox-preview requires a pane ID'
+        INBOX_PREVIEW_PANE="$2"
+        shift 2
+        parse_tmux_integration_args "$@"
+        tmux_notify_inbox_preview "$INBOX_PREVIEW_PANE"
         exit $?
         ;;
     --inbox-clear-all)
