@@ -730,16 +730,57 @@ get_best_tmux_client_pane_id() {
     return 1
 }
 
+# Resolve only a pane whose root process is an ancestor of the reporter. Read
+# both inventories once; walking through ps per ancestor is slow for hooks.
+# ps is optional, and missing/dead roots or a broken ancestry are a no-match.
+tmux_notify_target_from_ancestry() {
+    local sender_pid="${1:-${PPID:-}}" panes="" processes=""
+    is_integer "$sender_pid" && [ "$sender_pid" -gt 1 ] || return 1
+    command -v ps >/dev/null 2>&1 || return 1
+    panes="$(tmux_cmd list-panes -a -F '#{pane_id}|#{pane_pid}|#{pane_dead}' 2>/dev/null)" || return 1
+    [ -n "$panes" ] || return 1
+    processes="$(ps -A -o pid=,ppid= 2>/dev/null)" || return 1
+    local pane=""
+    pane="$(printf '%s\n' "$processes" | awk -v inventory="$panes" -v pid="$sender_pid" '
+        BEGIN {
+            n = split(inventory, rows, "\n")
+            for (i = 1; i <= n; i++) {
+                split(rows[i], fields, "|")
+                if (fields[1] ~ /^%[0-9]+$/ && fields[2] ~ /^[0-9]+$/ && fields[3] != "1")
+                    panes[fields[2]] = fields[1]
+            }
+        }
+        $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ { parents[$1] = $2 }
+        END {
+            for (depth = 0; depth < 64 && pid > 1 && !seen[pid]++; depth++) {
+                if (pid in panes) { print panes[pid]; exit }
+                if (!(pid in parents)) exit
+                pid = parents[pid]
+            }
+        }
+    ')"
+    is_pane_id "$pane" || return 1
+    printf '%s' "$pane"
+}
+
 resolve_tmux_notify_target() {
-    local allow_fallback="${1:-0}"
+    local allow_fallback="${1:-0}" sender_pid="${2:-${PPID:-}}" pane=""
 
     if [ -n "${TMUX_PANE:-}" ] && is_pane_id "$TMUX_PANE"; then
         printf '%s' "$TMUX_PANE"
         return 0
     fi
 
+    pane="$(tmux_notify_target_from_ancestry "$sender_pid" || true)"
+    if is_pane_id "$pane"; then
+        printf '%s' "$pane"
+        return 0
+    fi
+
+    # TMUX identifies a server, not the reporting pane. The ambient pane can
+    # belong to an unrelated client, especially for service-run agent hooks.
+    is_truthy "$allow_fallback" || return 1
     if [ -n "${TMUX:-}" ]; then
-        local pane=""
         pane="$(tmux_cmd display-message -p '#{pane_id}' 2>/dev/null || true)"
         if [ -n "$pane" ] && is_pane_id "$pane"; then
             printf '%s' "$pane"
@@ -753,12 +794,7 @@ resolve_tmux_notify_target() {
         fi
     fi
 
-    if is_truthy "$allow_fallback"; then
-        get_best_tmux_client_pane_id
-        return $?
-    fi
-
-    return 1
+    get_best_tmux_client_pane_id
 }
 
 # =============================================================================

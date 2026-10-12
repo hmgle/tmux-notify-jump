@@ -276,6 +276,16 @@ acknowledgement, leaving Inbox entries armed until you visit them via
 
 macOS note: in `--ui notification` mode, if the script is detached (or `terminal-notifier` doesn’t support `-wait`), it falls back to `terminal-notifier -execute`, where any click triggers the jump (no separate “Dismiss” action). Use `--ui dialog` for explicit buttons.
 
+Agent wrappers first use `TMUX_PANE`. If it is absent, they take one tmux pane
+inventory and one optional `ps` process inventory to find the nearest pane root
+in the reporter's process ancestry. This works for hooks that lose `TMUX_PANE`
+while still running under the originating pane. `TMUX` alone identifies a
+server and does not establish pane ownership. A shared daemon outside the pane
+process tree cannot be attributed this way; session IDs and working directories
+are not guessed. Unresolved events use the existing focus-only fallback, or
+become a no-op when it is disabled. Use an explicit `TMUX_NOTIFY_TMUX_SOCKET`
+when reporting to a non-default server without `TMUX`.
+
 ## Environment variables
 
 CLI flags override environment variables where applicable.
@@ -294,7 +304,9 @@ CLI flags override environment variables where applicable.
   `~/.cache/tmux-notify-jump/debug.log`).
 - `TMUX_NOTIFY_WINDOW_ID`: explicit X11 window id to focus (overrides auto-detection)
 - `TMUX_NOTIFY_TMUX_SOCKET`: tmux server socket path (passed to `tmux -S`; useful if you run multiple tmux servers)
-- `TMUX_NOTIFY_FALLBACK_TARGET`: if not running inside tmux, fall back to the most recently active tmux client pane as the jump target (`0` disables; default: `0`)
+- `TMUX_NOTIFY_FALLBACK_TARGET`: allow using tmux's current pane or the most
+  recently active ordinary client pane when the originating pane cannot be
+  identified (`0` disables; default: `0`). This may target unrelated work.
 - `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK`: when hooks run without tmux (missing or no server/target), fall back to `--focus-only` instead of no-op (`0` disables; default: `1`)
 - `TMUX_NOTIFY_UNATTACHED_FALLBACK`: policy when the target session has no identifiable ordinary client. The default `single` switches the server's sole ordinary client; it still refuses when there are zero or multiple ordinary clients. Set `none` for strict mode, which reports that the target is not visible instead of moving a terminal. Unknown values warn and fall back to `single`. On macOS the selected policy is forwarded to the notification click callback.
 - `TMUX_NOTIFY_REMOTE_MODE`: `tmux` (Inbox/status/remote `display-message`,
