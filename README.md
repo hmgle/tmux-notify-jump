@@ -325,10 +325,17 @@ Agent wrappers first use `TMUX_PANE`. If it is absent, they take one tmux pane
 inventory and one optional `ps` process inventory to find the nearest pane root
 in the reporter's process ancestry. This works for hooks that lose `TMUX_PANE`
 while still running under the originating pane. `TMUX` alone identifies a
-server and does not establish pane ownership. A shared daemon outside the pane
-process tree cannot be attributed this way; session IDs and working directories
-are not guessed. Unresolved events use the existing focus-only fallback, or
-become a no-op when it is disabled. Use an explicit `TMUX_NOTIFY_TMUX_SOCKET`
+server and does not establish pane ownership. Process ancestry identifies the
+pane that launched a process, which can differ from the session served by a
+persistent/shared daemon such as `codex app-server` or `opencode serve`.
+For those services, set `TMUX_NOTIFY_TARGET_ANCESTRY=0`, remove an inherited
+`TMUX_PANE` unless it belongs to the reporting session, and leave the agent's
+`*_NOTIFY_FALLBACK_TARGET=0`. Disabling ancestry does not override `TMUX_PANE`.
+Session IDs and working directories are not guessed. With no reliable target,
+events use the existing focus-only fallback, or become a no-op when it is
+disabled. Ambient pane/most-recent-client fallback now requires explicitly
+enabling `*_NOTIFY_FALLBACK_TARGET`; upgrading can therefore stop jumps that
+previously went to an unrelated pane. Use an explicit `TMUX_NOTIFY_TMUX_SOCKET`
 when reporting to a non-default server without `TMUX`.
 
 Run `tmux-notify-jump --doctor` to check executable and server versions, optional
@@ -347,6 +354,9 @@ need a manual click test; installed executables alone do not establish those.
 CLI flags override environment variables where applicable.
 
 - `TMUX_NOTIFY_CONFIG`: optional env file to load before running (default: `~/.config/tmux-notify-jump/env`)
+- `TMUX_NOTIFY_TARGET_ANCESTRY`: resolve missing `TMUX_PANE` through process
+  ancestry (default: `1`). Set `0` for shared services whose launch pane does
+  not identify the reporting session; explicit `TMUX_PANE` still takes priority.
 - `TMUX_NOTIFY_JUMP_SH`: override the notification executable (a path or command
   on `PATH`). Pointing it at `tmux-notify-jump` itself, including a symlink or
   hardlink, uses normal platform dispatch. If a custom executable calls the

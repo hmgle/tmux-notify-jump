@@ -4,7 +4,7 @@ load 'test_helper'
 
 setup() {
     setup_temp_dir
-    unset TMUX TMUX_PANE
+    unset TMUX TMUX_PANE TMUX_NOTIFY_TARGET_ANCESTRY
     PANE_ROWS=$'%1|100|0\n%2|200|0'
     PROCESS_ROWS=$'300 250\n250 200\n200 1\n100 1'
     INVENTORY_FAIL=0
@@ -95,4 +95,29 @@ ps() {
     run resolve_tmux_notify_target 1 300
     [ "$status" -eq 0 ]
     [ "$output" = '%1' ]
+}
+
+@test "target resolution can disable ancestry for shared daemons" {
+    export TMUX_NOTIFY_TARGET_ANCESTRY=0
+    run resolve_tmux_notify_target 0 300
+    [ "$status" -eq 1 ]
+    [ -z "$output" ]
+    [ ! -f "$TEST_TEMP_DIR/tmux.calls" ]
+    [ ! -f "$TEST_TEMP_DIR/ps.calls" ]
+
+    export TMUX_PANE='%9'
+    run resolve_tmux_notify_target 0 300
+    [ "$status" -eq 0 ]
+    [ "$output" = '%9' ]
+}
+
+@test "disabled ancestry still permits explicitly enabled ambient fallback" {
+    export TMUX_NOTIFY_TARGET_ANCESTRY=false
+    export TMUX='/tmp/fake.sock,1234,0'
+    run resolve_tmux_notify_target 1 300
+    [ "$status" -eq 0 ]
+    [ "$output" = '%1' ]
+    [ ! -f "$TEST_TEMP_DIR/ps.calls" ]
+    run rg 'list-panes' "$TEST_TEMP_DIR/tmux.calls"
+    [ "$status" -eq 1 ]
 }

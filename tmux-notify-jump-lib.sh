@@ -781,10 +781,12 @@ resolve_tmux_notify_target() {
         return 0
     fi
 
-    pane="$(tmux_notify_target_from_ancestry "$sender_pid" || true)"
-    if is_pane_id "$pane"; then
-        printf '%s' "$pane"
-        return 0
+    if is_truthy "${TMUX_NOTIFY_TARGET_ANCESTRY:-1}"; then
+        pane="$(tmux_notify_target_from_ancestry "$sender_pid" || true)"
+        if is_pane_id "$pane"; then
+            printf '%s' "$pane"
+            return 0
+        fi
     fi
 
     # TMUX identifies a server, not the reporting pane. The ambient pane can
