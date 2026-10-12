@@ -1321,6 +1321,41 @@ bind-key -T prefix A run-shell -b "tmux-notify-jump --inbox-next"'
     [[ "$label" == *'...' ]]
 }
 
+@test "Inbox menu fits emoji that target tmux counts wider than libc" {
+    title="$(printf '%0500d' 0)"
+    title="${title//0/☝}"
+    tmux_notify_inbox_enqueue '%9' complete Codex "$title"
+    tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+    label="$(sed -n '10p' "$TEST_TEMP_DIR/picker.args")"
+    ascii="${label//☝/}"
+    bytes="$(printf '%s' "$label" | wc -c)"
+    # tmux 3.7 counts U+261D as two columns, regardless of libc's width.
+    columns=$((${#ascii} + (bytes - ${#ascii}) / 3 * 2))
+    [ "$columns" -le 60 ]
+    [[ "$label" == 'complete Codex '* ]]
+    [[ "$label" == *'☝'*'...' ]]
+}
+
+@test "Inbox menu fits decomposed Hangul with utf8proc widths on a narrow client" {
+    FAKE_CLIENT_WIDTH=50
+    title="$(printf '%0500d' 0)"
+    title="${title//0/가}"
+    tmux_notify_inbox_enqueue '%9' complete Codex "$title"
+    tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+    label="$(sed -n '10p' "$TEST_TEMP_DIR/picker.args")"
+    without_leading="${label//ᄀ/}"
+    without_vowel="${label//ᅡ/}"
+    ascii="${without_leading//ᅡ/}"
+    bytes="$(printf '%s' "$label" | wc -c)"
+    leading_bytes="$(printf '%s' "$without_leading" | wc -c)"
+    vowel_bytes="$(printf '%s' "$without_vowel" | wc -c)"
+    # utf8proc counts U+1100 as two and U+1161 as one (libc uses zero).
+    columns=$((${#ascii} + (bytes - leading_bytes) / 3 * 2 + (bytes - vowel_bytes) / 3))
+    [ "$columns" -le 42 ]
+    [[ "$label" == 'complete Codex '* ]]
+    [[ "$label" == *'가'*'...' ]]
+}
+
 @test "Inbox picker menu escapes tmux formats and carries config cache socket" {
     tmux_notify_inbox_enqueue '%9' complete Codex '#{pane_id}'
     TMUX_NOTIFY_ENTRYPOINT="$TEST_TEMP_DIR/path with quotes' and spaces/tmux-notify-jump"

@@ -34,6 +34,8 @@ Notable changes to tmux-notify-jump are documented in this file.
 
 - Inbox menu labels fit the invoking client's width, including wide Unicode
   text, shortcuts and borders, so older tmux can display them in narrow terminals.
+  Non-ASCII codepoints always reserve two columns to cover libc, utf8proc and
+  tmux width-table differences, including emoji and decomposed Hangul.
 - Inbox menus fit the invoking client's height, including navigation rows;
   pagination uses entry offsets to avoid skipping items after a terminal resize.
 - Inbox popups omit the unsupported title option on tmux 3.2 and fall back to

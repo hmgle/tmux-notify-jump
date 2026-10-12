@@ -133,10 +133,17 @@ load 'test_helper'
     [ "$(truncate_text_columns 6 'A🚀𠮷BCD')" = 'A🚀...' ]
 }
 
-@test "truncate_text_columns: combining marks do not consume columns" {
-    command -v python3 >/dev/null 2>&1 || skip 'Python3 not available'
-    [ "$(truncate_text_columns 5 $'e\xcc\x81cole')" = $'e\xcc\x81cole' ]
-    [ "$(truncate_text_columns 4 $'e\xcc\x81cole')" = $'e\xcc\x81...' ]
+@test "truncate_text_columns: reserves two columns for tmux emoji width overrides" {
+    [ "$(truncate_text_columns 6 '☝☝☝☝☝☝☝')" = '☝...' ]
+}
+
+@test "truncate_text_columns: bounds each codepoint in decomposed Hangul" {
+    [ "$(truncate_text_columns 7 '가가가')" = '가...' ]
+}
+
+@test "truncate_text_columns: budgets combining marks conservatively" {
+    [ "$(truncate_text_columns 7 $'e\xcc\x81cole')" = $'e\xcc\x81cole' ]
+    [ "$(truncate_text_columns 6 $'e\xcc\x81cole')" = $'e\xcc\x81...' ]
 }
 
 @test "truncate_text_columns: handles budgets smaller than the ellipsis" {
@@ -157,8 +164,9 @@ load 'test_helper'
     [ "$(truncate_text_columns 5 'hello world')" = 'he...' ]
 }
 
-@test "truncate_text_columns: falls back safely when Python fails" {
-    python3() { return 1; }
+@test "truncate_text_columns: does not consult Python width tables" {
+    python3() { printf 'unexpected Python call'; }
     [ "$(truncate_text_columns 7 'A通知ABC')" = 'A通...' ]
     [ "$(truncate_text_columns 6 'A通知B')" = 'A通知B' ]
+    [ "$(truncate_text_columns 6 '☝☝☝☝☝☝☝')" = '☝...' ]
 }

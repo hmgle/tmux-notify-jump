@@ -217,43 +217,13 @@ else:
     printf '%s' "$text"
 }
 
-# Truncate plain text by terminal columns, preserving complete UTF-8 characters.
-# Python handles wide and combining characters; without it, count every
-# non-ASCII character as two columns so the result still fits older tmux.
+# Truncate plain text using a conservative terminal-column budget, preserving
+# complete UTF-8 characters. Count each non-ASCII codepoint as two columns:
+# libc, utf8proc and tmux's width overrides can disagree, even for zero-width
+# characters. A local width table cannot safely size another tmux server.
 truncate_text_columns() {
-    local max="$1" text="$2" out=""
+    local max="$1" text="$2"
     [ "$max" -gt 0 ] || return 0
-    if command -v python3 >/dev/null 2>&1; then
-        if out="$(printf '%s' "$text" | python3 -c 'import ctypes, sys, unicodedata
-max_width = int(sys.argv[1])
-text = sys.stdin.read()
-wcwidth = ctypes.CDLL(None).wcwidth
-wcwidth.argtypes = [ctypes.c_wchar]
-wcwidth.restype = ctypes.c_int
-def columns(char):
-    width = wcwidth(char)
-    if width < 0:
-        return 2
-    # Newer Unicode tables may know wide characters absent from libc.
-    return max(width, 2 if unicodedata.east_asian_width(char) in ("W", "F") else 0)
-widths = [columns(char) for char in text]
-if sum(widths) <= max_width:
-    sys.stdout.write(text)
-else:
-    suffix = "..." if max_width >= 4 else "."
-    budget = max_width - len(suffix)
-    used = end = 0
-    for width in widths:
-        if used + width > budget:
-            break
-        used += width
-        end += 1
-    sys.stdout.write(text[:end] + suffix)
-' "$max" 2>/dev/null)"; then
-            printf '%s' "$out"
-            return 0
-        fi
-    fi
 
     # Work in bytes even under a C locale, but copy whole UTF-8 sequences.
     local LC_ALL=C byte bytes columns pos=0 used=0 prefix="" suffix='...'
