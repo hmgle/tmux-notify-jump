@@ -54,6 +54,10 @@ This repo contains:
 
 - `xdotool` for focusing the terminal window before jumping (the script auto-disables focusing if missing)
 - `python3` for safer Unicode truncation
+- `ps` for resolving wrapper targets through process ancestry when `TMUX_PANE`
+  is missing
+- `fzf` for the searchable Inbox picker; menus need tmux 3.0 and popups need
+  tmux 3.2 (see [tmux Inbox](#tmux-inbox))
 
 ### Wrappers (Codex/Claude/Kimi/Grok/OpenCode/Pi/Step/omp hooks)
 
@@ -157,6 +161,7 @@ Common options:
   are selected first by the tmux Inbox key.
 - `--notify-source <name>`: source label shown in remote tmux messages and the
   Inbox metadata.
+- `--inbox-pick [options]`: search the tmux Inbox and jump to a selected item.
 
 ## Terminal bell over SSH
 
@@ -216,6 +221,39 @@ that exact pane as soon as it is visited. Repeated events for the same pane and
 priority collapse into one item with an updated count.
 Inbox cache directories and metadata files are restricted to the current user.
 Notification bodies are used for immediate delivery but are not persisted.
+Run `tmux-notify-jump --inbox-pick` for a searchable fzf popup with the selected
+pane's last 80 lines as a preview. It shows priority, agent/source, current
+session/window/pane, age in seconds and count, sorted attention first and then
+oldest first. Session renames and pane moves are read from one live inventory.
+Enter jumps; Escape cancels without acknowledging anything.
+
+Picker options:
+
+- `--kind attention|complete`, `--source <name>` and `--session <name-or-id>`:
+  exact filters; `--session` accepts the live name or stable `$N` session ID.
+- `--since <seconds>`: include items updated within this time (default `0`, all).
+- `--query <text>`: initial fzf search across the displayed fields.
+- `--menu`: use the numbered tmux menu; `--query` becomes a case-insensitive
+  substring filter. `[` and `]` move between pages of 35 items.
+- `--inline`: run fzf in the current terminal instead of a popup.
+- `--sender-tty <tty>` and `--tmux-socket <path>`: identify the invoking client
+  and server explicitly.
+
+fzf is optional. Popups need tmux 3.2; tmux 3.0–3.1 or a missing fzf falls back
+to the menu. Older tmux prints the filtered list; `--inline` with fzf and
+`--inbox-next` remain available. A picker invoked outside a client needs
+`--sender-tty` if several ordinary terminals are attached. An explicitly named
+client that has detached is never replaced with another terminal.
+
+Examples and an optional second binding (the installed `prefix+N` stays a quick
+jump to the oldest item):
+
+```bash
+tmux-notify-jump --inbox-pick --kind attention --session work --since 3600
+tmux-notify-jump --inbox-pick --query Codex
+tmux bind-key n run-shell -b 'TMUX_NOTIFY_SENDER_TTY="#{client_tty}" tmux-notify-jump --inbox-pick'
+```
+
 Inbox routing is active even before `--configure-tmux` installs its status,
 hooks, and binding. Set `TMUX_NOTIFY_REMOTE_MODE=desktop` to disable tmux Inbox
 storage and use desktop delivery only.

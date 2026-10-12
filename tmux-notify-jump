@@ -53,6 +53,29 @@ case "${1:-}" in
         tmux_notify_inbox_next "${TMUX_NOTIFY_SENDER_TTY:-}"
         exit $?
         ;;
+    --inbox-pick)
+        shift
+        tmux_notify_inbox_pick "$@"
+        exit $?
+        ;;
+    --inbox-select)
+        [ "$#" -ge 2 ] || die '--inbox-select requires an entry ID'
+        INBOX_SELECTED_ID="$2"
+        shift 2
+        if [ "${1:-}" = --sender-tty ]; then
+            [ "$#" -ge 2 ] || die '--sender-tty requires an argument'
+            TMUX_NOTIFY_SENDER_TTY="$2"
+            shift 2
+        fi
+        parse_tmux_integration_args "$@"
+        tmux_notify_inbox_select "$INBOX_SELECTED_ID" "${TMUX_NOTIFY_SENDER_TTY:-}"
+        exit $?
+        ;;
+    --inbox-preview)
+        [ "$#" -eq 2 ] || die '--inbox-preview requires a pane ID'
+        tmux_notify_inbox_preview "$2"
+        exit $?
+        ;;
     --inbox-clear-all)
         tmux_notify_inbox_clear_all
         exit 0

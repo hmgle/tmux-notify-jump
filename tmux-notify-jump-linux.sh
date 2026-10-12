@@ -66,6 +66,7 @@ Usage:
 
 Options:
   --list               List available panes
+  --inbox-pick [opts]   Search Inbox (fzf popup or tmux menu; see README)
   --focus-only         On click, only focus the terminal window (no tmux required)
   --no-activate        Do not focus the terminal window
   --class <CLASS>      Use a single terminal window class
@@ -938,6 +939,11 @@ parse_args() {
                 # Try common options (sets _PARSE_CONSUMED)
                 if parse_common_opt "$@"; then
                     case "$_PARSE_CONSUMED" in
+                        inbox-pick)
+                            shift
+                            tmux_notify_inbox_pick "$@"
+                            exit $?
+                            ;;
                         help)
                             print_usage
                             exit 0

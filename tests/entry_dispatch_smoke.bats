@@ -60,6 +60,21 @@ assert_linux_dispatch() {
     [ "$output" = $'tmux-notify-jump-macos.sh\n<--help>' ]
 }
 
+@test "Inbox picker rejects invalid options through entry and both platforms" {
+    export TMUX_NOTIFY_CONFIG="$TEST_TEMP_DIR/no-config"
+    for script in "$PROJECT_ROOT/tmux-notify-jump" \
+        "$PROJECT_ROOT/tmux-notify-jump-linux.sh" "$PROJECT_ROOT/tmux-notify-jump-macos.sh"; do
+        run "$script" --inbox-pick --kind invalid
+        [ "$status" -eq 1 ]
+        [[ "$output" == *'--kind must be attention or complete'* ]]
+        run "$script" --inbox-pick --since yesterday
+        [ "$status" -eq 1 ]
+        run "$script" --inbox-pick --session
+        [ "$status" -eq 1 ]
+        [[ "$output" == *'--session requires an argument'* ]]
+    done
+}
+
 @test "entry dispatch: absolute self-reference uses the native platform" {
     export TMUX_NOTIFY_JUMP_SH="$entry"
     assert_linux_dispatch
