@@ -1945,12 +1945,16 @@ tmux_notify_inbox_client() {
         row="$(best_tmux_terminal_client "$rows" "$session_id" || true)"
         if [ -n "$row" ]; then printf '%s' "$row"; return 0; fi
     fi
-    current="$(tmux_cmd display-message -p '#{client_name}' 2>/dev/null || true)"
-    while IFS= read -r row; do
-        [ -n "$row" ] || continue
-        read_tmux_client_row "$row"
-        if [ "$CLIENT_NAME" = "$current" ]; then printf '%s' "$row"; return 0; fi
-    done <<<"$rows"
+    # Outside tmux, display-message returns an ambient client even when several
+    # terminals are attached. That is not evidence of who invoked the picker.
+    if [ -n "${TMUX:-}" ]; then
+        current="$(tmux_cmd display-message -p '#{client_name}' 2>/dev/null || true)"
+        while IFS= read -r row; do
+            [ -n "$row" ] || continue
+            read_tmux_client_row "$row"
+            if [ "$CLIENT_NAME" = "$current" ]; then printf '%s' "$row"; return 0; fi
+        done <<<"$rows"
+    fi
     single_tmux_terminal_client "$rows"
 }
 
