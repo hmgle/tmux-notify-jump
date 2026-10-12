@@ -162,6 +162,8 @@ Common options:
 - `--notify-source <name>`: source label shown in remote tmux messages and the
   Inbox metadata.
 - `--inbox-pick [options]`: search the tmux Inbox and jump to a selected item.
+- `--doctor [--tmux-socket <path>]`: print dependency and tmux integration
+  diagnostics without changing configuration, permissions or Inbox contents.
 
 ## Terminal bell over SSH
 
@@ -323,6 +325,17 @@ process tree cannot be attributed this way; session IDs and working directories
 are not guessed. Unresolved events use the existing focus-only fallback, or
 become a no-op when it is disabled. Use an explicit `TMUX_NOTIFY_TMUX_SOCKET`
 when reporting to a non-default server without `TMUX`.
+
+Run `tmux-notify-jump --doctor` to check executable and server versions, optional
+dependencies, the effective configuration and socket paths, the pinned Inbox
+directory and its permissions, acknowledgement hooks, status segment and
+prefix binding. It never sends a notification or repairs state. `WARN` covers
+optional tools, older tmux capabilities and integrations that are absent or
+customized. `FAIL` means tmux/server access is unavailable or configuration/
+Inbox paths or permissions are invalid; the exit status is then `1`. Successful
+checks, including warnings, return `0`. Pass `--tmux-socket <path>` to inspect a
+specific server. Notification daemon action support and GUI activation still
+need a manual click test; installed executables alone do not establish those.
 
 ## Environment variables
 

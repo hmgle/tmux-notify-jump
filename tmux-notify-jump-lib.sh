@@ -247,12 +247,13 @@ require_arg() {
 #   --target, --focus-only, --title, --body, --sender-tty, --tmux-socket
 #   --no-activate, --list, --dry-run, --quiet, --timeout, --ui
 #   --max-title, --max-body, --dedupe-ms, --bell, --no-bell, --detach, --notify-kind,
-#   --notify-source, --inbox-pick
+#   --notify-source, --inbox-pick, --doctor
 #
 # Special return values in _PARSE_CONSUMED:
 #   "help" - caller should print_usage and exit 0
 #   "end"  - end of options marker (--) was seen
 #   "inbox-pick" - delegate remaining args to tmux_notify_inbox_pick()
+#   "doctor" - delegate remaining args to tmux_notify_doctor_cli()
 #
 # Platform-specific options NOT handled (must be handled by caller):
 #   macOS: --bundle-id, --bundle-ids, --sender-pid, --action-callback, --cb-*
@@ -312,6 +313,10 @@ parse_common_opt() {
             ;;
         --inbox-pick)
             _PARSE_CONSUMED="inbox-pick"
+            return 0
+            ;;
+        --doctor)
+            _PARSE_CONSUMED="doctor"
             return 0
             ;;
         --dry-run)
@@ -2116,6 +2121,174 @@ tmux_notify_tmux_version_at_least() {
         return $?
     fi
     return 1
+}
+
+# Diagnostics never create/chmod state or install hooks. Optional capabilities
+# are warnings; broken server access or unsafe/unreadable state fails the check.
+tmux_notify_doctor_cli() {
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --tmux-socket)
+                shift
+                [ "$#" -gt 0 ] || die '--tmux-socket requires an argument'
+                TMUX_NOTIFY_TMUX_SOCKET="$1"
+                ;;
+            *) die "Unknown doctor option: $1" ;;
+        esac
+        shift
+    done
+    ensure_tmux_notify_socket_from_env
+    tmux_notify_doctor
+}
+
+tmux_notify_doctor_line() {
+    local level="$1" label="$2" value="${3:-}" clean=""
+    clean="$(tmux_notify_compact_text "$value" | LC_ALL=C tr '\000-\037\177' ' ')"
+    printf '%-4s %-24s %s\n' "$level" "$label" "$clean"
+}
+
+tmux_notify_doctor_tool() {
+    local tool="$1" purpose="$2" path=""
+    path="$(command -v "$tool" 2>/dev/null || true)"
+    if [ -n "$path" ]; then
+        tmux_notify_doctor_line OK "$tool" "$path ($purpose)"
+    else
+        tmux_notify_doctor_line WARN "$tool" "unavailable ($purpose)"
+    fi
+}
+
+tmux_notify_doctor_private_path() {
+    local path="$1" expected="$2" mode=""
+    [ ! -L "$path" ] && [ -O "$path" ] && [ -r "$path" ] && [ -w "$path" ] || return 1
+    if [ -d "$path" ]; then
+        [ "$expected" = 700 ] && [ -x "$path" ] || return 1
+    else
+        [ "$expected" = 600 ] && [ -f "$path" ] || return 1
+    fi
+    mode="$(stat -c '%a' "$path" 2>/dev/null || stat -f '%Lp' "$path" 2>/dev/null || true)"
+    [ "$mode" = "$expected" ]
+}
+
+tmux_notify_doctor() {
+    local config="${TMUX_NOTIFY_CONFIG:-${HOME:-}/.config/tmux-notify-jump/env}"
+    local result=0 version="" server="" root="" pinned="" status="" hook_table=""
+    printf 'tmux-notify-jump diagnostics\n'
+    if [ -e "$config" ]; then
+        if [ -f "$config" ] && [ -r "$config" ]; then
+            tmux_notify_doctor_line OK 'Configuration' "$config"
+        else
+            tmux_notify_doctor_line FAIL 'Configuration' "$config (not a readable file)"
+            result=1
+        fi
+    else
+        tmux_notify_doctor_line WARN 'Configuration' "$config (absent; using environment/defaults)"
+    fi
+    tmux_notify_doctor_line OK 'Routing mode' "$(tmux_notify_remote_mode)"
+    tmux_notify_doctor_tool fzf 'optional searchable Inbox'
+    tmux_notify_doctor_tool jq 'agent wrappers; missing jq makes hooks no-op'
+    tmux_notify_doctor_tool ps 'optional pane ancestry resolution'
+    case "$(uname -s 2>/dev/null || true)" in
+        Darwin)
+            tmux_notify_doctor_tool terminal-notifier 'desktop notifications'
+            tmux_notify_doctor_tool osascript 'desktop terminal activation'
+            ;;
+        *)
+            tmux_notify_doctor_tool notify-send 'desktop notifications'
+            tmux_notify_doctor_tool xdotool 'optional X11 terminal activation'
+            if [ -n "${DISPLAY:-}" ]; then
+                tmux_notify_doctor_line OK 'X11 display' "$DISPLAY"
+            else
+                tmux_notify_doctor_line WARN 'X11 display' 'unset; desktop focus unavailable (tmux/SSH still works)'
+            fi
+            ;;
+    esac
+    if ! command -v tmux >/dev/null 2>&1; then
+        tmux_notify_doctor_line FAIL 'tmux' 'unavailable; Inbox and jump need tmux (focus-only remains available)'
+        return 1
+    fi
+    version="$(tmux_cmd -V 2>/dev/null || true)"
+    tmux_notify_doctor_line OK 'tmux executable' "$version"
+    server="$(tmux_cmd display-message -p '#{pid}' 2>/dev/null || true)"
+    if ! is_integer "$server"; then
+        tmux_notify_doctor_line FAIL 'tmux server' "not reachable; socket=${TMUX_NOTIFY_TMUX_SOCKET:-default (or TMUX)}"
+        return 1
+    fi
+    local socket=""
+    socket="$(tmux_cmd display-message -p '#{socket_path}' 2>/dev/null || true)"
+    version="$(tmux_cmd display-message -p '#{version}' 2>/dev/null || true)"
+    tmux_notify_doctor_line OK 'tmux server' "$version pid=$server socket=$socket"
+    if tmux_notify_tmux_version_at_least 3 2; then
+        tmux_notify_doctor_line OK 'Inbox UI' 'popup and menu supported'
+    elif tmux_notify_tmux_version_at_least 3 0; then
+        tmux_notify_doctor_line WARN 'Inbox UI' 'menu supported; fzf popup needs tmux 3.2'
+    else
+        tmux_notify_doctor_line WARN 'Inbox UI' 'menus and acknowledgement hooks need tmux 3.0; use --inbox-next or --inline'
+    fi
+    root="$(tmux_notify_inbox_root)"
+    pinned="$(tmux_cmd show-option -gqv @tmux-notify-jump-inbox-root 2>/dev/null || true)"
+    if [ -z "$pinned" ]; then
+        tmux_notify_doctor_line WARN 'Pinned Inbox path' 'not initialized; run --tmux-init or reload configured tmux file'
+    elif ! tmux_notify_inbox_root_is_valid "$pinned"; then
+        tmux_notify_doctor_line FAIL 'Pinned Inbox path' "$pinned (invalid; using default path)"
+        result=1
+    else
+        tmux_notify_doctor_line OK 'Pinned Inbox path' "$pinned"
+    fi
+    if [ ! -e "$root" ] && [ ! -L "$root" ]; then
+        tmux_notify_doctor_line OK 'Inbox permissions' "$root (not created yet)"
+    elif ! tmux_notify_doctor_private_path "$root" 700; then
+        tmux_notify_doctor_line FAIL 'Inbox permissions' "$root (need an owned, readable/writable directory with mode 700)"
+        result=1
+    else
+        local entry file unsafe=0 entries=0
+        for entry in "$root"/*; do
+            tmux_notify_inbox_id_is_valid "${entry##*/}" || continue
+            entries=$((entries + 1))
+            if ! tmux_notify_doctor_private_path "$entry" 700; then unsafe=1; continue; fi
+            for file in "$entry"/*; do
+                [ -e "$file" ] || [ -L "$file" ] || continue
+                if ! tmux_notify_doctor_private_path "$file" 600; then unsafe=1; fi
+            done
+        done
+        if [ "$unsafe" -eq 1 ]; then
+            tmux_notify_doctor_line FAIL 'Inbox permissions' "$root (unsafe entry ownership, permissions or symlinks)"
+            result=1
+        else
+            tmux_notify_doctor_line OK 'Inbox permissions' "$root ($entries entries; directories 700, files 600)"
+        fi
+    fi
+    status="$(tmux_cmd show-option -gqv status-right 2>/dev/null || true)"
+    if ! is_truthy "${TMUX_NOTIFY_TMUX_STATUS:-1}"; then
+        tmux_notify_doctor_line OK 'Status segment' 'disabled by TMUX_NOTIFY_TMUX_STATUS'
+    elif [[ "$status" == *"$(tmux_notify_tmux_status_segment)"* ]]; then
+        tmux_notify_doctor_line OK 'Status segment' 'installed in global status-right (session overrides may hide it)'
+    else
+        tmux_notify_doctor_line WARN 'Status segment' 'missing or customized; reload tmux config or run --tmux-init'
+    fi
+    hook_table="$(tmux_cmd show-hooks -g 2>/dev/null || true)"
+    local hook command
+    for hook in client-attached client-session-changed after-select-pane after-select-window client-focus-in; do
+        command="$(tmux_notify_tmux_hook_command "$hook" "$hook_table")"
+        if tmux_notify_tmux_is_ack_command "$command"; then
+            tmux_notify_doctor_line OK "Hook $hook" 'acknowledgement installed at [900]'
+        elif [ -n "$command" ]; then
+            tmux_notify_doctor_line WARN "Hook $hook" 'slot [900] occupied by another command'
+        else
+            tmux_notify_doctor_line WARN "Hook $hook" 'acknowledgement missing; reload configured tmux file'
+        fi
+    done
+    local key="" binding=""
+    key="$(tmux_cmd show-option -gqv @tmux-notify-jump-key 2>/dev/null || true)"
+    key="${TMUX_NOTIFY_TMUX_KEY:-${key:-N}}"
+    binding="$(tmux_notify_tmux_prefix_binding "$key")"
+    if [[ "$binding" == *--inbox-next* ]]; then
+        tmux_notify_doctor_line OK 'Inbox binding' "prefix+$key jumps to next item"
+    elif [ -n "$binding" ]; then
+        tmux_notify_doctor_line WARN 'Inbox binding' "prefix+$key belongs to another command"
+    else
+        tmux_notify_doctor_line WARN 'Inbox binding' "prefix+$key missing; reload configured tmux file"
+    fi
+    return "$result"
 }
 
 tmux_notify_tmux_major_version() {

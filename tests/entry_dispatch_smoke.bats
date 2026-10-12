@@ -75,6 +75,31 @@ assert_linux_dispatch() {
     done
 }
 
+@test "doctor uses an explicit socket through entry and both platforms" {
+    export TMUX_NOTIFY_CONFIG="$TEST_TEMP_DIR/no-config"
+    export TMUX_NOTIFY_TMUX_SOCKET=/configured/other.sock
+    unset TMUX
+    cat >"$TEST_TEMP_DIR/bin/tmux" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TEMP_DIR/doctor.calls"
+[ "${1:-}" = -S ] && [ "${2:-}" = /requested/server.sock ] || exit 99
+[ "${3:-}" = -V ] && printf 'tmux 3.7c\n'
+exit 1
+FAKE
+    chmod +x "$TEST_TEMP_DIR/bin/tmux"
+    for script in "$PROJECT_ROOT/tmux-notify-jump" \
+        "$PROJECT_ROOT/tmux-notify-jump-linux.sh" "$PROJECT_ROOT/tmux-notify-jump-macos.sh"; do
+        run "$script" --doctor --tmux-socket /requested/server.sock
+        [ "$status" -eq 1 ]
+        [[ "$output" == *'not reachable; socket=/requested/server.sock'* ]]
+        run "$script" --doctor --tmux-socket
+        [ "$status" -eq 1 ]
+        [[ "$output" == *'--tmux-socket requires an argument'* ]]
+    done
+    run rg -v '^-S /requested/server.sock ' "$TEST_TEMP_DIR/doctor.calls"
+    [ "$status" -eq 1 ]
+}
+
 @test "entry dispatch: absolute self-reference uses the native platform" {
     export TMUX_NOTIFY_JUMP_SH="$entry"
     assert_linux_dispatch

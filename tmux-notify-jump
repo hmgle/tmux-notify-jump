@@ -32,6 +32,11 @@ parse_tmux_integration_args() {
 }
 
 case "${1:-}" in
+    --doctor)
+        shift
+        tmux_notify_doctor_cli "$@"
+        exit $?
+        ;;
     --tmux-init)
         shift
         parse_tmux_integration_args "$@"
