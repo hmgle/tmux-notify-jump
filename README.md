@@ -221,6 +221,10 @@ hooks, and the `prefix+N` binding, then reload the configured file with
 selects the oldest attention item first, then the oldest completion, and clears
 that exact pane as soon as it is visited. Repeated events for the same pane and
 priority collapse into one item with an updated count.
+The Inbox stores pending attention/completion events. A continuous
+`working / needs-input / done` view needs reliable start, resume and exit
+events across adapters. These are not consistently available, so lifecycle
+state is not inferred from silence between notifications.
 Inbox cache directories and metadata files are restricted to the current user.
 Notification bodies are used for immediate delivery but are not persisted.
 Run `tmux-notify-jump --inbox-pick` for a searchable fzf popup with the selected
@@ -340,7 +344,9 @@ persistent/shared daemon such as `codex app-server` or `opencode serve`.
 For those services, set `TMUX_NOTIFY_TARGET_ANCESTRY=0`, remove an inherited
 `TMUX_PANE` unless it belongs to the reporting session, and leave the agent's
 `*_NOTIFY_FALLBACK_TARGET=0`. Disabling ancestry does not override `TMUX_PANE`.
-Session IDs and working directories are not guessed. With no reliable target,
+Reliable daemon targeting needs a per-report session-to-pane binding. Session
+IDs and shared working directories alone do not establish that binding and
+are not used to guess ownership. With no reliable target,
 events use the existing focus-only fallback, or become a no-op when it is
 disabled. Ambient pane/most-recent-client fallback now requires explicitly
 enabling `*_NOTIFY_FALLBACK_TARGET`; upgrading can therefore stop jumps that
