@@ -162,7 +162,7 @@ Common options:
 - `--notify-source <name>`: source label shown in remote tmux messages and the
   Inbox metadata.
 - `--inbox-pick [options]`: search the tmux Inbox and jump to a selected item.
-- `--doctor [--tmux-socket <path>]`: print dependency and tmux integration
+- `--doctor [--tmux-socket <path>] [--agent-config <agent=path>]`: print dependency and tmux integration
   diagnostics without changing configuration, permissions or Inbox contents.
 
 ## Terminal bell over SSH
@@ -346,13 +346,30 @@ when reporting to a non-default server without `TMUX`.
 Run `tmux-notify-jump --doctor` to check executable and server versions, optional
 dependencies, the effective configuration and socket paths, the pinned Inbox
 directory and its permissions, acknowledgement hooks, status segment and
-prefix binding. It never sends a notification or repairs state. `WARN` covers
+prefix binding. It probes fzf's required options with a noninteractive filter,
+checks all eight wrapper files for executability, and looks for wrapper text
+references in user-level agent configuration/bridge files. A text reference
+can be inactive or commented out; this check does not prove runtime hook
+registration or successful notification delivery. It never sends a
+notification or repairs state. `WARN` covers
 optional tools, older tmux capabilities and integrations that are absent or
 customized. `FAIL` means tmux/server access is unavailable or configuration/
 Inbox paths or permissions are invalid; the exit status is then `1`. Successful
 checks, including warnings, return `0`. Pass `--tmux-socket <path>` to inspect a
 specific server. Notification daemon action support and GUI activation still
 need a manual click test; installed executables alone do not establish those.
+
+Agent checks use the installer's standard user-level locations and honor
+`CODEX_CONFIG_PATH`, `CLAUDE_CONFIG_PATH`, `KIMI_CONFIG_PATH`, `GROK_HOOKS_PATH`,
+`OPENCODE_PLUGIN_PATH`, `PI_EXTENSION_PATH`, `STEP_EXTENSION_PATH`, and
+`OMP_EXTENSION_PATH` when set. Runtime config precedence and profile selection
+are not inferred. For a custom/profile/project file, repeat `--agent-config
+<agent=path>` with `codex`, `claude`, `kimi`, `grok`, `opencode`, `pi`, `step`, or
+`omp`, for example:
+
+```bash
+tmux-notify-jump --doctor --agent-config omp="$HOME/.omp/profiles/work/agent/extensions/tmux-notify-jump.ts"
+```
 
 ## Environment variables
 

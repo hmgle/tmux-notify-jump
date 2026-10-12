@@ -2188,6 +2188,7 @@ tmux_notify_tmux_version_at_least() {
 # Diagnostics never create/chmod state or install hooks. Optional capabilities
 # are warnings; broken server access or unsafe/unreadable state fails the check.
 tmux_notify_doctor_cli() {
+    local -a agent_configs=()
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --tmux-socket)
@@ -2195,12 +2196,21 @@ tmux_notify_doctor_cli() {
                 [ "$#" -gt 0 ] || die '--tmux-socket requires an argument'
                 TMUX_NOTIFY_TMUX_SOCKET="$1"
                 ;;
+            --agent-config)
+                shift
+                if [ "$#" -eq 0 ]; then
+                    printf 'Error: --agent-config requires agent=path\n' >&2
+                    return 1
+                fi
+                agent_configs+=("$1")
+                ;;
             *) die "Unknown doctor option: $1" ;;
         esac
         shift
     done
     ensure_tmux_notify_socket_from_env
-    tmux_notify_doctor
+    # Bash 3.2 treats an empty array as unset under nounset.
+    tmux_notify_doctor ${agent_configs[@]+"${agent_configs[@]}"}
 }
 
 tmux_notify_doctor_line() {
@@ -2231,6 +2241,66 @@ tmux_notify_doctor_private_path() {
     [ "$mode" = "$expected" ]
 }
 
+# These are user-level installation paths, not proof of runtime registration.
+# Explicit agent=path inputs let diagnostics inspect profiles/project configs
+# without copying every agent's evolving path or config precedence rules.
+tmux_notify_doctor_agents() {
+    local base="" home="${HOME:-}" i=0 spec="" agent="" path="" found=0
+    base="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local -a agents=(codex claude kimi grok opencode pi step omp)
+    local -a wrappers=(notify-codex.sh notify-claude-code.sh notify-kimi-code.sh notify-grok.sh notify-opencode.sh notify-pi.sh notify-step.sh notify-omp.sh)
+    local -a configs=(
+        "${CODEX_CONFIG_PATH:-$home/.codex/config.toml}"
+        "${CLAUDE_CONFIG_PATH:-$home/.claude/settings.json}"
+        "${KIMI_CONFIG_PATH:-$home/.kimi-code/config.toml}"
+        "${GROK_HOOKS_PATH:-${GROK_HOME:-$home/.grok}/hooks}/tmux-notify-jump.json"
+        "${OPENCODE_PLUGIN_PATH:-$home/.config/opencode/plugins}/tmux-notify-jump.ts"
+        "${PI_EXTENSION_PATH:-$home/.pi/agent/extensions}/tmux-notify-jump.ts"
+        "${STEP_EXTENSION_PATH:-$home/.stepcode/agent/extensions}/tmux-notify-jump.ts"
+        "${OMP_EXTENSION_PATH:-$home/.omp/agent/extensions}/tmux-notify-jump.ts"
+    )
+    for spec in "$@"; do
+        agent="${spec%%=*}"
+        path="${spec#*=}"
+        if [ "$spec" = "$path" ] || [ -z "$path" ]; then
+            printf 'Error: --agent-config requires agent=path\n' >&2
+            return 1
+        fi
+        found=0
+        for i in "${!agents[@]}"; do
+            [ "$agent" = "${agents[$i]}" ] || continue
+            configs[i]="$path"
+            found=1
+            break
+        done
+        if [ "$found" -eq 0 ]; then
+            printf 'Error: Unknown doctor agent: %s\n' "$agent" >&2
+            return 1
+        fi
+    done
+    for i in "${!agents[@]}"; do
+        agent="${agents[$i]}"
+        path="$base/${wrappers[$i]}"
+        if [ -f "$path" ] && [ -x "$path" ]; then
+            tmux_notify_doctor_line OK "Wrapper $agent" "$path (executable)"
+        else
+            tmux_notify_doctor_line WARN "Wrapper $agent" "$path (missing or not executable)"
+        fi
+        # TypeScript bridges invoke a command on PATH unless overridden.
+        case "$agent" in
+            opencode|pi|step|omp) tmux_notify_doctor_tool "${wrappers[$i]}" "$agent bridge default; *_NOTIFY_CMD may override" ;;
+        esac
+        path="${configs[$i]}"
+        if [ ! -f "$path" ] || [ ! -r "$path" ]; then
+            tmux_notify_doctor_line WARN "Config $agent" "$path (absent or unreadable; optional integration)"
+        elif LC_ALL=C awk -v needle="${wrappers[$i]}" 'index($0, needle) { found=1 } END { exit !found }' "$path"; then
+            tmux_notify_doctor_line OK "Config $agent" "$path (wrapper text reference found; registration unverified)"
+        else
+            tmux_notify_doctor_line WARN "Config $agent" "$path (no wrapper text reference; check hook/bridge configuration)"
+        fi
+    done
+}
+
 tmux_notify_doctor() {
     local config=""
     config="$(tmux_notify_config_path)"
@@ -2247,9 +2317,14 @@ tmux_notify_doctor() {
         tmux_notify_doctor_line WARN 'Configuration' "$config (absent; using environment/defaults)"
     fi
     tmux_notify_doctor_line OK 'Routing mode' "$(tmux_notify_remote_mode)"
-    tmux_notify_doctor_tool fzf 'optional searchable Inbox'
+    if tmux_notify_fzf_supported; then
+        tmux_notify_doctor_line OK fzf "$(command -v fzf) (picker options supported)"
+    else
+        tmux_notify_doctor_line WARN fzf 'missing or picker options unsupported; falling back to tmux menu'
+    fi
     tmux_notify_doctor_tool jq 'agent wrappers; missing jq makes hooks no-op'
     tmux_notify_doctor_tool ps 'optional pane ancestry resolution'
+    tmux_notify_doctor_agents "$@" || return 1
     case "$(uname -s 2>/dev/null || true)" in
         Darwin)
             tmux_notify_doctor_tool terminal-notifier 'desktop notifications'

@@ -68,6 +68,7 @@ Options:
   --list               List available panes
   --inbox-pick [opts]   Search Inbox (fzf popup or tmux menu; see README)
   --doctor [opts]       Diagnose dependencies and tmux integration (read-only)
+                       --agent-config <agent=path> inspects custom hook files
   --focus-only         On click, only focus the terminal window (no tmux required)
   --no-activate        Do not focus the terminal window
   --class <CLASS>      Use a single terminal window class

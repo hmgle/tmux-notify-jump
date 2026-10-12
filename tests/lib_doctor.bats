@@ -4,6 +4,7 @@ load 'test_helper'
 
 setup() {
     setup_temp_dir
+    export HOME="$TEST_TEMP_DIR/home"
     export TMUX_NOTIFY_CONFIG="$TEST_TEMP_DIR/config/env"
     export XDG_CACHE_HOME="$TEST_TEMP_DIR/cache"
     export TMUX_NOTIFY_TMUX_SOCKET="$TEST_TEMP_DIR/tmux.sock"
@@ -21,6 +22,7 @@ setup() {
         printf '#!/usr/bin/env bash\nexit 0\n' >"$TEST_TEMP_DIR/bin/$tool"
     done
     chmod +x "$TEST_TEMP_DIR/bin/"*
+    printf '#!/usr/bin/env bash\ncat\n' >"$TEST_TEMP_DIR/bin/fzf"
     export PATH="$TEST_TEMP_DIR/bin:$PATH"
 }
 
@@ -149,4 +151,51 @@ tmux_cmd() {
     [ "$status" -eq 0 ]
     [[ "$output" != *$'\e'* ]]
     [[ "$output" == *'absent [31m config'* ]]
+}
+
+@test "doctor probes fzf options without executing a preview or changing Inbox state" {
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'picker options supported'* ]]
+    printf '#!/usr/bin/env bash\nexit 2\n' >"$TEST_TEMP_DIR/bin/fzf"
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'picker options unsupported'* ]]
+    [ ! -e "$FAKE_ROOT" ]
+}
+
+@test "doctor checks all wrapper files and optional configuration references" {
+    mkdir -p "$HOME/.claude" "$HOME/.codex"
+    printf '{"hooks":{"Stop":[{"hooks":[{"command":"notify-claude-code.sh"}]}]}}\n' >"$HOME/.claude/settings.json"
+    printf 'model = "custom"\n' >"$HOME/.codex/config.toml"
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [ "$(printf '%s\n' "$output" | rg -c 'Wrapper .*executable')" -eq 8 ]
+    [[ "$output" == *'Config claude'*'wrapper text reference found; registration unverified'* ]]
+    [[ "$output" == *'Config codex'*'no wrapper text reference'* ]]
+    [[ "$output" == *'Config kimi'*'absent or unreadable'* ]]
+}
+
+@test "doctor warns about missing and nonexecutable wrappers without repairing them" {
+    mkdir -p "$TEST_TEMP_DIR/installed"
+    cp "$PROJECT_ROOT/tmux-notify-jump-lib.sh" "$TEST_TEMP_DIR/installed/tmux-notify-jump-lib.sh"
+    printf '#!/usr/bin/env bash\n' >"$TEST_TEMP_DIR/installed/notify-codex.sh"
+    chmod 600 "$TEST_TEMP_DIR/installed/notify-codex.sh"
+    source "$TEST_TEMP_DIR/installed/tmux-notify-jump-lib.sh"
+    run tmux_notify_doctor_agents
+    [ "$status" -eq 0 ]
+    [ "$(printf '%s\n' "$output" | rg -c 'missing or not executable')" -eq 8 ]
+    [ ! -x "$TEST_TEMP_DIR/installed/notify-codex.sh" ]
+}
+
+@test "doctor accepts explicit profile config paths and rejects unknown agents" {
+    cfg="$TEST_TEMP_DIR/custom profile.ts"
+    printf 'const cmd = "notify-omp.sh";\n' >"$cfg"
+    run tmux_notify_doctor_cli --agent-config "omp=$cfg"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"$cfg (wrapper text reference found; registration unverified)"* ]]
+    run tmux_notify_doctor_cli --agent-config "unknown=$cfg"
+    [ "$status" -eq 1 ]
+    run tmux_notify_doctor_cli --agent-config
+    [ "$status" -eq 1 ]
 }
