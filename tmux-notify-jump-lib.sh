@@ -106,6 +106,14 @@ log_debug() {
 # User Configuration
 # =============================================================================
 
+tmux_notify_config_path() {
+    if [ -n "${TMUX_NOTIFY_CONFIG:-}" ]; then
+        printf '%s' "$TMUX_NOTIFY_CONFIG"
+    elif [ -n "${HOME:-}" ]; then
+        printf '%s' "$HOME/.config/tmux-notify-jump/env"
+    fi
+}
+
 # Load user configuration from env file
 #
 # Loads environment variables from user's config file.
@@ -114,10 +122,8 @@ log_debug() {
 # Side effects:
 #   - Sources config file, setting exported variables
 load_user_config() {
-    local home="${HOME:-}"
-    [ -n "$home" ] || return 0
-
-    local cfg="${TMUX_NOTIFY_CONFIG:-$home/.config/tmux-notify-jump/env}"
+    local cfg=""
+    cfg="$(tmux_notify_config_path)"
     [ -f "$cfg" ] || return 0
 
     set +u
@@ -1942,11 +1948,11 @@ tmux_notify_shell_command() {
 # Carry the effective config, cache and socket into a popup/menu callback.
 # run-shell inherits the server environment, which may differ from this caller.
 tmux_notify_inbox_command() {
-    local cache="" path="${TMUX_NOTIFY_ENTRYPOINT:-}" config="${TMUX_NOTIFY_CONFIG:-}"
+    local cache="" path="${TMUX_NOTIFY_ENTRYPOINT:-}" config=""
     cache="$(tmux_notify_inbox_cache_root; printf '.')"
     cache="${cache%.}"
     [ -n "$path" ] || path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tmux-notify-jump"
-    [ -n "$config" ] || config="${HOME:-}/.config/tmux-notify-jump/env"
+    config="$(tmux_notify_config_path)"
     tmux_notify_shell_command env "TMUX_NOTIFY_CONFIG=$config" "XDG_CACHE_HOME=$cache" \
         "TMUX_NOTIFY_TMUX_SOCKET=${TMUX_NOTIFY_TMUX_SOCKET:-}" "$path" "$@"
 }
@@ -2193,7 +2199,8 @@ tmux_notify_doctor_private_path() {
 }
 
 tmux_notify_doctor() {
-    local config="${TMUX_NOTIFY_CONFIG:-${HOME:-}/.config/tmux-notify-jump/env}"
+    local config=""
+    config="$(tmux_notify_config_path)"
     local result=0 version="" server="" root="" pinned="" status="" hook_table=""
     printf 'tmux-notify-jump diagnostics\n'
     if [ -e "$config" ]; then
