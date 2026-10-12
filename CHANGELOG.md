@@ -13,12 +13,20 @@ Notable changes to tmux-notify-jump are documented in this file.
   configuration/socket paths, Inbox permissions, hooks, status and key binding.
 - Pane target resolution through process ancestry when a wrapper lacks
   `TMUX_PANE`, using one pane inventory and one optional process inventory.
+- `TMUX_NOTIFY_TARGET_ANCESTRY=0` disables ancestry targeting for shared
+  services; inherited `TMUX_PANE` still takes priority and must be accurate.
+- Doctor checks all eight wrapper executables, agent configuration text
+  references and required fzf options. Repeat `--agent-config <agent=path>`
+  for custom profile/project files; references do not prove hook registration.
 
 ### Changed
 
 - Ambient/current-client pane fallback now requires an explicit
   `*_NOTIFY_FALLBACK_TARGET` setting; `TMUX` alone identifies a server.
 - All Agent wrappers share priority normalization through the library.
+- Inbox next skips the invoking client's current pane without consuming its
+  notices. The picker marks that pane, limits menu labels and falls back to
+  menus when fzf lacks required options.
 
 ### Fixed
 
@@ -27,6 +35,11 @@ Notable changes to tmux-notify-jump are documented in this file.
   ambiguous picker ownership requires an explicit sender TTY.
 - Claude, Kimi and Grok focus-only default-message rewrites preserve source
   and priority metadata.
+- Inbox selection verifies the receiving client's location before clearing
+  both priorities for a pane, including without focus hooks. Failed navigation
+  retains notices; completely missing targets clear both stale entries.
+- Configuration loading, picker callbacks and doctor use one path resolver.
+- Target metadata preserves session names containing pipe characters.
 
 ## [1.3.0] - 2026-09-23
 
