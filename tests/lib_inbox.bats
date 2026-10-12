@@ -33,6 +33,8 @@ setup() {
     FAKE_PANE_EXISTS=1
     FAKE_WINDOW_EXISTS=1
     FAKE_SESSION_EXISTS=1
+    FAKE_DISPLAY_FAIL=0
+    FAKE_INVENTORY_FAIL=0
     FAKE_PANE_ROWS='%9|$1|@2|3|0|work'
 }
 
@@ -48,6 +50,7 @@ tmux_cmd() {
             printf '%s\n' "$FAKE_TMUX_VERSION"
             ;;
         display-message)
+            [ "$FAKE_DISPLAY_FAIL" -eq 0 ] || return 1
             if [ "${2:-}" = "-p" ] && [ "${3:-}" = '#{pid}' ]; then
                 printf '4242\n'
             elif [ "${2:-}" = "-p" ] && [ "${3:-}" = '#{socket_path}' ]; then
@@ -82,7 +85,22 @@ tmux_cmd() {
             [ -z "$FAKE_CLIENT_ROWS" ] || printf '%s\n' "$FAKE_CLIENT_ROWS"
             ;;
         list-panes)
-            printf '%s\n' "$FAKE_PANE_ROWS"
+            [ "$FAKE_INVENTORY_FAIL" -eq 0 ] || return 1
+            if [ "${4:-}" = '#{session_id}|#{window_id}|#{pane_id}' ]; then
+                if [ -n "${FAKE_SELECTION_ROWS+x}" ]; then
+                    printf '%s\n' "$FAKE_SELECTION_ROWS"
+                elif [ "$FAKE_PANE_EXISTS" -eq 1 ]; then
+                    printf '%s|%s|%s\n' "$FAKE_TARGET_SESSION_ID" "$FAKE_TARGET_WINDOW_ID" "$FAKE_TARGET_PANE_ID"
+                elif [ "$FAKE_WINDOW_EXISTS" -eq 1 ]; then
+                    printf '%s|%s|%%1\n' "$FAKE_TARGET_SESSION_ID" "$FAKE_TARGET_WINDOW_ID"
+                elif [ "$FAKE_SESSION_EXISTS" -eq 1 ]; then
+                    printf '%s|@99|%%1\n' "$FAKE_TARGET_SESSION_ID"
+                else
+                    printf '$99|@99|%%99\n'
+                fi
+            else
+                printf '%s\n' "$FAKE_PANE_ROWS"
+            fi
             ;;
         display-menu|display-popup)
             printf '%s\n' "$@" >"$TEST_TEMP_DIR/picker.args"
@@ -667,7 +685,7 @@ tmux_cmd() {
 
     root="$(tmux_notify_inbox_root)"
     [ -z "$(find "$root" -mindepth 1 -maxdepth 1 -type d ! -name '*.lock' -print -quit)" ]
-    run rg 'select-window -t @2' "$TMUX_LOG"
+    run rg -F 'select-window -t $1:@2' "$TMUX_LOG"
     [ "$status" -eq 0 ]
     run rg 'select-pane -t %9' "$TMUX_LOG"
     [ "$status" -eq 1 ]
@@ -723,6 +741,89 @@ tmux_cmd() {
 
     [ "$status" -eq 1 ]
     [ "$(tmux_notify_inbox_list | wc -l)" -eq 2 ]
+}
+
+@test "Inbox selection preserves both entries when all tmux queries fail" {
+    tmux_notify_inbox_enqueue '%9' attention Claude 'Permission'
+    tmux_notify_inbox_enqueue '%9' complete Claude 'Done'
+    id="$(printf '%s' '%9|complete' | sha256_hex_stdin)"
+    root="$(tmux_notify_inbox_root)"
+    FAKE_INBOX_ROOT="$root"
+    FAKE_DISPLAY_FAIL=1
+    FAKE_INVENTORY_FAIL=1
+    : >"$TMUX_LOG"
+
+    run tmux_notify_inbox_select "$id" /dev/pts/2
+
+    [ "$status" -eq 1 ]
+    [ "$(find "$root" -name pane_id | wc -l)" -eq 2 ]
+    run rg '^switch-client|^set-option' "$TMUX_LOG"
+    [ "$status" -eq 1 ]
+}
+
+@test "Inbox selection does not infer stale targets from failed or malformed inventory" {
+    tmux_notify_inbox_enqueue '%9' attention Claude 'Permission'
+    tmux_notify_inbox_enqueue '%9' complete Claude 'Done'
+    id="$(printf '%s' '%9|attention' | sha256_hex_stdin)"
+    FAKE_PANE_EXISTS=0
+    FAKE_WINDOW_EXISTS=0
+    FAKE_SESSION_EXISTS=0
+    FAKE_INVENTORY_FAIL=1
+    run tmux_notify_inbox_select "$id" /dev/pts/2
+    [ "$status" -eq 1 ]
+    FAKE_INVENTORY_FAIL=0
+    for FAKE_SELECTION_ROWS in '' '$99|@99|' '$99|@99|%99'$'\n''#{session_id}|@2|%9'; do
+        run tmux_notify_inbox_select "$id" /dev/pts/2
+        [ "$status" -eq 1 ]
+        [ "$(tmux_notify_inbox_list | wc -l)" -eq 2 ]
+    done
+}
+
+@test "Inbox closed pane follows its window into another session using one snapshot" {
+    tmux_notify_inbox_enqueue '%9' complete Claude 'Done'
+    id="$(printf '%s' '%9|complete' | sha256_hex_stdin)"
+    FAKE_PANE_EXISTS=0
+    FAKE_TARGET_SESSION_ID='$8'
+    : >"$TMUX_LOG"
+
+    tmux_notify_inbox_select "$id" /dev/pts/2
+
+    [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 0 ]
+    run rg -F 'switch-client -c /dev/pts/2 -t $8 ; select-window -t $8:@2' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+    [ "$(rg -c '^list-panes -a -F' "$TMUX_LOG")" -eq 1 ]
+}
+
+@test "Inbox closed pane prefers its recorded session when the window is linked" {
+    tmux_notify_inbox_enqueue '%9' complete Claude 'Done'
+    id="$(printf '%s' '%9|complete' | sha256_hex_stdin)"
+    FAKE_PANE_EXISTS=0
+    FAKE_SELECTION_ROWS=$'$8|@2|%1\n$1|@2|%1'
+
+    tmux_notify_inbox_select "$id" /dev/pts/2
+
+    run rg -F 'switch-client -c /dev/pts/2 -t $1 ; select-window -t $1:@2' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+    [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 0 ]
+}
+
+@test "Inbox corrupted empty session IDs cannot resolve an ambient target" {
+    tmux_notify_inbox_enqueue '%9' complete Claude 'Done'
+    id="$(printf '%s' '%9|complete' | sha256_hex_stdin)"
+    root="$(tmux_notify_inbox_root)"
+    printf '\n' >"$root/$id/session_id"
+    printf '\n' >"$root/$id/window_id"
+    FAKE_PANE_EXISTS=0
+    FAKE_WINDOW_EXISTS=0
+    FAKE_SESSION_EXISTS=0
+    : >"$TMUX_LOG"
+
+    run tmux_notify_inbox_select "$id" /dev/pts/2
+
+    [ "$status" -eq 1 ]
+    [ -z "$(tmux_notify_inbox_list)" ]
+    run rg '^switch-client|display-message -p -t' "$TMUX_LOG"
+    [ "$status" -eq 1 ]
 }
 
 @test "Inbox lock acquisition retries transient contention" {
@@ -1307,7 +1408,7 @@ FAKE
     [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 1 ]
 
     tmux_notify_inbox_select "$id" /dev/pts/2
-    run rg 'switch-client -c /dev/pts/2 -t \$8 ; select-window -t @20' "$TMUX_LOG"
+    run rg -F 'switch-client -c /dev/pts/2 -t $8 ; select-window -t $8:@20' "$TMUX_LOG"
     [ "$status" -eq 0 ]
     [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 0 ]
 }

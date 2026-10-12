@@ -40,6 +40,8 @@ Notable changes to tmux-notify-jump are documented in this file.
   retains notices; completely missing targets clear both stale entries.
 - Configuration loading, picker callbacks and doctor use one path resolver.
 - Target metadata preserves session names containing pipe characters.
+- Inbox selection retains notices when target inventory queries fail or are
+  incomplete, and follows a closed pane's window across session moves/links.
 
 ## [1.3.0] - 2026-09-23
 

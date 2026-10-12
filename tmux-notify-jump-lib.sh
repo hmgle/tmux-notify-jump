@@ -1854,12 +1854,6 @@ tmux_notify_inbox_ack_client() {
     [ -n "$pane" ] && tmux_notify_inbox_ack_pane "$pane"
 }
 
-tmux_notify_target_id_exists() {
-    local target="$1" format="$2" expected="$3" actual=""
-    actual="$(tmux_cmd display-message -p -t "$target" "$format" 2>/dev/null || true)"
-    [ "$actual" = "$expected" ]
-}
-
 tmux_notify_inbox_next() {
     local sender_tty="${1:-}" root="" list="" dir row="" current_pane=""
     root="$(tmux_notify_inbox_root)"
@@ -1895,19 +1889,35 @@ tmux_notify_inbox_select() {
     tmux_notify_inbox_entry_dir_is_valid "$selected" || return 0
     tmux_notify_inbox_entry_read "$selected"
     is_pane_id "$INBOX_PANE_ID" || return 1
-    # A pane may have moved or its session may have been renamed since enqueue.
-    local info="" sid wid pane name index client="" row="" target_pane="" target_window=""
-    info="$(tmux_notify_inbox_target_info "$INBOX_PANE_ID")"
-    IFS='|' read -r sid wid pane index name <<<"$info"
-    if [ "$pane" = "$INBOX_PANE_ID" ]; then
-        INBOX_SESSION_ID="$sid"
-        INBOX_WINDOW_ID="$wid"
-    fi
-    if tmux_notify_target_id_exists "$INBOX_PANE_ID" '#{pane_id}' "$INBOX_PANE_ID"; then
-        target_pane="$INBOX_PANE_ID"
-    elif tmux_notify_target_id_exists "$INBOX_WINDOW_ID" '#{window_id}' "$INBOX_WINDOW_ID"; then
-        target_window="$INBOX_WINDOW_ID"
-    elif ! tmux_notify_target_id_exists "$INBOX_SESSION_ID" '#{session_id}' "$INBOX_SESSION_ID"; then
+    # Missing IDs and failed queries are different: retire stale notices only
+    # after a successful, complete snapshot. Every live session has a pane.
+    # Identity-only rows also avoid delimiter issues with session/window names.
+    local inventory="" sid wid pane extra client="" row="" target_pane="" target_window=""
+    local pane_match="" window_match="" session_found=0
+    inventory="$(tmux_cmd list-panes -a -F '#{session_id}|#{window_id}|#{pane_id}' 2>/dev/null)" || return 1
+    [ -n "$inventory" ] || return 1
+    while IFS='|' read -r sid wid pane extra; do
+        # An unsupported format or truncated row is not evidence of absence.
+        [[ "$sid" =~ ^\$[0-9]+$ && "$wid" =~ ^@[0-9]+$ ]] || return 1
+        if ! is_pane_id "$pane" || [ -n "$extra" ]; then return 1; fi
+        if [ "$sid" = "$INBOX_SESSION_ID" ]; then session_found=1; fi
+        # A linked window may appear in several sessions. Prefer the recorded
+        # session when still linked there; otherwise follow a live owner.
+        if [ "$pane" = "$INBOX_PANE_ID" ] \
+            && { [ -z "$pane_match" ] || [ "$sid" = "$INBOX_SESSION_ID" ]; }; then
+            pane_match="$sid|$wid|$pane"
+        fi
+        if [ "$wid" = "$INBOX_WINDOW_ID" ] \
+            && { [ -z "$window_match" ] || [ "$sid" = "$INBOX_SESSION_ID" ]; }; then
+            window_match="$sid|$wid"
+        fi
+    done <<<"$inventory"
+    if [ -n "$pane_match" ]; then
+        IFS='|' read -r INBOX_SESSION_ID INBOX_WINDOW_ID target_pane <<<"$pane_match"
+    elif [ -n "$window_match" ]; then
+        IFS='|' read -r INBOX_SESSION_ID target_window <<<"$window_match"
+        INBOX_WINDOW_ID="$target_window"
+    elif [ "$session_found" -eq 0 ]; then
         tmux_notify_inbox_ack_pane "$INBOX_PANE_ID"
         return 1
     fi
@@ -1916,11 +1926,11 @@ tmux_notify_inbox_select() {
     client="$CLIENT_NAME"
     if [ -n "$target_pane" ]; then
         tmux_cmd switch-client -c "$client" -t "$INBOX_SESSION_ID" ';' \
-            select-window -t "$INBOX_WINDOW_ID" ';' \
+            select-window -t "$INBOX_SESSION_ID:$INBOX_WINDOW_ID" ';' \
             select-pane -t "$INBOX_PANE_ID" >/dev/null 2>&1 || return 1
     elif [ -n "$target_window" ]; then
         tmux_cmd switch-client -c "$client" -t "$INBOX_SESSION_ID" ';' \
-            select-window -t "$INBOX_WINDOW_ID" >/dev/null 2>&1 || return 1
+            select-window -t "$INBOX_SESSION_ID:$INBOX_WINDOW_ID" >/dev/null 2>&1 || return 1
     else
         tmux_cmd switch-client -c "$client" -t "$INBOX_SESSION_ID" >/dev/null 2>&1 || return 1
     fi

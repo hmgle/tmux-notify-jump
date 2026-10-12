@@ -233,6 +233,10 @@ acknowledging both priorities for that pane, including when focus hooks are not
 installed. A failed or unverified jump retains the notices. Closed panes keep
 the window/session fallback; successful fallback or an entirely stale target
 retires both priorities for the closed pane.
+Stale targets are cleared only after a successful pane inventory confirms
+their absence; failed or incomplete queries retain the notices. Window fallback
+follows a moved window's live session and prefers the recorded session when
+the window remains linked there.
 
 Picker options:
 
