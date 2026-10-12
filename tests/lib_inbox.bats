@@ -20,6 +20,7 @@ setup() {
     FAKE_TARGET_WINDOW_INDEX='3'
     FAKE_CLIENT_ROWS='0|10|/dev/pts/2|/dev/pts/2|222|$1|%1|work'
     FAKE_TMUX_VERSION='tmux 3.7'
+    FAKE_CLIENT_HEIGHT=24
     FAKE_SOCKET_PATH="$TMUX_NOTIFY_TMUX_SOCKET"
     FAKE_INBOX_ROOT=""
     FAKE_ATTENTION_COUNT=""
@@ -83,7 +84,15 @@ tmux_cmd() {
             fi
             ;;
         list-clients)
-            [ -z "$FAKE_CLIENT_ROWS" ] || printf '%s\n' "$FAKE_CLIENT_ROWS"
+            if [ "${3:-}" = '#{client_name}|#{client_tty}|#{client_height}' ]; then
+                if [ -n "${FAKE_CLIENT_DIMENSIONS+x}" ]; then
+                    printf '%s\n' "$FAKE_CLIENT_DIMENSIONS"
+                else
+                    printf '/dev/pts/2|/dev/pts/2|%s\n' "$FAKE_CLIENT_HEIGHT"
+                fi
+            else
+                [ -z "$FAKE_CLIENT_ROWS" ] || printf '%s\n' "$FAKE_CLIENT_ROWS"
+            fi
             ;;
         list-panes)
             [ "$FAKE_INVENTORY_FAIL" -eq 0 ] || return 1
@@ -1491,15 +1500,22 @@ FAKE
     [ "$status" -eq 0 ]
 }
 
-@test "Inbox picker menu paginates beyond its shortcut keys" {
+write_picker_entries() {
+    local root="" n
     root="$(tmux_notify_inbox_root)"
-    for n in {1..36}; do
+    for ((n = 1; n <= $1; n++)); do
         mkdir -p "$root/$n"
         printf 'complete\n' >"$root/$n/kind"
         printf '%%9\n' >"$root/$n/pane_id"
         printf 'Codex\n' >"$root/$n/source"
         printf '%s\n' "$n" >"$root/$n/first_ms"
+        printf 'Notice %s\n' "$n" >"$root/$n/title"
     done
+}
+
+@test "Inbox picker menu paginates beyond its shortcut keys" {
+    FAKE_CLIENT_HEIGHT=50
+    write_picker_entries 36
     tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
     args="$(cat "$TEST_TEMP_DIR/picker.args")"
     [[ "$args" == *'Next page'* ]]
@@ -1510,6 +1526,74 @@ FAKE
     [[ "$args" == *'Previous page'* ]]
     [[ "$args" != *'Next page'* ]]
     [[ "$args" == *'--inbox-select'* ]]
+}
+
+@test "Inbox menu pages fit a 24-row client including both navigation entries" {
+    write_picker_entries 60
+    for offset in 0 20 40; do
+        tmux_notify_inbox_pick --menu --offset "$offset" --sender-tty /dev/pts/2
+        args="$(cat "$TEST_TEMP_DIR/picker.args")"
+        line_count="$(wc -l <"$TEST_TEMP_DIR/picker.args")"
+        menu_height=$(((line_count - 9) / 3 + 2))
+        [ "$menu_height" -le 24 ]
+        [[ "$args" == *"Notice $((offset + 1))"* ]]
+        [[ "$args" == *"Notice $((offset + 20))"* ]]
+        if [ "$offset" -eq 0 ]; then
+            [[ "$args" != *'Previous page'* ]]
+        else
+            [[ "$args" == *'Previous page'* ]]
+        fi
+        if [ "$offset" -eq 40 ]; then
+            [[ "$args" != *'Next page'* ]]
+        else
+            [[ "$args" == *'Next page'* ]]
+        fi
+    done
+}
+
+@test "Inbox menu keeps the next offset when the terminal height changes" {
+    write_picker_entries 60
+    TMUX_NOTIFY_ENTRYPOINT=/bin/echo
+    tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+    callback="$(tail -n 1 "$TEST_TEMP_DIR/picker.args")"
+    # Decode the generated run-shell command into picker arguments.
+    run /bin/sh -c "exec /bin/sh -c ${callback#run-shell -b }"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'--offset 20'* ]]
+    FAKE_CLIENT_HEIGHT=14
+    tmux_notify_inbox_pick --menu --offset 20 --sender-tty /dev/pts/2
+    args="$(cat "$TEST_TEMP_DIR/picker.args")"
+    [[ "$args" == *'Notice 21'* ]]
+    [[ "$args" == *'Notice 30'* ]]
+    [[ "$args" != *'Notice 31'* ]]
+}
+
+@test "Inbox menu uses the invoking client height from a batch inventory" {
+    write_picker_entries 12
+    FAKE_CLIENT_ROWS=$'0|10|/dev/pts/2|/dev/pts/2|222|$1|%1|work\n0|20|/dev/pts/9|/dev/pts/9|999|$1|%2|work'
+    FAKE_CLIENT_DIMENSIONS=$'/dev/pts/2|/dev/pts/2|50\n/dev/pts/9|/dev/pts/9|10'
+
+    tmux_notify_inbox_pick --menu --sender-tty /dev/pts/9
+    args="$(cat "$TEST_TEMP_DIR/picker.args")"
+    [[ "$args" == *'Notice 6'* ]]
+    [[ "$args" != *'Notice 7'* ]]
+    [[ "$args" == *'Next page'* ]]
+    run rg -F 'list-clients -F #{client_name}|#{client_tty}|#{client_height}' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+}
+
+@test "Inbox menu prints the list without consuming entries on tiny or unknown clients" {
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    for height in 4 '' unknown; do
+        FAKE_CLIENT_HEIGHT="$height"
+        : >"$TMUX_LOG"
+        run tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+        [ "$status" -eq 0 ]
+        [[ "$output" == *'%9'* ]]
+        [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 1 ]
+        run rg '^display-menu' "$TMUX_LOG"
+        [ "$status" -eq 1 ]
+    done
 }
 
 @test "Inbox selection follows a moved pane and does not consume on a detached caller" {

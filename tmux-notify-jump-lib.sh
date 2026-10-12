@@ -2100,13 +2100,13 @@ tmux_notify_fzf_supported() {
 # auto: fzf popup on tmux >= 3.2, otherwise a paginated tmux >= 3.0 menu.
 # --inline runs fzf in the current terminal, including on older tmux versions.
 tmux_notify_inbox_pick() {
-    local kind="" source="" session="" since=0 query="" menu=0 inline=0 page=0
+    local kind="" source="" session="" since=0 query="" menu=0 inline=0 page=0 offset=""
     local sender_tty="${TMUX_NOTIFY_SENDER_TTY:-}"
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --menu) menu=1 ;;
             --inline) inline=1 ;;
-            --kind|--source|--session|--since|--query|--page|--sender-tty|--tmux-socket)
+            --kind|--source|--session|--since|--query|--page|--offset|--sender-tty|--tmux-socket)
                 local opt="$1"
                 shift
                 [ "$#" -gt 0 ] || die "$opt requires an argument"
@@ -2117,6 +2117,7 @@ tmux_notify_inbox_pick() {
                     --since) since="$1" ;;
                     --query) query="$1" ;;
                     --page) page="$1" ;;
+                    --offset) offset="$1" ;;
                     --sender-tty) sender_tty="$1" ;;
                     --tmux-socket) TMUX_NOTIFY_TMUX_SOCKET="$1" ;;
                 esac
@@ -2131,6 +2132,10 @@ tmux_notify_inbox_pick() {
     fi
     since=$((10#$since))
     page=$((10#$page))
+    if [ -n "$offset" ]; then
+        is_integer "$offset" || die '--offset requires a non-negative integer'
+        offset=$((10#$offset))
+    fi
     ensure_tmux_notify_socket_from_env
     require_tool tmux
     local rows="" row="" client="" command=""
@@ -2177,13 +2182,33 @@ tmux_notify_inbox_pick() {
     if [ -n "$query" ]; then
         rows="$(printf '%s\n' "$rows" | awk -v query="$query" 'index(tolower(substr($0, index($0, "\t") + 1)), tolower(query))')"
     fi
+    [ -n "$rows" ] || { printf 'Inbox has no matching items.\n'; return 0; }
+    local height="" page_size=35 dimensions="" dimension_client dimension_tty dimension_height
+    # Older tmux cannot reliably parse display-message -c. Match a batch client
+    # inventory instead, so another terminal's height cannot size this menu.
+    dimensions="$(tmux_cmd list-clients -F '#{client_name}|#{client_tty}|#{client_height}' 2>/dev/null)" || dimensions=""
+    while IFS='|' read -r dimension_client dimension_tty dimension_height; do
+        if [ "$dimension_client" = "$client" ] || [ "$dimension_tty" = "$client" ]; then
+            height="$dimension_height"
+            break
+        fi
+    done <<<"$dimensions"
+    if ! is_integer "$height" || [ "$height" -lt 5 ]; then
+        printf '%s\n' "$rows" | cut -f2-
+        warn 'Inbox menu needs a client at least 5 rows high; use --inline with fzf or --inbox-next'
+        return 0
+    fi
+    # tmux silently omits a menu taller than the client. Reserve two border
+    # rows and both navigation rows, including on the first and last pages.
+    height=$((10#$height))
+    if [ "$height" -lt 39 ]; then page_size=$((height - 4)); fi
     local -a items=() keys=(1 2 3 4 5 6 7 8 9 a b c d e f g h i j k l m n o p q r s t u v w x y z)
-    local id pane agent location age count title label n=0 shown=0 start=$((page * 35)) more=0
+    local id pane agent location age count title label n=0 shown=0 start="${offset:-$((page * page_size))}" more=0
     while IFS=$'\t' read -r id pane kind agent location age count title; do
         [ -n "$id" ] || continue
         n=$((n + 1))
         [ "$n" -gt "$start" ] || continue
-        if [ "$shown" -ge 35 ]; then more=1; break; fi
+        if [ "$shown" -ge "$page_size" ]; then more=1; break; fi
         label="$kind $agent $location ($age, x$count) $title"
         label="$(truncate_text 60 "$label")"
         label="${label//#/##}"
@@ -2191,12 +2216,16 @@ tmux_notify_inbox_pick() {
         items+=("$label" "${keys[$shown]}" "run-shell -b $(tmux_notify_shell_command "$command")")
         shown=$((shown + 1))
     done <<<"$rows"
-    if [ "$page" -gt 0 ]; then
-        command="$(tmux_notify_inbox_command --inbox-pick --menu --page "$((page - 1))" "${filters[@]}")"
+    # Offsets keep the next page contiguous if the terminal is resized between
+    # callbacks; recomputing page * capacity could skip pending entries.
+    if [ "$start" -gt 0 ]; then
+        local previous=$((start - page_size))
+        [ "$previous" -ge 0 ] || previous=0
+        command="$(tmux_notify_inbox_command --inbox-pick --menu --offset "$previous" "${filters[@]}")"
         items+=('Previous page' '[' "run-shell -b $(tmux_notify_shell_command "$command")")
     fi
     if [ "$more" -eq 1 ]; then
-        command="$(tmux_notify_inbox_command --inbox-pick --menu --page "$((page + 1))" "${filters[@]}")"
+        command="$(tmux_notify_inbox_command --inbox-pick --menu --offset "$((start + shown))" "${filters[@]}")"
         items+=('Next page' ']' "run-shell -b $(tmux_notify_shell_command "$command")")
     fi
     [ "${#items[@]}" -gt 0 ] || { printf 'Inbox has no matching items.\n'; return 0; }

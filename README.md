@@ -249,7 +249,9 @@ Picker options:
 - `--since <seconds>`: include items updated within this time (default `0`, all).
 - `--query <text>`: initial fzf search across the displayed fields.
 - `--menu`: use the numbered tmux menu; `--query` becomes a case-insensitive
-  substring filter. `[` and `]` move between pages of 35 items.
+  substring filter. `[` and `]` move between pages of up to 35 items. Page size
+  adapts to the invoking client's height, reserving borders and navigation rows.
+  A client smaller than 5 rows, or an unavailable height, prints the list.
 - `--inline`: run fzf in the current terminal instead of a popup.
 - `--sender-tty <tty>` and `--tmux-socket <path>`: identify the invoking client
   and server explicitly. The selected socket takes precedence over configuration
