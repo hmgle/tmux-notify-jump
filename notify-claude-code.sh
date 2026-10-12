@@ -194,10 +194,7 @@ case "$EVENT_NAME" in
         ;;
 esac
 
-NOTIFY_KIND="complete"
-case "$EVENT_NAME:$NOTIF_TYPE" in
-    PostToolUseFailure:*|Notification:permission_prompt|Notification:idle_prompt|Notification:elicitation_dialog) NOTIFY_KIND="attention" ;;
-esac
+NOTIFY_KIND="$(tmux_notify_event_kind claude "$EVENT_NAME" "$NOTIF_TYPE")"
 
 # Format title with optional event type
 TITLE="$(format_notify_title "Claude" "$EVENT_LABEL" "$TITLE_MSG" "$CLAUDE_SHOW_TYPE")"

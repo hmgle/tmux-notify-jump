@@ -127,10 +127,7 @@ case "$EVENT_NAME" in
         ;;
 esac
 
-NOTIFY_KIND="complete"
-case "$EVENT_NAME:$NOTIF_TYPE" in
-    post_tool_use_failure:*|notification:permission_prompt|notification:idle_prompt) NOTIFY_KIND="attention" ;;
-esac
+NOTIFY_KIND="$(tmux_notify_event_kind grok "$EVENT_NAME" "$NOTIF_TYPE")"
 
 TITLE="$(format_notify_title "Grok" "$EVENT_LABEL" "$TITLE_MSG" "$GROK_SHOW_TYPE")"
 ALLOW_FOCUS_FALLBACK="${GROK_NOTIFY_FOCUS_ONLY_FALLBACK:-${TMUX_NOTIFY_FOCUS_ONLY_FALLBACK:-1}}"

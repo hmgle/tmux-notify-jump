@@ -96,10 +96,7 @@ case "$EVENT_TYPE" in
         ;;
 esac
 
-NOTIFY_KIND="complete"
-case "$EVENT_TYPE" in
-    *permission*|*Permission*|*error*|*Error*|*failure*|*Failure*) NOTIFY_KIND="attention" ;;
-esac
+NOTIFY_KIND="$(tmux_notify_event_kind codex "$EVENT_TYPE")"
 
 # Format title with optional event type
 TITLE="$(format_notify_title "Codex" "$EVENT_TYPE" "$TITLE_MSG" "$CODEX_SHOW_TYPE")"

@@ -166,10 +166,7 @@ case "$EVENT_TYPE" in
         ;;
 esac
 
-NOTIFY_KIND="complete"
-case "$EVENT_TYPE" in
-    permission.asked|session.error) NOTIFY_KIND="attention" ;;
-esac
+NOTIFY_KIND="$(tmux_notify_event_kind opencode "$EVENT_TYPE")"
 
 # Format title with optional event type
 TITLE="$(format_notify_title "OpenCode" "$EVENT_TYPE" "$TITLE_MSG" "$OPENCODE_SHOW_TYPE")"

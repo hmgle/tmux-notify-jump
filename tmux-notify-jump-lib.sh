@@ -1671,6 +1671,29 @@ tmux_notify_inbox_clear_all() {
     return "$status"
 }
 
+# Wrappers normalize their native event/subtype here, then report through the
+# existing --notify-kind/--notify-source CLI contract. Keep payload extraction
+# and event whitelists in the adapter: lifecycle names differ between agents.
+tmux_notify_event_kind() {
+    local agent="$1" event="$2" subtype="${3:-}" kind=complete
+    case "$agent:$event:$subtype" in
+        claude:PostToolUseFailure:*|claude:Notification:permission_prompt|claude:Notification:idle_prompt|claude:Notification:elicitation_dialog|\
+        kimi:PermissionRequest:*|kimi:StopFailure:*|kimi:Notification:permission_prompt|kimi:Notification:idle_prompt|\
+        grok:post_tool_use_failure:*|grok:notification:permission_prompt|grok:notification:idle_prompt|\
+        opencode:permission.asked:*|opencode:session.error:*|step:ui_prompt_start:*)
+            kind=attention
+            ;;
+    esac
+    case "$agent" in
+        codex|pi|omp|step)
+            case "$event" in
+                *permission*|*Permission*|*error*|*Error*|*failure*|*Failure*) kind=attention ;;
+            esac
+            ;;
+    esac
+    printf '%s' "$kind"
+}
+
 # Only a per-agent override becomes a CLI argument. Unset/empty values inherit
 # the platform's global setting, including when a custom jump command is used.
 tmux_notify_agent_bell_arg() {

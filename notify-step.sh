@@ -148,10 +148,7 @@ case "$EVENT_NAME" in
         ;;
 esac
 
-NOTIFY_KIND="complete"
-case "$EVENT_NAME" in
-    ui_prompt_start|*permission*|*Permission*|*error*|*Error*|*failure*|*Failure*) NOTIFY_KIND="attention" ;;
-esac
+NOTIFY_KIND="$(tmux_notify_event_kind step "$EVENT_NAME")"
 
 # Format title with optional event type
 TITLE="$(format_notify_title "Step" "$EVENT_NAME" "$TITLE_MSG" "$STEP_SHOW_TYPE")"

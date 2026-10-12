@@ -146,10 +146,7 @@ case "$EVENT_NAME" in
         ;;
 esac
 
-NOTIFY_KIND="complete"
-case "$EVENT_NAME:$NOTIF_TYPE" in
-    PermissionRequest:*|StopFailure:*|Notification:permission_prompt|Notification:idle_prompt) NOTIFY_KIND="attention" ;;
-esac
+NOTIFY_KIND="$(tmux_notify_event_kind kimi "$EVENT_NAME" "$NOTIF_TYPE")"
 
 TITLE="$(format_notify_title "Kimi" "$EVENT_LABEL" "$TITLE_MSG" "$KIMI_SHOW_TYPE")"
 ALLOW_FOCUS_FALLBACK="${KIMI_NOTIFY_FOCUS_ONLY_FALLBACK:-${TMUX_NOTIFY_FOCUS_ONLY_FALLBACK:-1}}"
