@@ -251,7 +251,10 @@ Picker options:
 - `--menu`: use the numbered tmux menu; `--query` becomes a case-insensitive
   substring filter. `[` and `]` move between pages of up to 35 items. Page size
   adapts to the invoking client's height, reserving borders and navigation rows.
-  A client smaller than 5 rows, or an unavailable height, prints the list.
+  Labels also fit its width, counting wide Unicode characters and reserving
+  space for shortcuts and borders. Without Python, non-ASCII characters use a
+  conservative two-column budget. A client smaller than 5 rows or 9 columns,
+  or unavailable dimensions, prints the list.
 - `--inline`: run fzf in the current terminal instead of a popup.
 - `--sender-tty <tty>` and `--tmux-socket <path>`: identify the invoking client
   and server explicitly. The selected socket takes precedence over configuration

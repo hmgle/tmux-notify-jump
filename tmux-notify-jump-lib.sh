@@ -217,6 +217,67 @@ else:
     printf '%s' "$text"
 }
 
+# Truncate plain text by terminal columns, preserving complete UTF-8 characters.
+# Python handles wide and combining characters; without it, count every
+# non-ASCII character as two columns so the result still fits older tmux.
+truncate_text_columns() {
+    local max="$1" text="$2" out=""
+    [ "$max" -gt 0 ] || return 0
+    if command -v python3 >/dev/null 2>&1; then
+        if out="$(printf '%s' "$text" | python3 -c 'import ctypes, sys, unicodedata
+max_width = int(sys.argv[1])
+text = sys.stdin.read()
+wcwidth = ctypes.CDLL(None).wcwidth
+wcwidth.argtypes = [ctypes.c_wchar]
+wcwidth.restype = ctypes.c_int
+def columns(char):
+    width = wcwidth(char)
+    if width < 0:
+        return 2
+    # Newer Unicode tables may know wide characters absent from libc.
+    return max(width, 2 if unicodedata.east_asian_width(char) in ("W", "F") else 0)
+widths = [columns(char) for char in text]
+if sum(widths) <= max_width:
+    sys.stdout.write(text)
+else:
+    suffix = "..." if max_width >= 4 else "."
+    budget = max_width - len(suffix)
+    used = end = 0
+    for width in widths:
+        if used + width > budget:
+            break
+        used += width
+        end += 1
+    sys.stdout.write(text[:end] + suffix)
+' "$max" 2>/dev/null)"; then
+            printf '%s' "$out"
+            return 0
+        fi
+    fi
+
+    # Work in bytes even under a C locale, but copy whole UTF-8 sequences.
+    local LC_ALL=C byte bytes columns pos=0 used=0 prefix="" suffix='...'
+    [ "$max" -ge 4 ] || suffix='.'
+    local budget=$((max - ${#suffix}))
+    while [ "$pos" -lt "${#text}" ]; do
+        byte="${text:$pos:1}"
+        bytes=1 columns=1
+        case "$byte" in
+            [$'\xc2'-$'\xdf']) bytes=2 columns=2 ;;
+            [$'\xe0'-$'\xef']) bytes=3 columns=2 ;;
+            [$'\xf0'-$'\xf4']) bytes=4 columns=2 ;;
+        esac
+        used=$((used + columns))
+        if [ "$used" -le "$budget" ]; then prefix+="${text:$pos:$bytes}"; fi
+        pos=$((pos + bytes))
+    done
+    if [ "$used" -le "$max" ]; then
+        printf '%s' "$text"
+    else
+        printf '%s%s' "$prefix" "$suffix"
+    fi
+}
+
 # Remove leading and trailing whitespace from string
 #
 # Arguments:
@@ -2183,25 +2244,31 @@ tmux_notify_inbox_pick() {
         rows="$(printf '%s\n' "$rows" | awk -v query="$query" 'index(tolower(substr($0, index($0, "\t") + 1)), tolower(query))')"
     fi
     [ -n "$rows" ] || { printf 'Inbox has no matching items.\n'; return 0; }
-    local height="" page_size=35 dimensions="" dimension_client dimension_tty dimension_height
+    local height="" width="" page_size=35 dimensions="" dimension_client dimension_tty dimension_height dimension_width
     # Older tmux cannot reliably parse display-message -c. Match a batch client
-    # inventory instead, so another terminal's height cannot size this menu.
-    dimensions="$(tmux_cmd list-clients -F '#{client_name}|#{client_tty}|#{client_height}' 2>/dev/null)" || dimensions=""
-    while IFS='|' read -r dimension_client dimension_tty dimension_height; do
+    # inventory instead, so another terminal's dimensions cannot size this menu.
+    dimensions="$(tmux_cmd list-clients -F '#{client_name}|#{client_tty}|#{client_height}|#{client_width}' 2>/dev/null)" || dimensions=""
+    while IFS='|' read -r dimension_client dimension_tty dimension_height dimension_width; do
         if [ "$dimension_client" = "$client" ] || [ "$dimension_tty" = "$client" ]; then
             height="$dimension_height"
+            width="$dimension_width"
             break
         fi
     done <<<"$dimensions"
-    if ! is_integer "$height" || [ "$height" -lt 5 ]; then
+    if ! is_integer "$height" || [ "$height" -lt 5 ] || ! is_integer "$width" || [ "$width" -lt 9 ]; then
         printf '%s\n' "$rows" | cut -f2-
-        warn 'Inbox menu needs a client at least 5 rows high; use --inline with fzf or --inbox-next'
+        warn 'Inbox menu needs a client at least 5 rows high and 9 columns wide; use --inline with fzf or --inbox-next'
         return 0
     fi
     # tmux silently omits a menu taller than the client. Reserve two border
     # rows and both navigation rows, including on the first and last pages.
     height=$((10#$height))
+    width=$((10#$width))
     if [ "$height" -lt 39 ]; then page_size=$((height - 4)); fi
+    # Older tmux also silently omits wide menus. Allow four columns for border
+    # and padding, plus four for the space and single-character shortcut (x).
+    local label_width=$((width - 8))
+    [ "$label_width" -le 60 ] || label_width=60
     local -a items=() keys=(1 2 3 4 5 6 7 8 9 a b c d e f g h i j k l m n o p q r s t u v w x y z)
     local id pane agent location age count title label n=0 shown=0 start="${offset:-$((page * page_size))}" more=0
     while IFS=$'\t' read -r id pane kind agent location age count title; do
@@ -2210,7 +2277,7 @@ tmux_notify_inbox_pick() {
         [ "$n" -gt "$start" ] || continue
         if [ "$shown" -ge "$page_size" ]; then more=1; break; fi
         label="$kind $agent $location ($age, x$count) $title"
-        label="$(truncate_text 60 "$label")"
+        label="$(truncate_text_columns "$label_width" "$label")"
         label="${label//#/##}"
         command="$(tmux_notify_inbox_command --inbox-select "$id" --sender-tty "$sender_tty" --tmux-socket "${TMUX_NOTIFY_TMUX_SOCKET:-}")"
         items+=("$label" "${keys[$shown]}" "run-shell -b $(tmux_notify_shell_command "$command")")
@@ -2222,11 +2289,13 @@ tmux_notify_inbox_pick() {
         local previous=$((start - page_size))
         [ "$previous" -ge 0 ] || previous=0
         command="$(tmux_notify_inbox_command --inbox-pick --menu --offset "$previous" "${filters[@]}")"
-        items+=('Previous page' '[' "run-shell -b $(tmux_notify_shell_command "$command")")
+        label="$(truncate_text_columns "$label_width" 'Previous page')"
+        items+=("$label" '[' "run-shell -b $(tmux_notify_shell_command "$command")")
     fi
     if [ "$more" -eq 1 ]; then
         command="$(tmux_notify_inbox_command --inbox-pick --menu --offset "$((start + shown))" "${filters[@]}")"
-        items+=('Next page' ']' "run-shell -b $(tmux_notify_shell_command "$command")")
+        label="$(truncate_text_columns "$label_width" 'Next page')"
+        items+=("$label" ']' "run-shell -b $(tmux_notify_shell_command "$command")")
     fi
     [ "${#items[@]}" -gt 0 ] || { printf 'Inbox has no matching items.\n'; return 0; }
     tmux_cmd display-menu -c "$client" -T 'Inbox' -x C -y C "${items[@]}"

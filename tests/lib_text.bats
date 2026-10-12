@@ -121,3 +121,44 @@ load 'test_helper'
     # The text is 11 chars including newline, so it should truncate and add "..."
     [ "$result" = $'hello\nw...' ]
 }
+
+@test "truncate_text_columns: preserves text that fits including wide characters" {
+    [ "$(truncate_text_columns 6 'A通知B')" = 'A通知B' ]
+    [ "$(truncate_text_columns 5 'hello')" = 'hello' ]
+}
+
+@test "truncate_text_columns: reserves ellipsis columns without splitting Unicode" {
+    [ "$(truncate_text_columns 8 '通知已完成请检查结果')" = '通知...' ]
+    [ "$(truncate_text_columns 5 'A通知B')" = 'A...' ]
+    [ "$(truncate_text_columns 6 'A🚀𠮷BCD')" = 'A🚀...' ]
+}
+
+@test "truncate_text_columns: combining marks do not consume columns" {
+    command -v python3 >/dev/null 2>&1 || skip 'Python3 not available'
+    [ "$(truncate_text_columns 5 $'e\xcc\x81cole')" = $'e\xcc\x81cole' ]
+    [ "$(truncate_text_columns 4 $'e\xcc\x81cole')" = $'e\xcc\x81...' ]
+}
+
+@test "truncate_text_columns: handles budgets smaller than the ellipsis" {
+    [ "$(truncate_text_columns 0 '通知')" = '' ]
+    [ "$(truncate_text_columns 1 '通知')" = '.' ]
+    [ "$(truncate_text_columns 2 '通知')" = '.' ]
+    [ "$(truncate_text_columns 3 '通知')" = '通.' ]
+}
+
+@test "truncate_text_columns: works without Python in UTF-8 and C locales" {
+    command() {
+        if [ "${1:-}" = -v ] && [ "${2:-}" = python3 ]; then return 1; fi
+        builtin command "$@"
+    }
+    [ "$(truncate_text_columns 7 'A通知ABC')" = 'A通...' ]
+    [ "$(LC_ALL=C truncate_text_columns 7 'A通知ABC')" = 'A通...' ]
+    [ "$(truncate_text_columns 6 'A通知B')" = 'A通知B' ]
+    [ "$(truncate_text_columns 5 'hello world')" = 'he...' ]
+}
+
+@test "truncate_text_columns: falls back safely when Python fails" {
+    python3() { return 1; }
+    [ "$(truncate_text_columns 7 'A通知ABC')" = 'A通...' ]
+    [ "$(truncate_text_columns 6 'A通知B')" = 'A通知B' ]
+}

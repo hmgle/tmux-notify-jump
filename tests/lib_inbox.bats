@@ -21,6 +21,7 @@ setup() {
     FAKE_CLIENT_ROWS='0|10|/dev/pts/2|/dev/pts/2|222|$1|%1|work'
     FAKE_TMUX_VERSION='tmux 3.7'
     FAKE_CLIENT_HEIGHT=24
+    FAKE_CLIENT_WIDTH=80
     FAKE_SOCKET_PATH="$TMUX_NOTIFY_TMUX_SOCKET"
     FAKE_INBOX_ROOT=""
     FAKE_ATTENTION_COUNT=""
@@ -84,11 +85,11 @@ tmux_cmd() {
             fi
             ;;
         list-clients)
-            if [ "${3:-}" = '#{client_name}|#{client_tty}|#{client_height}' ]; then
+            if [ "${3:-}" = '#{client_name}|#{client_tty}|#{client_height}|#{client_width}' ]; then
                 if [ -n "${FAKE_CLIENT_DIMENSIONS+x}" ]; then
                     printf '%s\n' "$FAKE_CLIENT_DIMENSIONS"
                 else
-                    printf '/dev/pts/2|/dev/pts/2|%s\n' "$FAKE_CLIENT_HEIGHT"
+                    printf '/dev/pts/2|/dev/pts/2|%s|%s\n' "$FAKE_CLIENT_HEIGHT" "$FAKE_CLIENT_WIDTH"
                 fi
             else
                 [ -z "$FAKE_CLIENT_ROWS" ] || printf '%s\n' "$FAKE_CLIENT_ROWS"
@@ -1296,6 +1297,30 @@ bind-key -T prefix A run-shell -b "tmux-notify-jump --inbox-next"'
     [[ "$label" == *'...' ]]
 }
 
+@test "Inbox menu reserves shortcut and border columns on a narrow client" {
+    FAKE_CLIENT_WIDTH=50
+    tmux_notify_inbox_enqueue '%9' complete Codex "$(printf '%0500d' 0)"
+    tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+    label="$(sed -n '10p' "$TEST_TEMP_DIR/picker.args")"
+    [ "${#label}" -le 42 ]
+    [[ "$label" == *'...' ]]
+}
+
+@test "Inbox menu fits wide Unicode labels on an 80-column client" {
+    # Each U+901A character occupies two terminal columns and three UTF-8 bytes.
+    title="$(printf '%0500d' 0)"
+    title="${title//0/通}"
+    tmux_notify_inbox_enqueue '%9' complete Codex "$title"
+    tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+    label="$(sed -n '10p' "$TEST_TEMP_DIR/picker.args")"
+    ascii="${label//通/}"
+    bytes="$(printf '%s' "$label" | wc -c)"
+    columns=$((${#ascii} + (bytes - ${#ascii}) / 3 * 2))
+    [ "$columns" -le 60 ]
+    [[ "$label" == *'通'* ]]
+    [[ "$label" == *'...' ]]
+}
+
 @test "Inbox picker menu escapes tmux formats and carries config cache socket" {
     tmux_notify_inbox_enqueue '%9' complete Codex '#{pane_id}'
     TMUX_NOTIFY_ENTRYPOINT="$TEST_TEMP_DIR/path with quotes' and spaces/tmux-notify-jump"
@@ -1568,24 +1593,54 @@ write_picker_entries() {
     [[ "$args" != *'Notice 31'* ]]
 }
 
-@test "Inbox menu uses the invoking client height from a batch inventory" {
+@test "Inbox menu uses the invoking client dimensions from a batch inventory" {
     write_picker_entries 12
     FAKE_CLIENT_ROWS=$'0|10|/dev/pts/2|/dev/pts/2|222|$1|%1|work\n0|20|/dev/pts/9|/dev/pts/9|999|$1|%2|work'
-    FAKE_CLIENT_DIMENSIONS=$'/dev/pts/2|/dev/pts/2|50\n/dev/pts/9|/dev/pts/9|10'
+    FAKE_CLIENT_DIMENSIONS=$'/dev/pts/2|/dev/pts/2|50|80\n/dev/pts/9|/dev/pts/9|10|40'
 
     tmux_notify_inbox_pick --menu --sender-tty /dev/pts/9
     args="$(cat "$TEST_TEMP_DIR/picker.args")"
-    [[ "$args" == *'Notice 6'* ]]
-    [[ "$args" != *'Notice 7'* ]]
+    [ "$(rg -c -- '--inbox-select' "$TEST_TEMP_DIR/picker.args")" -eq 6 ]
     [[ "$args" == *'Next page'* ]]
-    run rg -F 'list-clients -F #{client_name}|#{client_tty}|#{client_height}' "$TMUX_LOG"
+    label="$(sed -n '10p' "$TEST_TEMP_DIR/picker.args")"
+    [ "${#label}" -le 32 ]
+    [[ "$label" == *'...' ]]
+    run rg -F 'list-clients -F #{client_name}|#{client_tty}|#{client_height}|#{client_width}' "$TMUX_LOG"
     [ "$status" -eq 0 ]
+}
+
+@test "Inbox menu truncates navigation labels on the narrowest supported client" {
+    FAKE_CLIENT_WIDTH=9
+    write_picker_entries 60
+    tmux_notify_inbox_pick --menu --offset 20 --sender-tty /dev/pts/2
+    # Every entry, including Previous/Next, has one label column plus (key).
+    labels="$(awk 'NR > 9 && (NR - 10) % 3 == 0' "$TEST_TEMP_DIR/picker.args")"
+    while IFS= read -r label; do
+        [ "$label" = '.' ]
+    done <<<"$labels"
+    args="$(cat "$TEST_TEMP_DIR/picker.args")"
+    [[ "$args" == *'--offset'* ]]
+    [ "$(wc -l <"$TEST_TEMP_DIR/picker.args")" -eq 75 ]
 }
 
 @test "Inbox menu prints the list without consuming entries on tiny or unknown clients" {
     tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
     for height in 4 '' unknown; do
         FAKE_CLIENT_HEIGHT="$height"
+        : >"$TMUX_LOG"
+        run tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+        [ "$status" -eq 0 ]
+        [[ "$output" == *'%9'* ]]
+        [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 1 ]
+        run rg '^display-menu' "$TMUX_LOG"
+        [ "$status" -eq 1 ]
+    done
+}
+
+@test "Inbox menu prints the list without consuming entries on tiny or unknown widths" {
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    for width in 8 '' unknown; do
+        FAKE_CLIENT_WIDTH="$width"
         : >"$TMUX_LOG"
         run tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
         [ "$status" -eq 0 ]
