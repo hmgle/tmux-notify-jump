@@ -1208,6 +1208,40 @@ prepare_tmux_jump_client() {
     log_debug "selected tmux client=$JUMP_CLIENT_NAME tty=$SENDER_CLIENT_TTY pid=$SENDER_CLIENT_PID session=$selected_session_name session_id=$selected_session_id pane=$selected_pane_id activity=$selected_activity"
 }
 
+# Verify the explicit ordinary client after navigation, before acknowledging.
+# Pane context is absent on older tmux: retain the existing session-only check.
+tmux_notify_verify_client_target() {
+    local client="$1" session="$2" pane="${3:-}" window="${4:-}" actual_window=""
+    local rows=""
+    rows="$(tmux_terminal_client_rows)"
+    local matched=0
+    local line=""
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        read_tmux_client_row "$line"
+        if [ "$CLIENT_NAME" != "$client" ] \
+            || [ "$CLIENT_SESSION_ID" != "$session" ]; then
+            continue
+        fi
+        # Old tmux releases do not expand #{pane_id} in client context. Verify
+        # the session only there instead of failing a jump that did happen.
+        if [ -z "$CLIENT_PANE_ID" ]; then
+            log_debug "client pane not reported; verified session only"
+        elif [ -n "$pane" ] && [ "$CLIENT_PANE_ID" != "$pane" ]; then
+            continue
+        elif [ -n "$window" ]; then
+            actual_window="$(tmux_cmd display-message -p -t "$CLIENT_PANE_ID" '#{window_id}' 2>/dev/null || true)"
+            [ "$actual_window" = "$window" ] || continue
+        fi
+        matched=1
+        break
+    done <<<"$rows"
+    if [ "$matched" -ne 1 ]; then
+        log_debug "client switch postcondition failed: client=$client target_session=$session target_pane=$pane target_window=$window rows=$rows"
+        return 1
+    fi
+}
+
 jump_to_pane() {
     if [ -z "${JUMP_CLIENT_NAME:-}" ]; then
         prepare_tmux_jump_client
@@ -1216,30 +1250,7 @@ jump_to_pane() {
         select-pane -t "$JUMP_TARGET_PANE_ID" 2>/dev/null; then
         die "Failed to switch terminal client $JUMP_CLIENT_NAME to $SESSION:$WINDOW.$PANE"
     fi
-
-    local rows=""
-    rows="$(tmux_terminal_client_rows)"
-    local matched=0
-    local line=""
-    while IFS= read -r line; do
-        [ -n "$line" ] || continue
-        read_tmux_client_row "$line"
-        if [ "$CLIENT_NAME" != "$JUMP_CLIENT_NAME" ] \
-            || [ "$CLIENT_SESSION_ID" != "$JUMP_TARGET_SESSION_ID" ]; then
-            continue
-        fi
-        # Old tmux releases do not expand #{pane_id} in client context. Verify
-        # the session only there instead of failing a jump that did happen.
-        if [ -z "$CLIENT_PANE_ID" ]; then
-            log_debug "client pane not reported; verified session only"
-        elif [ "$CLIENT_PANE_ID" != "$JUMP_TARGET_PANE_ID" ]; then
-            continue
-        fi
-        matched=1
-        break
-    done <<<"$rows"
-    if [ "$matched" -ne 1 ]; then
-        log_debug "client switch postcondition failed: client=$JUMP_CLIENT_NAME target_session=$JUMP_TARGET_SESSION_ID target_pane=$JUMP_TARGET_PANE_ID rows=$rows"
+    if ! tmux_notify_verify_client_target "$JUMP_CLIENT_NAME" "$JUMP_TARGET_SESSION_ID" "$JUMP_TARGET_PANE_ID"; then
         die "tmux client switch did not make $SESSION:$WINDOW.$PANE visible"
     fi
     tmux_notify_inbox_ack_pane "$JUMP_TARGET_PANE_ID"
@@ -1869,32 +1880,38 @@ tmux_notify_inbox_select() {
     tmux_notify_inbox_entry_read "$selected"
     is_pane_id "$INBOX_PANE_ID" || return 1
     # A pane may have moved or its session may have been renamed since enqueue.
-    local info="" sid wid pane name index client="" row=""
+    local info="" sid wid pane name index client="" row="" target_pane="" target_window=""
     info="$(tmux_notify_inbox_target_info "$INBOX_PANE_ID")"
     IFS='|' read -r sid wid pane name index <<<"$info"
     if [ "$pane" = "$INBOX_PANE_ID" ]; then
         INBOX_SESSION_ID="$sid"
         INBOX_WINDOW_ID="$wid"
     fi
+    if tmux_notify_target_id_exists "$INBOX_PANE_ID" '#{pane_id}' "$INBOX_PANE_ID"; then
+        target_pane="$INBOX_PANE_ID"
+    elif tmux_notify_target_id_exists "$INBOX_WINDOW_ID" '#{window_id}' "$INBOX_WINDOW_ID"; then
+        target_window="$INBOX_WINDOW_ID"
+    elif ! tmux_notify_target_id_exists "$INBOX_SESSION_ID" '#{session_id}' "$INBOX_SESSION_ID"; then
+        tmux_notify_inbox_ack_pane "$INBOX_PANE_ID"
+        return 1
+    fi
     row="$(tmux_notify_inbox_client "$sender_tty" "$INBOX_SESSION_ID")" || return 1
     read_tmux_client_row "$row"
     client="$CLIENT_NAME"
-    if tmux_notify_target_id_exists "$INBOX_PANE_ID" '#{pane_id}' "$INBOX_PANE_ID"; then
+    if [ -n "$target_pane" ]; then
         tmux_cmd switch-client -c "$client" -t "$INBOX_SESSION_ID" ';' \
             select-window -t "$INBOX_WINDOW_ID" ';' \
             select-pane -t "$INBOX_PANE_ID" >/dev/null 2>&1 || return 1
-    elif tmux_notify_target_id_exists "$INBOX_WINDOW_ID" '#{window_id}' "$INBOX_WINDOW_ID"; then
+    elif [ -n "$target_window" ]; then
         tmux_cmd switch-client -c "$client" -t "$INBOX_SESSION_ID" ';' \
             select-window -t "$INBOX_WINDOW_ID" >/dev/null 2>&1 || return 1
-    elif tmux_notify_target_id_exists "$INBOX_SESSION_ID" '#{session_id}' "$INBOX_SESSION_ID"; then
-        tmux_cmd switch-client -c "$client" -t "$INBOX_SESSION_ID" >/dev/null 2>&1 || return 1
     else
-        rm -rf "$selected" 2>/dev/null || true
-        tmux_notify_inbox_sync_counts
-        return 1
+        tmux_cmd switch-client -c "$client" -t "$INBOX_SESSION_ID" >/dev/null 2>&1 || return 1
     fi
-    rm -rf "$selected" 2>/dev/null || true
-    tmux_notify_inbox_sync_counts
+    tmux_notify_verify_client_target "$client" "$INBOX_SESSION_ID" "$target_pane" "$target_window" || return 1
+    # Visiting a pane acknowledges both priorities even without focus hooks.
+    # A verified window/session fallback also retires all notices for the dead pane.
+    tmux_notify_inbox_ack_pane "$INBOX_PANE_ID"
 }
 
 tmux_notify_inbox_list() {

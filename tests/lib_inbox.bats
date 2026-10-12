@@ -29,6 +29,7 @@ setup() {
     FAKE_BINDING=""
     FAKE_HOOK_COMMAND=""
     FAKE_SWITCH_FAIL=0
+    FAKE_SWITCH_NOOP=0
     FAKE_PANE_EXISTS=1
     FAKE_WINDOW_EXISTS=1
     FAKE_SESSION_EXISTS=1
@@ -66,7 +67,8 @@ tmux_cmd() {
                             && printf '%s\n' "$FAKE_TARGET_PANE_ID"
                         ;;
                     '#{window_id}')
-                        [ "$FAKE_WINDOW_EXISTS" -eq 1 ] && [ "${4:-}" = "$FAKE_TARGET_WINDOW_ID" ] \
+                        [ "$FAKE_WINDOW_EXISTS" -eq 1 ] \
+                            && { [ "${4:-}" = "$FAKE_TARGET_WINDOW_ID" ] || is_pane_id "${4:-}"; } \
                             && printf '%s\n' "$FAKE_TARGET_WINDOW_ID"
                         ;;
                     '#{session_id}')
@@ -122,7 +124,19 @@ tmux_cmd() {
             esac
             ;;
         switch-client)
-            [ "$FAKE_SWITCH_FAIL" -eq 0 ]
+            [ "$FAKE_SWITCH_FAIL" -eq 0 ] || return 1
+            [ "$FAKE_SWITCH_NOOP" -eq 0 ] || return 0
+            local row client_name="${3:-}" pane_id selected_pane="$FAKE_TARGET_PANE_ID"
+            [ "$FAKE_PANE_EXISTS" -eq 1 ] || selected_pane='%1'
+            local updated=""
+            while IFS= read -r row; do
+                IFS='|' read -r mode activity name tty pid sid pane_id session_name <<<"$row"
+                if [ "$name" = "$client_name" ]; then
+                    row="$mode|$activity|$name|$tty|$pid|$FAKE_TARGET_SESSION_ID|$selected_pane|$FAKE_TARGET_SESSION_NAME"
+                fi
+                updated+="$row"$'\n'
+            done <<<"$FAKE_CLIENT_ROWS"
+            FAKE_CLIENT_ROWS="${updated%$'\n'}"
             ;;
     esac
 }
@@ -670,6 +684,45 @@ tmux_cmd() {
     [ "$status" -eq 1 ]
     root="$(tmux_notify_inbox_root)"
     [ -z "$(find "$root" -mindepth 1 -maxdepth 1 -type d ! -name '*.lock' -print -quit)" ]
+}
+
+@test "Inbox selection acknowledges both priorities without installed focus hooks" {
+    tmux_notify_inbox_enqueue '%9' attention Claude 'Permission'
+    tmux_notify_inbox_enqueue '%9' complete Claude 'Done'
+    id="$(printf '%s' '%9|attention' | sha256_hex_stdin)"
+
+    tmux_notify_inbox_select "$id" /dev/pts/2
+
+    [ "$TMUX_NOTIFY_INBOX_ATTENTION" -eq 0 ]
+    [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 0 ]
+    [ -z "$(tmux_notify_inbox_list)" ]
+}
+
+@test "Inbox stale selection retires both priorities even without an attached client" {
+    tmux_notify_inbox_enqueue '%9' attention Claude 'Permission'
+    tmux_notify_inbox_enqueue '%9' complete Claude 'Done'
+    id="$(printf '%s' '%9|complete' | sha256_hex_stdin)"
+    FAKE_PANE_EXISTS=0
+    FAKE_WINDOW_EXISTS=0
+    FAKE_SESSION_EXISTS=0
+    FAKE_CLIENT_ROWS=''
+
+    run tmux_notify_inbox_select "$id" /dev/pts/gone
+
+    [ "$status" -eq 1 ]
+    [ -z "$(tmux_notify_inbox_list)" ]
+}
+
+@test "Inbox selection retains both priorities when switch reports success without moving" {
+    tmux_notify_inbox_enqueue '%9' attention Claude 'Permission'
+    tmux_notify_inbox_enqueue '%9' complete Claude 'Done'
+    id="$(printf '%s' '%9|complete' | sha256_hex_stdin)"
+    FAKE_SWITCH_NOOP=1
+
+    run tmux_notify_inbox_select "$id" /dev/pts/2
+
+    [ "$status" -eq 1 ]
+    [ "$(tmux_notify_inbox_list | wc -l)" -eq 2 ]
 }
 
 @test "Inbox lock acquisition retries transient contention" {

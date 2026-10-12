@@ -228,6 +228,11 @@ pane's last 80 lines as a preview. It shows priority, agent/source, current
 session/window/pane, age in seconds and count, sorted attention first and then
 oldest first. Session renames and pane moves are read from one live inventory.
 Enter jumps; Escape cancels without acknowledging anything.
+Successful selection verifies the ordinary client's session and pane before
+acknowledging both priorities for that pane, including when focus hooks are not
+installed. A failed or unverified jump retains the notices. Closed panes keep
+the window/session fallback; successful fallback or an entirely stale target
+retires both priorities for the closed pane.
 
 Picker options:
 
