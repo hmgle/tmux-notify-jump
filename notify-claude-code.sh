@@ -312,6 +312,8 @@ elif is_truthy "$ALLOW_FOCUS_FALLBACK"; then
             --timeout "$TIMEOUT_MS"
             --max-title "$MAX_TITLE"
             --max-body "$MAX_BODY"
+            --notify-kind "$NOTIFY_KIND"
+            --notify-source "Claude"
         )
     fi
     args=(--focus-only "${args[@]}")

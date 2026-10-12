@@ -65,3 +65,21 @@ EVENTS
         [ "$(tmux_notify_event_kind "$agent" tool.done)" = complete ]
     done
 }
+
+@test "focus-only default messages retain reporter source and priority" {
+    unset TMUX_PANE
+    while IFS='|' read -r wrapper source payload; do
+        rm -f "$CAPTURE_FILE"
+        run bash -c 'printf "%s" "$2" | "$1"' _ "$PROJECT_ROOT/notify-$wrapper.sh" "$payload"
+        [ "$status" -eq 0 ]
+        args="$(cat "$CAPTURE_FILE")"
+        [[ "$args" == *$'--notify-kind\ncomplete\n'* ]]
+        [[ "$args" == *$'--notify-source\n'"$source"$'\n'* ]]
+        [[ "$args" == *$'--focus-only\n'* ]]
+        [[ "$args" == *$'--body\nClick to focus terminal\n'* ]]
+    done <<'EVENTS'
+claude-code|Claude|{"hook_event_name":"Stop"}
+kimi-code|Kimi|{"hook_event_name":"Stop"}
+grok|Grok|{"hookEventName":"stop","reason":"end_turn"}
+EVENTS
+}
