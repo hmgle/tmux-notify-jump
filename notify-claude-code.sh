@@ -194,10 +194,7 @@ case "$EVENT_NAME" in
         ;;
 esac
 
-NOTIFY_KIND="complete"
-case "$EVENT_NAME:$NOTIF_TYPE" in
-    PostToolUseFailure:*|Notification:permission_prompt|Notification:idle_prompt|Notification:elicitation_dialog) NOTIFY_KIND="attention" ;;
-esac
+NOTIFY_KIND="$(tmux_notify_event_kind claude "$EVENT_NAME" "$NOTIF_TYPE")"
 
 # Format title with optional event type
 TITLE="$(format_notify_title "Claude" "$EVENT_LABEL" "$TITLE_MSG" "$CLAUDE_SHOW_TYPE")"
@@ -238,7 +235,7 @@ fi
 TARGET=""
 if command -v tmux >/dev/null 2>&1; then
     if tmux_cmd list-sessions >/dev/null 2>&1; then
-        TARGET="$(resolve_tmux_notify_target "$ALLOW_FALLBACK" 2>/dev/null || true)"
+        TARGET="$(resolve_tmux_notify_target "$ALLOW_FALLBACK" "${PPID:-}" 2>/dev/null || true)"
     else
         log_debug "tmux server not running"
     fi
@@ -315,6 +312,8 @@ elif is_truthy "$ALLOW_FOCUS_FALLBACK"; then
             --timeout "$TIMEOUT_MS"
             --max-title "$MAX_TITLE"
             --max-body "$MAX_BODY"
+            --notify-kind "$NOTIFY_KIND"
+            --notify-source "Claude"
         )
     fi
     args=(--focus-only "${args[@]}")

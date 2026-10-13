@@ -32,6 +32,11 @@ parse_tmux_integration_args() {
 }
 
 case "${1:-}" in
+    --doctor)
+        shift
+        tmux_notify_doctor_cli "$@"
+        exit $?
+        ;;
     --tmux-init)
         shift
         parse_tmux_integration_args "$@"
@@ -51,6 +56,32 @@ case "${1:-}" in
     --inbox-next)
         shift
         tmux_notify_inbox_next "${TMUX_NOTIFY_SENDER_TTY:-}"
+        exit $?
+        ;;
+    --inbox-pick)
+        shift
+        tmux_notify_inbox_pick "$@"
+        exit $?
+        ;;
+    --inbox-select)
+        [ "$#" -ge 2 ] || die '--inbox-select requires an entry ID'
+        INBOX_SELECTED_ID="$2"
+        shift 2
+        if [ "${1:-}" = --sender-tty ]; then
+            [ "$#" -ge 2 ] || die '--sender-tty requires an argument'
+            TMUX_NOTIFY_SENDER_TTY="$2"
+            shift 2
+        fi
+        parse_tmux_integration_args "$@"
+        tmux_notify_inbox_select "$INBOX_SELECTED_ID" "${TMUX_NOTIFY_SENDER_TTY:-}"
+        exit $?
+        ;;
+    --inbox-preview)
+        [ "$#" -ge 2 ] || die '--inbox-preview requires a pane ID'
+        INBOX_PREVIEW_PANE="$2"
+        shift 2
+        parse_tmux_integration_args "$@"
+        tmux_notify_inbox_preview "$INBOX_PREVIEW_PANE"
         exit $?
         ;;
     --inbox-clear-all)

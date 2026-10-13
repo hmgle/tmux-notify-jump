@@ -54,6 +54,10 @@ This repo contains:
 
 - `xdotool` for focusing the terminal window before jumping (the script auto-disables focusing if missing)
 - `python3` for safer Unicode truncation
+- `ps` for resolving wrapper targets through process ancestry when `TMUX_PANE`
+  is missing
+- `fzf` for the searchable Inbox picker; menus need tmux 3.0 and popups need
+  tmux 3.2 (see [tmux Inbox](#tmux-inbox))
 
 ### Wrappers (Codex/Claude/Kimi/Grok/OpenCode/Pi/Step/omp hooks)
 
@@ -157,6 +161,9 @@ Common options:
   are selected first by the tmux Inbox key.
 - `--notify-source <name>`: source label shown in remote tmux messages and the
   Inbox metadata.
+- `--inbox-pick [options]`: search the tmux Inbox and jump to a selected item.
+- `--doctor [--tmux-socket <path>] [--agent-config <agent=path>]`: print dependency and tmux integration
+  diagnostics without changing configuration, permissions or Inbox contents.
 
 ## Terminal bell over SSH
 
@@ -214,11 +221,70 @@ hooks, and the `prefix+N` binding, then reload the configured file with
 selects the oldest attention item first, then the oldest completion, and clears
 that exact pane as soon as it is visited. Repeated events for the same pane and
 priority collapse into one item with an updated count.
+The Inbox stores pending attention/completion events. A continuous
+`working / needs-input / done` view needs reliable start, resume and exit
+events across adapters. These are not consistently available, so lifecycle
+state is not inferred from silence between notifications.
 Inbox cache directories and metadata files are restricted to the current user.
 Notification bodies are used for immediate delivery but are not persisted.
+Run `tmux-notify-jump --inbox-pick` for a searchable fzf popup with the selected
+pane's last 80 lines as a preview. It shows priority, agent/source, current
+session/window/pane, age in seconds and count, sorted attention first and then
+oldest first. Session renames and pane moves are read from one live inventory.
+Enter jumps; Escape cancels without acknowledging anything.
+Successful selection verifies the ordinary client's session and pane before
+acknowledging both priorities for that pane, including when focus hooks are not
+installed. A failed or unverified jump retains the notices. Closed panes keep
+the window/session fallback; successful fallback or an entirely stale target
+retires both priorities for the closed pane.
+Stale targets are cleared only after a successful pane inventory confirms
+their absence; failed or incomplete queries retain the notices. Window fallback
+follows a moved window's live session and prefers the recorded session when
+the window remains linked there.
+
+Picker options:
+
+- `--kind attention|complete`, `--source <name>` and `--session <name-or-id>`:
+  exact filters; `--session` accepts the live name or stable `$N` session ID.
+- `--since <seconds>`: include items updated within this time (default `0`, all).
+- `--query <text>`: initial fzf search across the displayed fields.
+- `--menu`: use the numbered tmux menu; `--query` becomes a case-insensitive
+  substring filter. `[` and `]` move between pages of up to 35 items. Page size
+  adapts to the invoking client's height, reserving borders and navigation rows.
+  Labels also fit its width, reserving space for shortcuts and borders. Each
+  non-ASCII codepoint uses a conservative two-column budget because tmux and
+  system Unicode width tables can disagree. This can shorten accented or
+  combining text earlier; menu sizing does not require Python. A client smaller
+  than 5 rows or 9 columns, or unavailable dimensions, prints the list.
+- `--inline`: run fzf in the current terminal instead of a popup.
+- `--sender-tty <tty>` and `--tmux-socket <path>`: identify the invoking client
+  and server explicitly. The selected socket takes precedence over configuration
+  throughout menu, popup and preview callbacks.
+
+fzf is optional. Popups need tmux 3.2 (popup titles need 3.3). tmux 3.0–3.1,
+an unavailable or incompatible fzf, or a failed popup falls back to the menu.
+Older tmux prints the filtered list;
+`--inline` with fzf and `--inbox-next` remain available. A picker invoked outside a client needs
+`--sender-tty` if several ordinary terminals are attached. An explicitly named
+client that has detached is never replaced with another terminal.
+
+Examples and an optional second binding (the installed `prefix+N` stays a quick
+jump to the oldest item outside the invoking client's current pane):
+
+```bash
+tmux-notify-jump --inbox-pick --kind attention --session work --since 3600
+tmux-notify-jump --inbox-pick --query Codex
+tmux bind-key n run-shell -b 'TMUX_NOTIFY_SENDER_TTY="#{client_tty}" tmux-notify-jump --inbox-pick'
+```
+
 Inbox routing is active even before `--configure-tmux` installs its status,
 hooks, and binding. Set `TMUX_NOTIFY_REMOTE_MODE=desktop` to disable tmux Inbox
 storage and use desktop delivery only.
+
+`--inbox-next` skips the invoking client's current pane and leaves its entries
+pending. The picker marks that pane with `[current]` and lets you select it
+explicitly. Inbox list/picker/next operations maintain private permissions,
+expire old items and update counts as applicable; `--doctor` only reads state.
 
 Initialization pins the resolved Inbox directory in the tmux server so agent
 processes and `run-shell` hooks use the same location. To customize
@@ -276,11 +342,68 @@ acknowledgement, leaving Inbox entries armed until you visit them via
 
 macOS note: in `--ui notification` mode, if the script is detached (or `terminal-notifier` doesn’t support `-wait`), it falls back to `terminal-notifier -execute`, where any click triggers the jump (no separate “Dismiss” action). Use `--ui dialog` for explicit buttons.
 
+Agent wrappers first use `TMUX_PANE`. If it is absent, they take one tmux pane
+inventory and one optional `ps` process inventory to find the nearest pane root
+in the reporter's process ancestry. This works for hooks that lose `TMUX_PANE`
+while still running under the originating pane. `TMUX` alone identifies a
+server and does not establish pane ownership. Process ancestry identifies the
+pane that launched a process, which can differ from the session served by a
+persistent/shared daemon such as `codex app-server` or `opencode serve`.
+For those services, set `TMUX_NOTIFY_TARGET_ANCESTRY=0`, remove an inherited
+`TMUX_PANE` unless it belongs to the reporting session, and leave the agent's
+`*_NOTIFY_FALLBACK_TARGET=0`. Disabling ancestry does not override `TMUX_PANE`.
+Reliable daemon targeting needs a per-report session-to-pane binding. Session
+IDs and shared working directories alone do not establish that binding and
+are not used to guess ownership. With no reliable target,
+events use the existing focus-only fallback, or become a no-op when it is
+disabled. Ambient pane/most-recent-client fallback now requires explicitly
+enabling `*_NOTIFY_FALLBACK_TARGET`; upgrading can therefore stop jumps that
+previously went to an unrelated pane. Use an explicit `TMUX_NOTIFY_TMUX_SOCKET`
+when reporting to a non-default server without `TMUX`.
+
+Run `tmux-notify-jump --doctor` to check executable and server versions, optional
+dependencies, the effective configuration and socket paths, the pinned Inbox
+directory and its permissions, acknowledgement hooks, status segment and
+prefix binding. It probes fzf's required options with a noninteractive filter,
+checks all eight wrapper files for executability, and looks for wrapper text
+references in user-level agent configuration/bridge files. A text reference
+can be inactive or commented out; this check does not prove runtime hook
+registration or successful notification delivery. It never sends a
+notification or repairs state. `WARN` covers
+optional tools, older tmux capabilities and integrations that are absent or
+customized. `FAIL` means tmux/server access is unavailable or configuration/
+Inbox paths or permissions are invalid; the exit status is then `1`. Successful
+checks, including warnings, return `0`. Pass `--tmux-socket <path>` to inspect a
+specific server. Notification daemon action support and GUI activation still
+need a manual click test; installed executables alone do not establish those.
+Invalid `--agent-config` specifications fail before any diagnostic output or
+tmux queries. Server reachability is checked before optional dependencies and
+agent configuration, so an unavailable server stops those further checks.
+
+Agent checks use the installer's standard user-level locations and honor
+`CODEX_CONFIG_PATH`, `CLAUDE_CONFIG_PATH`, `KIMI_CONFIG_PATH`, `GROK_HOOKS_PATH`,
+`OPENCODE_PLUGIN_PATH`, `PI_EXTENSION_PATH`, `STEP_EXTENSION_PATH`, and
+`OMP_EXTENSION_PATH` when set. Runtime config precedence and profile selection
+are not inferred. For a custom/profile/project file, repeat `--agent-config
+<agent=path>` with `codex`, `claude`, `kimi`, `grok`, `opencode`, `pi`, `step`, or
+`omp`, for example:
+
+```bash
+tmux-notify-jump --doctor --agent-config omp="$HOME/.omp/profiles/work/agent/extensions/tmux-notify-jump.ts"
+```
+
 ## Environment variables
 
 CLI flags override environment variables where applicable.
 
-- `TMUX_NOTIFY_CONFIG`: optional env file to load before running (default: `~/.config/tmux-notify-jump/env`)
+- `TMUX_NOTIFY_CONFIG`: env file to load before running (unset defaults to
+  `~/.config/tmux-notify-jump/env`; explicitly empty disables file loading).
+  Relative paths resolve against the invocation directory and are fixed as
+  absolute paths before loading and generating callbacks. A caller without
+  `HOME` or an explicit config passes the same absence to popup/menu callbacks.
+- `TMUX_NOTIFY_TARGET_ANCESTRY`: resolve missing `TMUX_PANE` through process
+  ancestry (default: `1`). Set `0` for shared services whose launch pane does
+  not identify the reporting session; explicit `TMUX_PANE` still takes priority.
 - `TMUX_NOTIFY_JUMP_SH`: override the notification executable (a path or command
   on `PATH`). Pointing it at `tmux-notify-jump` itself, including a symlink or
   hardlink, uses normal platform dispatch. If a custom executable calls the
@@ -294,7 +417,9 @@ CLI flags override environment variables where applicable.
   `~/.cache/tmux-notify-jump/debug.log`).
 - `TMUX_NOTIFY_WINDOW_ID`: explicit X11 window id to focus (overrides auto-detection)
 - `TMUX_NOTIFY_TMUX_SOCKET`: tmux server socket path (passed to `tmux -S`; useful if you run multiple tmux servers)
-- `TMUX_NOTIFY_FALLBACK_TARGET`: if not running inside tmux, fall back to the most recently active tmux client pane as the jump target (`0` disables; default: `0`)
+- `TMUX_NOTIFY_FALLBACK_TARGET`: allow using tmux's current pane or the most
+  recently active ordinary client pane when the originating pane cannot be
+  identified (`0` disables; default: `0`). This may target unrelated work.
 - `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK`: when hooks run without tmux (missing or no server/target), fall back to `--focus-only` instead of no-op (`0` disables; default: `1`)
 - `TMUX_NOTIFY_UNATTACHED_FALLBACK`: policy when the target session has no identifiable ordinary client. The default `single` switches the server's sole ordinary client; it still refuses when there are zero or multiple ordinary clients. Set `none` for strict mode, which reports that the target is not visible instead of moving a terminal. Unknown values warn and fall back to `single`. On macOS the selected policy is forwarded to the notification click callback.
 - `TMUX_NOTIFY_REMOTE_MODE`: `tmux` (Inbox/status/remote `display-message`,

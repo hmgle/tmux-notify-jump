@@ -146,10 +146,7 @@ case "$EVENT_NAME" in
         ;;
 esac
 
-NOTIFY_KIND="complete"
-case "$EVENT_NAME:$NOTIF_TYPE" in
-    PermissionRequest:*|StopFailure:*|Notification:permission_prompt|Notification:idle_prompt) NOTIFY_KIND="attention" ;;
-esac
+NOTIFY_KIND="$(tmux_notify_event_kind kimi "$EVENT_NAME" "$NOTIF_TYPE")"
 
 TITLE="$(format_notify_title "Kimi" "$EVENT_LABEL" "$TITLE_MSG" "$KIMI_SHOW_TYPE")"
 ALLOW_FOCUS_FALLBACK="${KIMI_NOTIFY_FOCUS_ONLY_FALLBACK:-${TMUX_NOTIFY_FOCUS_ONLY_FALLBACK:-1}}"
@@ -183,7 +180,7 @@ fi
 TARGET=""
 if command -v tmux >/dev/null 2>&1; then
     if tmux_cmd list-sessions >/dev/null 2>&1; then
-        TARGET="$(resolve_tmux_notify_target "$ALLOW_FALLBACK" 2>/dev/null || true)"
+        TARGET="$(resolve_tmux_notify_target "$ALLOW_FALLBACK" "${PPID:-}" 2>/dev/null || true)"
     else
         log_debug "tmux server not running"
     fi
@@ -253,6 +250,8 @@ elif is_truthy "$ALLOW_FOCUS_FALLBACK"; then
             --timeout "$TIMEOUT_MS"
             --max-title "$MAX_TITLE"
             --max-body "$MAX_BODY"
+            --notify-kind "$NOTIFY_KIND"
+            --notify-source "Kimi"
         )
     fi
     args=(--focus-only "${args[@]}")

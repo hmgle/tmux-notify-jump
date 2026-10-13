@@ -148,10 +148,7 @@ case "$EVENT_NAME" in
         ;;
 esac
 
-NOTIFY_KIND="complete"
-case "$EVENT_NAME" in
-    ui_prompt_start|*permission*|*Permission*|*error*|*Error*|*failure*|*Failure*) NOTIFY_KIND="attention" ;;
-esac
+NOTIFY_KIND="$(tmux_notify_event_kind step "$EVENT_NAME")"
 
 # Format title with optional event type
 TITLE="$(format_notify_title "Step" "$EVENT_NAME" "$TITLE_MSG" "$STEP_SHOW_TYPE")"
@@ -179,7 +176,7 @@ fi
 TARGET=""
 if command -v tmux >/dev/null 2>&1; then
     if tmux_cmd list-sessions >/dev/null 2>&1; then
-        TARGET="$(resolve_tmux_notify_target "$ALLOW_FALLBACK" 2>/dev/null || true)"
+        TARGET="$(resolve_tmux_notify_target "$ALLOW_FALLBACK" "${PPID:-}" 2>/dev/null || true)"
     else
         log_debug "tmux server not running"
     fi

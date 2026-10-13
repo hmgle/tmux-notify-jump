@@ -2,6 +2,68 @@
 
 Notable changes to tmux-notify-jump are documented in this file.
 
+## [1.4.0] - 2026-10-13
+
+### Added
+
+- Searchable tmux Inbox via `--inbox-pick`: optional fzf popup, bounded pane
+  preview, kind/source/session/recency filters and paginated menu fallback.
+  The installed `prefix+N` quick-jump binding is retained.
+- Read-only `--doctor` diagnostics for dependencies, tmux capabilities,
+  configuration/socket paths, Inbox permissions, hooks, status and key binding.
+- Pane target resolution through process ancestry when a wrapper lacks
+  `TMUX_PANE`, using one pane inventory and one optional process inventory.
+- `TMUX_NOTIFY_TARGET_ANCESTRY=0` disables ancestry targeting for shared
+  services; inherited `TMUX_PANE` still takes priority and must be accurate.
+- Doctor checks all eight wrapper executables, agent configuration text
+  references and required fzf options. Repeat `--agent-config <agent=path>`
+  for custom profile/project files; references do not prove hook registration.
+  Invalid specifications fail before diagnostics; unreachable tmux servers
+  are reported before optional tool and agent configuration checks.
+
+### Changed
+
+- Ambient/current-client pane fallback now requires an explicit
+  `*_NOTIFY_FALLBACK_TARGET` setting; `TMUX` alone identifies a server.
+- All Agent wrappers share priority normalization through the library.
+- Inbox next skips the invoking client's current pane without consuming its
+  notices. The picker marks that pane, limits menu labels and falls back to
+  menus when fzf lacks required options.
+
+### Fixed
+
+- Inbox menu labels fit the invoking client's width, including wide Unicode
+  text, shortcuts and borders, so older tmux can display them in narrow terminals.
+  Non-ASCII codepoints always reserve two columns to cover libc, utf8proc and
+  tmux width-table differences, including emoji and decomposed Hangul.
+- Inbox menus fit the invoking client's height, including navigation rows;
+  pagination uses entry offsets to avoid skipping items after a terminal resize.
+- Inbox popups omit the unsupported title option on tmux 3.2 and fall back to
+  the menu if popup creation fails.
+- Inbox menu, popup and preview callbacks retain the explicitly selected tmux
+  socket even when user configuration names another server.
+- Inbox selection follows moved panes using live session/window IDs and refuses
+  to redirect a detached sender's jump to another terminal. Outside tmux,
+  ambiguous picker ownership requires an explicit sender TTY.
+- Claude, Kimi and Grok focus-only default-message rewrites preserve source
+  and priority metadata.
+- Inbox selection verifies the receiving client's location before clearing
+  both priorities for a pane, including without focus hooks. Failed navigation
+  retains notices; completely missing targets clear both stale entries.
+- Configuration loading, picker callbacks and doctor use one path resolver.
+- Relative configuration paths stay absolute across popup/menu working
+  directories. Explicitly empty configuration disables loading, so callbacks
+  cannot adopt another HOME's defaults when the caller had no config path.
+- Target metadata preserves session names containing pipe characters.
+- Inbox selection retains notices when target inventory queries fail or are
+  incomplete, and follows a closed pane's window across session moves/links.
+
+### Tests
+
+- Added focused coverage for Inbox configuration callbacks, target resolution,
+  diagnostics, reporter metadata, popup/menu compatibility, and Unicode menu
+  sizing. The suite now contains 451 tests.
+
 ## [1.3.0] - 2026-09-23
 
 ### Added

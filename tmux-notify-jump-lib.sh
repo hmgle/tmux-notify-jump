@@ -106,6 +106,26 @@ log_debug() {
 # User Configuration
 # =============================================================================
 
+tmux_notify_config_path() {
+    local path="" directory=""
+    # An explicit empty value disables loading, including inside callbacks
+    # whose server environment may supply a different HOME.
+    if [ -n "${TMUX_NOTIFY_CONFIG+x}" ]; then
+        path="$TMUX_NOTIFY_CONFIG"
+    elif [ -n "${HOME:-}" ]; then
+        path="$HOME/.config/tmux-notify-jump/env"
+    fi
+    case "$path" in
+        ''|/*) ;;
+        *)
+            directory="$(pwd -P && printf '.')" || return 1
+            directory="${directory%$'\n'.}"
+            path="${directory%/}/$path"
+            ;;
+    esac
+    printf '%s' "$path"
+}
+
 # Load user configuration from env file
 #
 # Loads environment variables from user's config file.
@@ -114,10 +134,13 @@ log_debug() {
 # Side effects:
 #   - Sources config file, setting exported variables
 load_user_config() {
-    local home="${HOME:-}"
-    [ -n "$home" ] || return 0
-
-    local cfg="${TMUX_NOTIFY_CONFIG:-$home/.config/tmux-notify-jump/env}"
+    local cfg=""
+    cfg="$(tmux_notify_config_path && printf '.')" || return 1
+    cfg="${cfg%.}"
+    # Freeze the effective path before sourcing: config files and later
+    # callbacks can change directory, and detached shells may change HOME.
+    TMUX_NOTIFY_CONFIG="$cfg"
+    export TMUX_NOTIFY_CONFIG
     [ -f "$cfg" ] || return 0
 
     set +u
@@ -194,6 +217,37 @@ else:
     printf '%s' "$text"
 }
 
+# Truncate plain text using a conservative terminal-column budget, preserving
+# complete UTF-8 characters. Count each non-ASCII codepoint as two columns:
+# libc, utf8proc and tmux's width overrides can disagree, even for zero-width
+# characters. A local width table cannot safely size another tmux server.
+truncate_text_columns() {
+    local max="$1" text="$2"
+    [ "$max" -gt 0 ] || return 0
+
+    # Work in bytes even under a C locale, but copy whole UTF-8 sequences.
+    local LC_ALL=C byte bytes columns pos=0 used=0 prefix="" suffix='...'
+    [ "$max" -ge 4 ] || suffix='.'
+    local budget=$((max - ${#suffix}))
+    while [ "$pos" -lt "${#text}" ]; do
+        byte="${text:$pos:1}"
+        bytes=1 columns=1
+        case "$byte" in
+            [$'\xc2'-$'\xdf']) bytes=2 columns=2 ;;
+            [$'\xe0'-$'\xef']) bytes=3 columns=2 ;;
+            [$'\xf0'-$'\xf4']) bytes=4 columns=2 ;;
+        esac
+        used=$((used + columns))
+        if [ "$used" -le "$budget" ]; then prefix+="${text:$pos:$bytes}"; fi
+        pos=$((pos + bytes))
+    done
+    if [ "$used" -le "$max" ]; then
+        printf '%s' "$text"
+    else
+        printf '%s%s' "$prefix" "$suffix"
+    fi
+}
+
 # Remove leading and trailing whitespace from string
 #
 # Arguments:
@@ -247,11 +301,13 @@ require_arg() {
 #   --target, --focus-only, --title, --body, --sender-tty, --tmux-socket
 #   --no-activate, --list, --dry-run, --quiet, --timeout, --ui
 #   --max-title, --max-body, --dedupe-ms, --bell, --no-bell, --detach, --notify-kind,
-#   --notify-source
+#   --notify-source, --inbox-pick, --doctor
 #
 # Special return values in _PARSE_CONSUMED:
 #   "help" - caller should print_usage and exit 0
 #   "end"  - end of options marker (--) was seen
+#   "inbox-pick" - delegate remaining args to tmux_notify_inbox_pick()
+#   "doctor" - delegate remaining args to tmux_notify_doctor_cli()
 #
 # Platform-specific options NOT handled (must be handled by caller):
 #   macOS: --bundle-id, --bundle-ids, --sender-pid, --action-callback, --cb-*
@@ -307,6 +363,14 @@ parse_common_opt() {
             # shellcheck disable=SC2034 # consumed by caller scripts
             LIST_ONLY=1
             _PARSE_CONSUMED=1
+            return 0
+            ;;
+        --inbox-pick)
+            _PARSE_CONSUMED="inbox-pick"
+            return 0
+            ;;
+        --doctor)
+            _PARSE_CONSUMED="doctor"
             return 0
             ;;
         --dry-run)
@@ -730,16 +794,59 @@ get_best_tmux_client_pane_id() {
     return 1
 }
 
+# Resolve only a pane whose root process is an ancestor of the reporter. Read
+# both inventories once; walking through ps per ancestor is slow for hooks.
+# ps is optional, and missing/dead roots or a broken ancestry are a no-match.
+tmux_notify_target_from_ancestry() {
+    local sender_pid="${1:-${PPID:-}}" panes="" processes=""
+    is_integer "$sender_pid" && [ "$sender_pid" -gt 1 ] || return 1
+    command -v ps >/dev/null 2>&1 || return 1
+    panes="$(tmux_cmd list-panes -a -F '#{pane_id}|#{pane_pid}|#{pane_dead}' 2>/dev/null)" || return 1
+    [ -n "$panes" ] || return 1
+    processes="$(ps -A -o pid=,ppid= 2>/dev/null)" || return 1
+    local pane=""
+    pane="$(printf '%s\n' "$processes" | awk -v inventory="$panes" -v pid="$sender_pid" '
+        BEGIN {
+            n = split(inventory, rows, "\n")
+            for (i = 1; i <= n; i++) {
+                split(rows[i], fields, "|")
+                if (fields[1] ~ /^%[0-9]+$/ && fields[2] ~ /^[0-9]+$/ && fields[3] != "1")
+                    panes[fields[2]] = fields[1]
+            }
+        }
+        $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ { parents[$1] = $2 }
+        END {
+            for (depth = 0; depth < 64 && pid > 1 && !seen[pid]++; depth++) {
+                if (pid in panes) { print panes[pid]; exit }
+                if (!(pid in parents)) exit
+                pid = parents[pid]
+            }
+        }
+    ')"
+    is_pane_id "$pane" || return 1
+    printf '%s' "$pane"
+}
+
 resolve_tmux_notify_target() {
-    local allow_fallback="${1:-0}"
+    local allow_fallback="${1:-0}" sender_pid="${2:-${PPID:-}}" pane=""
 
     if [ -n "${TMUX_PANE:-}" ] && is_pane_id "$TMUX_PANE"; then
         printf '%s' "$TMUX_PANE"
         return 0
     fi
 
+    if is_truthy "${TMUX_NOTIFY_TARGET_ANCESTRY:-1}"; then
+        pane="$(tmux_notify_target_from_ancestry "$sender_pid" || true)"
+        if is_pane_id "$pane"; then
+            printf '%s' "$pane"
+            return 0
+        fi
+    fi
+
+    # TMUX identifies a server, not the reporting pane. The ambient pane can
+    # belong to an unrelated client, especially for service-run agent hooks.
+    is_truthy "$allow_fallback" || return 1
     if [ -n "${TMUX:-}" ]; then
-        local pane=""
         pane="$(tmux_cmd display-message -p '#{pane_id}' 2>/dev/null || true)"
         if [ -n "$pane" ] && is_pane_id "$pane"; then
             printf '%s' "$pane"
@@ -753,12 +860,7 @@ resolve_tmux_notify_target() {
         fi
     fi
 
-    if is_truthy "$allow_fallback"; then
-        get_best_tmux_client_pane_id
-        return $?
-    fi
-
-    return 1
+    get_best_tmux_client_pane_id
 }
 
 # =============================================================================
@@ -1162,6 +1264,40 @@ prepare_tmux_jump_client() {
     log_debug "selected tmux client=$JUMP_CLIENT_NAME tty=$SENDER_CLIENT_TTY pid=$SENDER_CLIENT_PID session=$selected_session_name session_id=$selected_session_id pane=$selected_pane_id activity=$selected_activity"
 }
 
+# Verify the explicit ordinary client after navigation, before acknowledging.
+# Pane context is absent on older tmux: retain the existing session-only check.
+tmux_notify_verify_client_target() {
+    local client="$1" session="$2" pane="${3:-}" window="${4:-}" actual_window=""
+    local rows=""
+    rows="$(tmux_terminal_client_rows)"
+    local matched=0
+    local line=""
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        read_tmux_client_row "$line"
+        if [ "$CLIENT_NAME" != "$client" ] \
+            || [ "$CLIENT_SESSION_ID" != "$session" ]; then
+            continue
+        fi
+        # Old tmux releases do not expand #{pane_id} in client context. Verify
+        # the session only there instead of failing a jump that did happen.
+        if [ -z "$CLIENT_PANE_ID" ]; then
+            log_debug "client pane not reported; verified session only"
+        elif [ -n "$pane" ] && [ "$CLIENT_PANE_ID" != "$pane" ]; then
+            continue
+        elif [ -n "$window" ]; then
+            actual_window="$(tmux_cmd display-message -p -t "$CLIENT_PANE_ID" '#{window_id}' 2>/dev/null || true)"
+            [ "$actual_window" = "$window" ] || continue
+        fi
+        matched=1
+        break
+    done <<<"$rows"
+    if [ "$matched" -ne 1 ]; then
+        log_debug "client switch postcondition failed: client=$client target_session=$session target_pane=$pane target_window=$window rows=$rows"
+        return 1
+    fi
+}
+
 jump_to_pane() {
     if [ -z "${JUMP_CLIENT_NAME:-}" ]; then
         prepare_tmux_jump_client
@@ -1170,30 +1306,7 @@ jump_to_pane() {
         select-pane -t "$JUMP_TARGET_PANE_ID" 2>/dev/null; then
         die "Failed to switch terminal client $JUMP_CLIENT_NAME to $SESSION:$WINDOW.$PANE"
     fi
-
-    local rows=""
-    rows="$(tmux_terminal_client_rows)"
-    local matched=0
-    local line=""
-    while IFS= read -r line; do
-        [ -n "$line" ] || continue
-        read_tmux_client_row "$line"
-        if [ "$CLIENT_NAME" != "$JUMP_CLIENT_NAME" ] \
-            || [ "$CLIENT_SESSION_ID" != "$JUMP_TARGET_SESSION_ID" ]; then
-            continue
-        fi
-        # Old tmux releases do not expand #{pane_id} in client context. Verify
-        # the session only there instead of failing a jump that did happen.
-        if [ -z "$CLIENT_PANE_ID" ]; then
-            log_debug "client pane not reported; verified session only"
-        elif [ "$CLIENT_PANE_ID" != "$JUMP_TARGET_PANE_ID" ]; then
-            continue
-        fi
-        matched=1
-        break
-    done <<<"$rows"
-    if [ "$matched" -ne 1 ]; then
-        log_debug "client switch postcondition failed: client=$JUMP_CLIENT_NAME target_session=$JUMP_TARGET_SESSION_ID target_pane=$JUMP_TARGET_PANE_ID rows=$rows"
+    if ! tmux_notify_verify_client_target "$JUMP_CLIENT_NAME" "$JUMP_TARGET_SESSION_ID" "$JUMP_TARGET_PANE_ID"; then
         die "tmux client switch did not make $SESSION:$WINDOW.$PANE visible"
     fi
     tmux_notify_inbox_ack_pane "$JUMP_TARGET_PANE_ID"
@@ -1536,7 +1649,8 @@ tmux_notify_inbox_gc() {
 
 tmux_notify_inbox_target_info() {
     local target="$1"
-    tmux_cmd display-message -p -t "$target" '#{session_id}|#{window_id}|#{pane_id}|#{session_name}|#{window_index}' 2>/dev/null || true
+    # Keep the human label last: read's final field preserves embedded pipes.
+    tmux_cmd display-message -p -t "$target" '#{session_id}|#{window_id}|#{pane_id}|#{window_index}|#{session_name}' 2>/dev/null || true
 }
 
 tmux_notify_inbox_acquire_lock() {
@@ -1559,7 +1673,7 @@ tmux_notify_inbox_enqueue() {
     info="$(tmux_notify_inbox_target_info "$target")"
     [ -n "$info" ] || return 1
     local session_id window_id pane_id session_name window_index
-    IFS='|' read -r session_id window_id pane_id session_name window_index <<<"$info"
+    IFS='|' read -r session_id window_id pane_id window_index session_name <<<"$info"
     [ -n "$pane_id" ] || return 1
     local root="" now=""
     root="$(tmux_notify_inbox_root)"
@@ -1635,6 +1749,29 @@ tmux_notify_inbox_clear_all() {
     return "$status"
 }
 
+# Wrappers normalize their native event/subtype here, then report through the
+# existing --notify-kind/--notify-source CLI contract. Keep payload extraction
+# and event whitelists in the adapter: lifecycle names differ between agents.
+tmux_notify_event_kind() {
+    local agent="$1" event="$2" subtype="${3:-}" kind=complete
+    case "$agent:$event:$subtype" in
+        claude:PostToolUseFailure:*|claude:Notification:permission_prompt|claude:Notification:idle_prompt|claude:Notification:elicitation_dialog|\
+        kimi:PermissionRequest:*|kimi:StopFailure:*|kimi:Notification:permission_prompt|kimi:Notification:idle_prompt|\
+        grok:post_tool_use_failure:*|grok:notification:permission_prompt|grok:notification:idle_prompt|\
+        opencode:permission.asked:*|opencode:session.error:*|step:ui_prompt_start:*)
+            kind=attention
+            ;;
+    esac
+    case "$agent" in
+        codex|pi|omp|step)
+            case "$event" in
+                *permission*|*Permission*|*error*|*Error*|*failure*|*Failure*) kind=attention ;;
+            esac
+            ;;
+    esac
+    printf '%s' "$kind"
+}
+
 # Only a per-agent override becomes a CLI argument. Unset/empty values inherit
 # the platform's global setting, including when a custom jump command is used.
 tmux_notify_agent_bell_arg() {
@@ -1694,7 +1831,7 @@ tmux_notify_route_notification() {
     local session_id="" window_id="" pane_id="" session_name="" window_index=""
     local target_info_available=0
     if [ -n "$info" ]; then
-        IFS='|' read -r session_id window_id pane_id session_name window_index <<<"$info"
+        IFS='|' read -r session_id window_id pane_id window_index session_name <<<"$info"
         if [ -n "$session_id" ] && is_pane_id "$pane_id"; then
             target_info_available=1
         fi
@@ -1765,63 +1902,90 @@ tmux_notify_inbox_ack_client() {
     [ -n "$pane" ] && tmux_notify_inbox_ack_pane "$pane"
 }
 
-tmux_notify_target_id_exists() {
-    local target="$1" format="$2" expected="$3" actual=""
-    actual="$(tmux_cmd display-message -p -t "$target" "$format" 2>/dev/null || true)"
-    [ "$actual" = "$expected" ]
-}
-
 tmux_notify_inbox_next() {
-    local sender_tty="${1:-}" root="" list="" dir
+    local sender_tty="${1:-}" root="" list="" dir row="" current_pane=""
     root="$(tmux_notify_inbox_root)"
     local now=""
     now="$(now_ms)"
     tmux_notify_inbox_secure_dir "$root" 1 || return 1
     tmux_notify_inbox_gc "$root" "$now"
+    row="$(tmux_notify_inbox_client "$sender_tty" || true)"
+    if [ -n "$row" ]; then
+        read_tmux_client_row "$row"
+        current_pane="$CLIENT_PANE_ID"
+        sender_tty="${sender_tty:-$CLIENT_TTY}"
+    fi
     for dir in "$root"/*; do
         tmux_notify_inbox_entry_dir_is_valid "$dir" || continue
         tmux_notify_inbox_entry_read "$dir"
+        [ -z "$current_pane" ] || [ "$INBOX_PANE_ID" != "$current_pane" ] || continue
         local rank=1
         [ "${INBOX_KIND:-complete}" = "attention" ] && rank=0
         list+="$rank|${INBOX_FIRST_MS:-0}|${dir##*/}"$'\n'
     done
-    local selected_id="" selected=""
+    local selected_id=""
     selected_id="$(printf '%s' "$list" | sort -n -t '|' -k1,1 -k2,2 | head -n 1 | cut -d '|' -f3- || true)"
     [ -n "$selected_id" ] || { tmux_notify_inbox_sync_counts; return 0; }
+    tmux_notify_inbox_select "$selected_id" "$sender_tty"
+}
+
+tmux_notify_inbox_select() {
+    local selected_id="$1" sender_tty="${2:-}" root="" selected=""
+    tmux_notify_inbox_id_is_valid "$selected_id" || return 1
+    root="$(tmux_notify_inbox_root)"
     selected="$root/$selected_id"
+    tmux_notify_inbox_entry_dir_is_valid "$selected" || return 0
     tmux_notify_inbox_entry_read "$selected"
-    local client="" target_client="" row target_activity=0
-    while IFS= read -r row; do
-        [ -n "$row" ] || continue
-        read_tmux_client_row "$row"
-        if [ -n "$sender_tty" ] && [ "$CLIENT_TTY" = "$sender_tty" ]; then client="$CLIENT_NAME"; break; fi
-        [ "$CLIENT_SESSION_ID" = "$INBOX_SESSION_ID" ] || continue
-        if is_integer "$CLIENT_ACTIVITY" && [ "$CLIENT_ACTIVITY" -gt "$target_activity" ]; then
-            target_activity="$CLIENT_ACTIVITY"
-            target_client="$CLIENT_NAME"
-        elif [ -z "$target_client" ]; then
-            target_client="$CLIENT_NAME"
+    is_pane_id "$INBOX_PANE_ID" || return 1
+    # Missing IDs and failed queries are different: retire stale notices only
+    # after a successful, complete snapshot. Every live session has a pane.
+    # Identity-only rows also avoid delimiter issues with session/window names.
+    local inventory="" sid wid pane extra client="" row="" target_pane="" target_window=""
+    local pane_match="" window_match="" session_found=0
+    inventory="$(tmux_cmd list-panes -a -F '#{session_id}|#{window_id}|#{pane_id}' 2>/dev/null)" || return 1
+    [ -n "$inventory" ] || return 1
+    while IFS='|' read -r sid wid pane extra; do
+        # An unsupported format or truncated row is not evidence of absence.
+        [[ "$sid" =~ ^\$[0-9]+$ && "$wid" =~ ^@[0-9]+$ ]] || return 1
+        if ! is_pane_id "$pane" || [ -n "$extra" ]; then return 1; fi
+        if [ "$sid" = "$INBOX_SESSION_ID" ]; then session_found=1; fi
+        # A linked window may appear in several sessions. Prefer the recorded
+        # session when still linked there; otherwise follow a live owner.
+        if [ "$pane" = "$INBOX_PANE_ID" ] \
+            && { [ -z "$pane_match" ] || [ "$sid" = "$INBOX_SESSION_ID" ]; }; then
+            pane_match="$sid|$wid|$pane"
         fi
-    done <<<"$(tmux_terminal_client_rows)"
-    [ -n "$client" ] || client="$target_client"
-    [ -n "$client" ] || client="$(tmux_cmd display-message -p '#{client_name}' 2>/dev/null || true)"
-    [ -n "$client" ] || return 1
-    if tmux_notify_target_id_exists "$INBOX_PANE_ID" '#{pane_id}' "$INBOX_PANE_ID"; then
-        tmux_cmd switch-client -c "$client" -t "$INBOX_SESSION_ID" ';' \
-            select-window -t "$INBOX_WINDOW_ID" ';' \
-            select-pane -t "$INBOX_PANE_ID" >/dev/null 2>&1 || return 1
-    elif tmux_notify_target_id_exists "$INBOX_WINDOW_ID" '#{window_id}' "$INBOX_WINDOW_ID"; then
-        tmux_cmd switch-client -c "$client" -t "$INBOX_SESSION_ID" ';' \
-            select-window -t "$INBOX_WINDOW_ID" >/dev/null 2>&1 || return 1
-    elif tmux_notify_target_id_exists "$INBOX_SESSION_ID" '#{session_id}' "$INBOX_SESSION_ID"; then
-        tmux_cmd switch-client -c "$client" -t "$INBOX_SESSION_ID" >/dev/null 2>&1 || return 1
-    else
-        rm -rf "$selected" 2>/dev/null || true
-        tmux_notify_inbox_sync_counts
+        if [ "$wid" = "$INBOX_WINDOW_ID" ] \
+            && { [ -z "$window_match" ] || [ "$sid" = "$INBOX_SESSION_ID" ]; }; then
+            window_match="$sid|$wid"
+        fi
+    done <<<"$inventory"
+    if [ -n "$pane_match" ]; then
+        IFS='|' read -r INBOX_SESSION_ID INBOX_WINDOW_ID target_pane <<<"$pane_match"
+    elif [ -n "$window_match" ]; then
+        IFS='|' read -r INBOX_SESSION_ID target_window <<<"$window_match"
+        INBOX_WINDOW_ID="$target_window"
+    elif [ "$session_found" -eq 0 ]; then
+        tmux_notify_inbox_ack_pane "$INBOX_PANE_ID"
         return 1
     fi
-    rm -rf "$selected" 2>/dev/null || true
-    tmux_notify_inbox_sync_counts
+    row="$(tmux_notify_inbox_client "$sender_tty" "$INBOX_SESSION_ID")" || return 1
+    read_tmux_client_row "$row"
+    client="$CLIENT_NAME"
+    if [ -n "$target_pane" ]; then
+        tmux_cmd switch-client -c "$client" -t "$INBOX_SESSION_ID" ';' \
+            select-window -t "$INBOX_SESSION_ID:$INBOX_WINDOW_ID" ';' \
+            select-pane -t "$INBOX_PANE_ID" >/dev/null 2>&1 || return 1
+    elif [ -n "$target_window" ]; then
+        tmux_cmd switch-client -c "$client" -t "$INBOX_SESSION_ID" ';' \
+            select-window -t "$INBOX_SESSION_ID:$INBOX_WINDOW_ID" >/dev/null 2>&1 || return 1
+    else
+        tmux_cmd switch-client -c "$client" -t "$INBOX_SESSION_ID" >/dev/null 2>&1 || return 1
+    fi
+    tmux_notify_verify_client_target "$client" "$INBOX_SESSION_ID" "$target_pane" "$target_window" || return 1
+    # Visiting a pane acknowledges both priorities even without focus hooks.
+    # A verified window/session fallback also retires all notices for the dead pane.
+    tmux_notify_inbox_ack_pane "$INBOX_PANE_ID"
 }
 
 tmux_notify_inbox_list() {
@@ -1835,6 +1999,544 @@ tmux_notify_inbox_list() {
             "${INBOX_KIND:-complete}" "${INBOX_COUNT:-1}" \
             "$INBOX_PANE_ID" "$INBOX_SOURCE" "$INBOX_TITLE"
     done
+}
+
+# Quote generated callbacks for the shell used by tmux and fzf. POSIX single
+# quotes also work with /bin/sh and macOS's default Bash 3.2.
+tmux_notify_shell_command() {
+    local arg
+    for arg in "$@"; do
+        arg="${arg//\'/\'\\\'\'}"
+        printf "'%s' " "$arg"
+    done
+}
+
+# Carry the effective config, cache and socket into a popup/menu callback.
+# run-shell inherits the server environment, which may differ from this caller.
+# Callers also pass --tmux-socket so config loading cannot override the server.
+tmux_notify_inbox_command() {
+    local cache="" path="${TMUX_NOTIFY_ENTRYPOINT:-}" config=""
+    cache="$(tmux_notify_inbox_cache_root; printf '.')"
+    cache="${cache%.}"
+    [ -n "$path" ] || path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tmux-notify-jump"
+    config="$(tmux_notify_config_path && printf '.')" || return 1
+    config="${config%.}"
+    tmux_notify_shell_command env "TMUX_NOTIFY_CONFIG=$config" "XDG_CACHE_HOME=$cache" \
+        "TMUX_NOTIFY_TMUX_SOCKET=${TMUX_NOTIFY_TMUX_SOCKET:-}" "$path" "$@"
+}
+
+# Return an ordinary client row. An explicitly supplied TTY must still exist;
+# never move another terminal when the caller has detached in the meantime.
+tmux_notify_inbox_client() {
+    local sender_tty="${1:-}" session_id="${2:-}" rows="" row="" current=""
+    rows="$(tmux_terminal_client_rows)"
+    if [ -n "$sender_tty" ]; then
+        find_tmux_terminal_client_by_tty "$rows" "$sender_tty"
+        return $?
+    fi
+    if [ -n "$session_id" ]; then
+        row="$(best_tmux_terminal_client "$rows" "$session_id" || true)"
+        if [ -n "$row" ]; then printf '%s' "$row"; return 0; fi
+    fi
+    # Outside tmux, display-message returns an ambient client even when several
+    # terminals are attached. That is not evidence of who invoked the picker.
+    if [ -n "${TMUX:-}" ]; then
+        current="$(tmux_cmd display-message -p '#{client_name}' 2>/dev/null || true)"
+        while IFS= read -r row; do
+            [ -n "$row" ] || continue
+            read_tmux_client_row "$row"
+            if [ "$CLIENT_NAME" = "$current" ]; then printf '%s' "$row"; return 0; fi
+        done <<<"$rows"
+    fi
+    single_tmux_terminal_client "$rows"
+}
+
+# id, pane, kind, source, live location, age, count, title. One pane inventory
+# serves the entire list; the final human label may contain the separator.
+# Listing maintains private permissions, expiry and counts; only doctor is
+# strictly read-only.
+tmux_notify_inbox_picker_rows() {
+    local kind="${1:-}" source="${2:-}" session="${3:-}" since="${4:-0}"
+    local current_pane="${5:-}"
+    local root="" inventory="" now="" dir rows="" rank age last
+    root="$(tmux_notify_inbox_root)"
+    tmux_notify_inbox_secure_dir "$root" || return 1
+    now="$(now_ms)"
+    tmux_notify_inbox_gc "$root" "$now"
+    tmux_notify_inbox_sync_counts
+    inventory="$(tmux_cmd list-panes -a -F '#{pane_id}|#{session_id}|#{window_id}|#{window_index}|#{pane_index}|#{session_name}' 2>/dev/null)" || return 1
+    for dir in "$root"/*; do
+        tmux_notify_inbox_entry_dir_is_valid "$dir" || continue
+        tmux_notify_inbox_entry_read "$dir"
+        case "$INBOX_KIND" in attention|complete) ;; *) continue ;; esac
+        is_pane_id "$INBOX_PANE_ID" || continue
+        [ -z "$kind" ] || [ "$kind" = "$INBOX_KIND" ] || continue
+        [ -z "$source" ] || [ "$source" = "$INBOX_SOURCE" ] || continue
+        local pane sid wid win index name match="" fallback="" location=""
+        while IFS='|' read -r pane sid wid win index name; do
+            [ "$pane" = "$INBOX_PANE_ID" ] || continue
+            [ -n "$fallback" ] || fallback="$sid|$wid|$win|$index|$name"
+            if [ "$sid" = "$INBOX_SESSION_ID" ]; then
+                match="$sid|$wid|$win|$index|$name"
+                break
+            fi
+        done <<<"$inventory"
+        match="${match:-$fallback}"
+        if [ -n "$match" ]; then
+            IFS='|' read -r sid wid win index name <<<"$match"
+            location="$name:$win.$index"
+        else
+            sid="$INBOX_SESSION_ID"
+            name="$INBOX_SESSION_NAME"
+            location="$name:${INBOX_WINDOW_INDEX:-?} [closed pane]"
+        fi
+        [ -z "$session" ] || [ "$session" = "$sid" ] || [ "$session" = "$name" ] || continue
+        [ -z "$current_pane" ] || [ "$INBOX_PANE_ID" != "$current_pane" ] || location+=' [current]'
+        last="${INBOX_LAST_MS:-0}"
+        is_integer "$last" || last=0
+        age=0
+        [ "$now" -le "$last" ] || age=$(((now - last) / 1000))
+        [ "$since" -eq 0 ] || [ "$age" -le "$since" ] || continue
+        rank=1
+        [ "$INBOX_KIND" != attention ] || rank=0
+        # Strip terminal control bytes before rendering event text in a picker.
+        location="$(tmux_notify_compact_text "$location" | LC_ALL=C tr '\000-\037\177' ' ')"
+        local label="" agent=""
+        label="$(tmux_notify_compact_text "${INBOX_TITLE:-(untitled)}" | LC_ALL=C tr '\000-\037\177' ' ')"
+        agent="$(tmux_notify_compact_text "${INBOX_SOURCE:-tmux-notify-jump}" | LC_ALL=C tr '\000-\037\177' ' ')"
+        rows+="$rank"$'\t'"${INBOX_FIRST_MS:-0}"$'\t'"${dir##*/}"$'\t'"$INBOX_PANE_ID"$'\t'"$INBOX_KIND"$'\t'"$agent"$'\t'"$location"$'\t'"${age}s"$'\t'"${INBOX_COUNT:-1}"$'\t'"$label"$'\n'
+    done
+    printf '%s' "$rows" | sort -t $'\t' -k1,1n -k2,2n | cut -f3-
+}
+
+tmux_notify_inbox_preview() {
+    is_pane_id "${1:-}" || return 1
+    # -S includes history plus the visible screen; tail bounds the total rows.
+    tmux_cmd capture-pane -p -t "$1" -S -80 2>/dev/null | tail -n 80 || printf 'Pane is no longer available.\n'
+}
+
+# Probe the options used by the picker without opening a UI or running preview.
+# Ignore personal defaults just as the actual picker does.
+tmux_notify_fzf_supported() {
+    command -v fzf >/dev/null 2>&1 || return 1
+    local row=$'id\tprobe' selected=""
+    selected="$(printf '%s\n' "$row" | env FZF_DEFAULT_OPTS= FZF_DEFAULT_OPTS_FILE= FZF_DEFAULT_COMMAND= SHELL=/bin/sh \
+        fzf --filter=probe --delimiter=$'\t' --with-nth=2.. --no-sort --reverse --query='' \
+            --prompt='Inbox> ' --header='probe' --preview=':' \
+            --preview-window='down:40%:wrap' 2>/dev/null)" || return 1
+    # Some fzf versions print the transformed --with-nth fields in filter mode.
+    [ -n "$selected" ]
+}
+
+# auto: fzf popup on tmux >= 3.2, otherwise a paginated tmux >= 3.0 menu.
+# --inline runs fzf in the current terminal, including on older tmux versions.
+tmux_notify_inbox_pick() {
+    local kind="" source="" session="" since=0 query="" menu=0 inline=0 page=0 offset=""
+    local sender_tty="${TMUX_NOTIFY_SENDER_TTY:-}"
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --menu) menu=1 ;;
+            --inline) inline=1 ;;
+            --kind|--source|--session|--since|--query|--page|--offset|--sender-tty|--tmux-socket)
+                local opt="$1"
+                shift
+                [ "$#" -gt 0 ] || die "$opt requires an argument"
+                case "$opt" in
+                    --kind) kind="$1" ;;
+                    --source) source="$1" ;;
+                    --session) session="$1" ;;
+                    --since) since="$1" ;;
+                    --query) query="$1" ;;
+                    --page) page="$1" ;;
+                    --offset) offset="$1" ;;
+                    --sender-tty) sender_tty="$1" ;;
+                    --tmux-socket) TMUX_NOTIFY_TMUX_SOCKET="$1" ;;
+                esac
+                ;;
+            *) die "Unknown Inbox picker option: $1" ;;
+        esac
+        shift
+    done
+    case "$kind" in ''|attention|complete) ;; *) die '--kind must be attention or complete' ;; esac
+    if ! is_integer "$since" || ! is_integer "$page"; then
+        die '--since and --page require non-negative integers'
+    fi
+    since=$((10#$since))
+    page=$((10#$page))
+    if [ -n "$offset" ]; then
+        is_integer "$offset" || die '--offset requires a non-negative integer'
+        offset=$((10#$offset))
+    fi
+    ensure_tmux_notify_socket_from_env
+    require_tool tmux
+    local rows="" row="" client="" command=""
+    row="$(tmux_notify_inbox_client "$sender_tty" || true)"
+    local current_pane=""
+    if [ -n "$row" ]; then
+        read_tmux_client_row "$row"
+        current_pane="$CLIENT_PANE_ID"
+    fi
+    rows="$(tmux_notify_inbox_picker_rows "$kind" "$source" "$session" "$since" "$current_pane")" || return 1
+    if [ -z "$rows" ]; then printf 'Inbox has no matching items.\n'; return 0; fi
+    [ -n "$row" ] || { warn 'Inbox picker needs an ordinary tmux client; pass --sender-tty'; return 1; }
+    read_tmux_client_row "$row"
+    client="$CLIENT_NAME"
+    sender_tty="$CLIENT_TTY"
+    local -a filters=(--source "$source" --session "$session" --since "$since" --query "$query" --sender-tty "$sender_tty" --tmux-socket "${TMUX_NOTIFY_TMUX_SOCKET:-}")
+    [ -z "$kind" ] || filters+=(--kind "$kind")
+    if [ "$menu" -eq 0 ] && tmux_notify_fzf_supported; then
+        if [ "$inline" -eq 0 ] && tmux_notify_tmux_version_at_least 3 2; then
+            command="$(tmux_notify_inbox_command --inbox-pick --inline "${filters[@]}")"
+            local -a popup_args=(-c "$client" -E -w '85%' -h '75%')
+            # Popups exist in 3.2, but their title option arrived in 3.3.
+            if tmux_notify_tmux_version_at_least 3 3; then popup_args+=(-T 'Inbox'); fi
+            if tmux_cmd display-popup "${popup_args[@]}" "$command"; then return 0; fi
+            warn 'Inbox popup failed; falling back to the menu'
+        elif [ "$inline" -eq 1 ]; then
+            local selected="" result=0 preview=""
+            preview="$(tmux_notify_inbox_command --inbox-preview) {2} $(tmux_notify_shell_command --tmux-socket "${TMUX_NOTIFY_TMUX_SOCKET:-}")"
+            selected="$(printf '%s\n' "$rows" | env FZF_DEFAULT_OPTS= FZF_DEFAULT_OPTS_FILE= FZF_DEFAULT_COMMAND= SHELL=/bin/sh \
+                fzf --delimiter=$'\t' --with-nth=2.. --no-sort --reverse --query="$query" \
+                    --prompt='Inbox> ' --header='Enter: jump  Esc: cancel | pane kind agent location age count title' \
+                    --preview="$preview" --preview-window='down:40%:wrap')" || result=$?
+            case "$result" in 0) ;; 1|130) return 0 ;; *) return "$result" ;; esac
+            [ -n "$selected" ] || return 0
+            tmux_notify_inbox_select "${selected%%$'\t'*}" "$sender_tty"
+            return $?
+        fi
+    fi
+    if ! tmux_notify_tmux_version_at_least 3 0; then
+        printf '%s\n' "$rows" | cut -f2-
+        warn 'Interactive Inbox menus require tmux 3.0; use --inline with fzf or --inbox-next'
+        return 0
+    fi
+    if [ -n "$query" ]; then
+        rows="$(printf '%s\n' "$rows" | awk -v query="$query" 'index(tolower(substr($0, index($0, "\t") + 1)), tolower(query))')"
+    fi
+    [ -n "$rows" ] || { printf 'Inbox has no matching items.\n'; return 0; }
+    local height="" width="" page_size=35 dimensions="" dimension_client dimension_tty dimension_height dimension_width
+    # Older tmux cannot reliably parse display-message -c. Match a batch client
+    # inventory instead, so another terminal's dimensions cannot size this menu.
+    dimensions="$(tmux_cmd list-clients -F '#{client_name}|#{client_tty}|#{client_height}|#{client_width}' 2>/dev/null)" || dimensions=""
+    while IFS='|' read -r dimension_client dimension_tty dimension_height dimension_width; do
+        if [ "$dimension_client" = "$client" ] || [ "$dimension_tty" = "$client" ]; then
+            height="$dimension_height"
+            width="$dimension_width"
+            break
+        fi
+    done <<<"$dimensions"
+    if ! is_integer "$height" || [ "$height" -lt 5 ] || ! is_integer "$width" || [ "$width" -lt 9 ]; then
+        printf '%s\n' "$rows" | cut -f2-
+        warn 'Inbox menu needs a client at least 5 rows high and 9 columns wide; use --inline with fzf or --inbox-next'
+        return 0
+    fi
+    # tmux silently omits a menu taller than the client. Reserve two border
+    # rows and both navigation rows, including on the first and last pages.
+    height=$((10#$height))
+    width=$((10#$width))
+    if [ "$height" -lt 39 ]; then page_size=$((height - 4)); fi
+    # Older tmux also silently omits wide menus. Allow four columns for border
+    # and padding, plus four for the space and single-character shortcut (x).
+    local label_width=$((width - 8))
+    [ "$label_width" -le 60 ] || label_width=60
+    local -a items=() keys=(1 2 3 4 5 6 7 8 9 a b c d e f g h i j k l m n o p q r s t u v w x y z)
+    local id pane agent location age count title label n=0 shown=0 start="${offset:-$((page * page_size))}" more=0
+    while IFS=$'\t' read -r id pane kind agent location age count title; do
+        [ -n "$id" ] || continue
+        n=$((n + 1))
+        [ "$n" -gt "$start" ] || continue
+        if [ "$shown" -ge "$page_size" ]; then more=1; break; fi
+        label="$kind $agent $location ($age, x$count) $title"
+        label="$(truncate_text_columns "$label_width" "$label")"
+        label="${label//#/##}"
+        command="$(tmux_notify_inbox_command --inbox-select "$id" --sender-tty "$sender_tty" --tmux-socket "${TMUX_NOTIFY_TMUX_SOCKET:-}")"
+        items+=("$label" "${keys[$shown]}" "run-shell -b $(tmux_notify_shell_command "$command")")
+        shown=$((shown + 1))
+    done <<<"$rows"
+    # Offsets keep the next page contiguous if the terminal is resized between
+    # callbacks; recomputing page * capacity could skip pending entries.
+    if [ "$start" -gt 0 ]; then
+        local previous=$((start - page_size))
+        [ "$previous" -ge 0 ] || previous=0
+        command="$(tmux_notify_inbox_command --inbox-pick --menu --offset "$previous" "${filters[@]}")"
+        label="$(truncate_text_columns "$label_width" 'Previous page')"
+        items+=("$label" '[' "run-shell -b $(tmux_notify_shell_command "$command")")
+    fi
+    if [ "$more" -eq 1 ]; then
+        command="$(tmux_notify_inbox_command --inbox-pick --menu --offset "$((start + shown))" "${filters[@]}")"
+        label="$(truncate_text_columns "$label_width" 'Next page')"
+        items+=("$label" ']' "run-shell -b $(tmux_notify_shell_command "$command")")
+    fi
+    [ "${#items[@]}" -gt 0 ] || { printf 'Inbox has no matching items.\n'; return 0; }
+    tmux_cmd display-menu -c "$client" -T 'Inbox' -x C -y C "${items[@]}"
+}
+
+tmux_notify_tmux_version_at_least() {
+    local major="$1" minor="$2" version="" actual_major="" actual_minor=""
+    version="$(tmux_cmd display-message -p '#{version}' 2>/dev/null || true)"
+    [ -n "$version" ] || version="$(tmux_cmd -V 2>/dev/null || true)"
+    version="${version#tmux }"
+    if [[ "$version" =~ ^([0-9]+)\.([0-9]+) ]]; then
+        actual_major="${BASH_REMATCH[1]}"
+        actual_minor="${BASH_REMATCH[2]}"
+        [ "$actual_major" -gt "$major" ] || { [ "$actual_major" -eq "$major" ] && [ "$actual_minor" -ge "$minor" ]; }
+        return $?
+    fi
+    return 1
+}
+
+# Diagnostics never create/chmod state or install hooks. Optional capabilities
+# are warnings; broken server access or unsafe/unreadable state fails the check.
+TMUX_NOTIFY_DOCTOR_AGENTS=(codex claude kimi grok opencode pi step omp)
+
+tmux_notify_doctor_agent_config_index() {
+    local spec="$1" agent="${1%%=*}" path="${1#*=}" i
+    if [ "$spec" = "$path" ] || [ -z "$path" ]; then
+        printf 'Error: --agent-config requires agent=path\n' >&2
+        return 1
+    fi
+    for i in "${!TMUX_NOTIFY_DOCTOR_AGENTS[@]}"; do
+        if [ "$agent" = "${TMUX_NOTIFY_DOCTOR_AGENTS[$i]}" ]; then
+            printf '%s' "$i"
+            return 0
+        fi
+    done
+    printf 'Error: Unknown doctor agent: %s\n' "$agent" >&2
+    return 1
+}
+
+tmux_notify_doctor_cli() {
+    local -a agent_configs=()
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --tmux-socket)
+                shift
+                [ "$#" -gt 0 ] || die '--tmux-socket requires an argument'
+                TMUX_NOTIFY_TMUX_SOCKET="$1"
+                ;;
+            --agent-config)
+                shift
+                if [ "$#" -eq 0 ]; then
+                    printf 'Error: --agent-config requires agent=path\n' >&2
+                    return 1
+                fi
+                tmux_notify_doctor_agent_config_index "$1" >/dev/null || return 1
+                agent_configs+=("$1")
+                ;;
+            *) die "Unknown doctor option: $1" ;;
+        esac
+        shift
+    done
+    ensure_tmux_notify_socket_from_env
+    # Bash 3.2 treats an empty array as unset under nounset.
+    tmux_notify_doctor ${agent_configs[@]+"${agent_configs[@]}"}
+}
+
+tmux_notify_doctor_line() {
+    local level="$1" label="$2" value="${3:-}" clean=""
+    clean="$(tmux_notify_compact_text "$value" | LC_ALL=C tr '\000-\037\177' ' ')"
+    printf '%-4s %-24s %s\n' "$level" "$label" "$clean"
+}
+
+tmux_notify_doctor_tool() {
+    local tool="$1" purpose="$2" path=""
+    path="$(command -v "$tool" 2>/dev/null || true)"
+    if [ -n "$path" ]; then
+        tmux_notify_doctor_line OK "$tool" "$path ($purpose)"
+    else
+        tmux_notify_doctor_line WARN "$tool" "unavailable ($purpose)"
+    fi
+}
+
+tmux_notify_doctor_private_path() {
+    local path="$1" expected="$2" mode=""
+    [ ! -L "$path" ] && [ -O "$path" ] && [ -r "$path" ] && [ -w "$path" ] || return 1
+    if [ -d "$path" ]; then
+        [ "$expected" = 700 ] && [ -x "$path" ] || return 1
+    else
+        [ "$expected" = 600 ] && [ -f "$path" ] || return 1
+    fi
+    mode="$(stat -c '%a' "$path" 2>/dev/null || stat -f '%Lp' "$path" 2>/dev/null || true)"
+    [ "$mode" = "$expected" ]
+}
+
+# These are user-level installation paths, not proof of runtime registration.
+# Explicit agent=path inputs let diagnostics inspect profiles/project configs
+# without copying every agent's evolving path or config precedence rules.
+tmux_notify_doctor_agents() {
+    local base="" home="${HOME:-}" i=0 spec="" agent="" path=""
+    base="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local -a wrappers=(notify-codex.sh notify-claude-code.sh notify-kimi-code.sh notify-grok.sh notify-opencode.sh notify-pi.sh notify-step.sh notify-omp.sh)
+    local -a configs=(
+        "${CODEX_CONFIG_PATH:-$home/.codex/config.toml}"
+        "${CLAUDE_CONFIG_PATH:-$home/.claude/settings.json}"
+        "${KIMI_CONFIG_PATH:-$home/.kimi-code/config.toml}"
+        "${GROK_HOOKS_PATH:-${GROK_HOME:-$home/.grok}/hooks}/tmux-notify-jump.json"
+        "${OPENCODE_PLUGIN_PATH:-$home/.config/opencode/plugins}/tmux-notify-jump.ts"
+        "${PI_EXTENSION_PATH:-$home/.pi/agent/extensions}/tmux-notify-jump.ts"
+        "${STEP_EXTENSION_PATH:-$home/.stepcode/agent/extensions}/tmux-notify-jump.ts"
+        "${OMP_EXTENSION_PATH:-$home/.omp/agent/extensions}/tmux-notify-jump.ts"
+    )
+    for spec in "$@"; do
+        i="$(tmux_notify_doctor_agent_config_index "$spec")" || return 1
+        configs[i]="${spec#*=}"
+    done
+    for i in "${!TMUX_NOTIFY_DOCTOR_AGENTS[@]}"; do
+        agent="${TMUX_NOTIFY_DOCTOR_AGENTS[$i]}"
+        path="$base/${wrappers[$i]}"
+        if [ -f "$path" ] && [ -x "$path" ]; then
+            tmux_notify_doctor_line OK "Wrapper $agent" "$path (executable)"
+        else
+            tmux_notify_doctor_line WARN "Wrapper $agent" "$path (missing or not executable)"
+        fi
+        # TypeScript bridges invoke a command on PATH unless overridden.
+        case "$agent" in
+            opencode|pi|step|omp) tmux_notify_doctor_tool "${wrappers[$i]}" "$agent bridge default; *_NOTIFY_CMD may override" ;;
+        esac
+        path="${configs[$i]}"
+        if [ ! -f "$path" ] || [ ! -r "$path" ]; then
+            tmux_notify_doctor_line WARN "Config $agent" "$path (absent or unreadable; optional integration)"
+        elif LC_ALL=C awk -v needle="${wrappers[$i]}" 'index($0, needle) { found=1 } END { exit !found }' "$path"; then
+            tmux_notify_doctor_line OK "Config $agent" "$path (wrapper text reference found; registration unverified)"
+        else
+            tmux_notify_doctor_line WARN "Config $agent" "$path (no wrapper text reference; check hook/bridge configuration)"
+        fi
+    done
+}
+
+tmux_notify_doctor() {
+    local spec
+    for spec in "$@"; do
+        tmux_notify_doctor_agent_config_index "$spec" >/dev/null || return 1
+    done
+    local config=""
+    config="$(tmux_notify_config_path && printf '.')" || return 1
+    config="${config%.}"
+    local result=0 version="" server="" root="" pinned="" status="" hook_table=""
+    printf 'tmux-notify-jump diagnostics\n'
+    if [ -z "$config" ]; then
+        tmux_notify_doctor_line OK 'Configuration' '(unset) using environment/defaults'
+    elif [ -e "$config" ]; then
+        if [ -f "$config" ] && [ -r "$config" ]; then
+            tmux_notify_doctor_line OK 'Configuration' "$config"
+        else
+            tmux_notify_doctor_line FAIL 'Configuration' "$config (not a readable file)"
+            result=1
+        fi
+    else
+        tmux_notify_doctor_line WARN 'Configuration' "$config (absent; using environment/defaults)"
+    fi
+    tmux_notify_doctor_line OK 'Routing mode' "$(tmux_notify_remote_mode)"
+    if ! command -v tmux >/dev/null 2>&1; then
+        tmux_notify_doctor_line FAIL 'tmux' 'unavailable; Inbox and jump need tmux (focus-only remains available)'
+        return 1
+    fi
+    version="$(tmux_cmd -V 2>/dev/null || true)"
+    tmux_notify_doctor_line OK 'tmux executable' "$version"
+    server="$(tmux_cmd display-message -p '#{pid}' 2>/dev/null || true)"
+    if ! is_integer "$server"; then
+        tmux_notify_doctor_line FAIL 'tmux server' "not reachable; socket=${TMUX_NOTIFY_TMUX_SOCKET:-default (or TMUX)}"
+        return 1
+    fi
+    local socket=""
+    socket="$(tmux_cmd display-message -p '#{socket_path}' 2>/dev/null || true)"
+    version="$(tmux_cmd display-message -p '#{version}' 2>/dev/null || true)"
+    tmux_notify_doctor_line OK 'tmux server' "$version pid=$server socket=$socket"
+    if tmux_notify_fzf_supported; then
+        tmux_notify_doctor_line OK fzf "$(command -v fzf) (picker options supported)"
+    else
+        tmux_notify_doctor_line WARN fzf 'missing or picker options unsupported; falling back to tmux menu'
+    fi
+    tmux_notify_doctor_tool jq 'agent wrappers; missing jq makes hooks no-op'
+    tmux_notify_doctor_tool ps 'optional pane ancestry resolution'
+    tmux_notify_doctor_agents "$@" || return 1
+    case "$(uname -s 2>/dev/null || true)" in
+        Darwin)
+            tmux_notify_doctor_tool terminal-notifier 'desktop notifications'
+            tmux_notify_doctor_tool osascript 'desktop terminal activation'
+            ;;
+        *)
+            tmux_notify_doctor_tool notify-send 'desktop notifications'
+            tmux_notify_doctor_tool xdotool 'optional X11 terminal activation'
+            if [ -n "${DISPLAY:-}" ]; then
+                tmux_notify_doctor_line OK 'X11 display' "$DISPLAY"
+            else
+                tmux_notify_doctor_line WARN 'X11 display' 'unset; desktop focus unavailable (tmux/SSH still works)'
+            fi
+            ;;
+    esac
+    if tmux_notify_tmux_version_at_least 3 2; then
+        tmux_notify_doctor_line OK 'Inbox UI' 'popup and menu supported'
+    elif tmux_notify_tmux_version_at_least 3 0; then
+        tmux_notify_doctor_line WARN 'Inbox UI' 'menu supported; fzf popup needs tmux 3.2'
+    else
+        tmux_notify_doctor_line WARN 'Inbox UI' 'menus and acknowledgement hooks need tmux 3.0; use --inbox-next or --inline'
+    fi
+    root="$(tmux_notify_inbox_root)"
+    pinned="$(tmux_cmd show-option -gqv @tmux-notify-jump-inbox-root 2>/dev/null || true)"
+    if [ -z "$pinned" ]; then
+        tmux_notify_doctor_line WARN 'Pinned Inbox path' 'not initialized; run --tmux-init or reload configured tmux file'
+    elif ! tmux_notify_inbox_root_is_valid "$pinned"; then
+        tmux_notify_doctor_line FAIL 'Pinned Inbox path' "$pinned (invalid; using default path)"
+        result=1
+    else
+        tmux_notify_doctor_line OK 'Pinned Inbox path' "$pinned"
+    fi
+    if [ ! -e "$root" ] && [ ! -L "$root" ]; then
+        tmux_notify_doctor_line OK 'Inbox permissions' "$root (not created yet)"
+    elif ! tmux_notify_doctor_private_path "$root" 700; then
+        tmux_notify_doctor_line FAIL 'Inbox permissions' "$root (need an owned, readable/writable directory with mode 700)"
+        result=1
+    else
+        local entry file unsafe=0 entries=0
+        for entry in "$root"/*; do
+            tmux_notify_inbox_id_is_valid "${entry##*/}" || continue
+            entries=$((entries + 1))
+            if ! tmux_notify_doctor_private_path "$entry" 700; then unsafe=1; continue; fi
+            for file in "$entry"/*; do
+                [ -e "$file" ] || [ -L "$file" ] || continue
+                if ! tmux_notify_doctor_private_path "$file" 600; then unsafe=1; fi
+            done
+        done
+        if [ "$unsafe" -eq 1 ]; then
+            tmux_notify_doctor_line FAIL 'Inbox permissions' "$root (unsafe entry ownership, permissions or symlinks)"
+            result=1
+        else
+            tmux_notify_doctor_line OK 'Inbox permissions' "$root ($entries entries; directories 700, files 600)"
+        fi
+    fi
+    status="$(tmux_cmd show-option -gqv status-right 2>/dev/null || true)"
+    if ! is_truthy "${TMUX_NOTIFY_TMUX_STATUS:-1}"; then
+        tmux_notify_doctor_line OK 'Status segment' 'disabled by TMUX_NOTIFY_TMUX_STATUS'
+    elif [[ "$status" == *"$(tmux_notify_tmux_status_segment)"* ]]; then
+        tmux_notify_doctor_line OK 'Status segment' 'installed in global status-right (session overrides may hide it)'
+    else
+        tmux_notify_doctor_line WARN 'Status segment' 'missing or customized; reload tmux config or run --tmux-init'
+    fi
+    hook_table="$(tmux_cmd show-hooks -g 2>/dev/null || true)"
+    local hook command
+    for hook in client-attached client-session-changed after-select-pane after-select-window client-focus-in; do
+        command="$(tmux_notify_tmux_hook_command "$hook" "$hook_table")"
+        if tmux_notify_tmux_is_ack_command "$command"; then
+            tmux_notify_doctor_line OK "Hook $hook" 'acknowledgement installed at [900]'
+        elif [ -n "$command" ]; then
+            tmux_notify_doctor_line WARN "Hook $hook" 'slot [900] occupied by another command'
+        else
+            tmux_notify_doctor_line WARN "Hook $hook" 'acknowledgement missing; reload configured tmux file'
+        fi
+    done
+    local key="" binding=""
+    key="$(tmux_cmd show-option -gqv @tmux-notify-jump-key 2>/dev/null || true)"
+    key="${TMUX_NOTIFY_TMUX_KEY:-${key:-N}}"
+    binding="$(tmux_notify_tmux_prefix_binding "$key")"
+    if [[ "$binding" == *--inbox-next* ]]; then
+        tmux_notify_doctor_line OK 'Inbox binding' "prefix+$key jumps to next item"
+    elif [ -n "$binding" ]; then
+        tmux_notify_doctor_line WARN 'Inbox binding' "prefix+$key belongs to another command"
+    else
+        tmux_notify_doctor_line WARN 'Inbox binding' "prefix+$key missing; reload configured tmux file"
+    fi
+    return "$result"
 }
 
 tmux_notify_tmux_major_version() {

@@ -73,6 +73,11 @@ setup() {
     [ "$_PARSE_CONSUMED" = "end" ]
 }
 
+@test "parse_common_opt: delegates Inbox picker options" {
+    parse_common_opt --inbox-pick --kind attention
+    [ "$_PARSE_CONSUMED" = inbox-pick ]
+}
+
 @test "parse_common_opt: returns failure for unknown option" {
     if parse_common_opt --not-a-real-option; then
         status=0

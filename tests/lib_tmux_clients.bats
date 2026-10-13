@@ -12,6 +12,46 @@ teardown() {
     teardown_temp_dir
 }
 
+@test "Inbox picker excludes control clients and refuses ambiguous ownership" {
+    unset TMUX
+    tmux_cmd() {
+        case "$1" in
+            list-clients)
+                printf '1|30|control|/dev/pts/control|900|$1|%%9|work\n'
+                printf '0|20|ordinary|/dev/pts/1|100|$1|%%1|work\n'
+                printf '0|10|other|/dev/pts/2|200|$2|%%2|other\n'
+                ;;
+            display-message) printf 'control\n' ;;
+        esac
+    }
+    run tmux_notify_inbox_client /dev/pts/control
+    [ "$status" -eq 1 ]
+    run tmux_notify_inbox_client
+    [ "$status" -eq 1 ]
+    run tmux_notify_inbox_client /dev/pts/1
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'ordinary|/dev/pts/1'* ]]
+}
+
+@test "Inbox picker outside tmux refuses the ambient client when several are attached" {
+    unset TMUX
+    tmux_cmd() {
+        case "$1" in
+            list-clients)
+                printf '0|20|ordinary|/dev/pts/1|100|$1|%%1|work\n'
+                printf '0|10|other|/dev/pts/2|200|$2|%%2|other\n'
+                ;;
+            display-message) printf 'ordinary\n' ;;
+        esac
+    }
+    run tmux_notify_inbox_client
+    [ "$status" -eq 1 ]
+    export TMUX='/tmp/fake.sock,1234,0'
+    run tmux_notify_inbox_client
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'ordinary|/dev/pts/1'* ]]
+}
+
 @test "bell delivery uses terminal inventory filtering and legacy tty fallback" {
     tmux_cmd() {
         printf '1|30|control|/dev/pts/9|900|$1|%%9|work\n'

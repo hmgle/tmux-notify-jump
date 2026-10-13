@@ -20,6 +20,8 @@ setup() {
     FAKE_TARGET_WINDOW_INDEX='3'
     FAKE_CLIENT_ROWS='0|10|/dev/pts/2|/dev/pts/2|222|$1|%1|work'
     FAKE_TMUX_VERSION='tmux 3.7'
+    FAKE_CLIENT_HEIGHT=24
+    FAKE_CLIENT_WIDTH=80
     FAKE_SOCKET_PATH="$TMUX_NOTIFY_TMUX_SOCKET"
     FAKE_INBOX_ROOT=""
     FAKE_ATTENTION_COUNT=""
@@ -29,9 +31,14 @@ setup() {
     FAKE_BINDING=""
     FAKE_HOOK_COMMAND=""
     FAKE_SWITCH_FAIL=0
+    FAKE_SWITCH_NOOP=0
     FAKE_PANE_EXISTS=1
     FAKE_WINDOW_EXISTS=1
     FAKE_SESSION_EXISTS=1
+    FAKE_DISPLAY_FAIL=0
+    FAKE_POPUP_FAIL=0
+    FAKE_INVENTORY_FAIL=0
+    FAKE_PANE_ROWS='%9|$1|@2|3|0|work'
 }
 
 teardown() {
@@ -46,24 +53,28 @@ tmux_cmd() {
             printf '%s\n' "$FAKE_TMUX_VERSION"
             ;;
         display-message)
+            [ "$FAKE_DISPLAY_FAIL" -eq 0 ] || return 1
             if [ "${2:-}" = "-p" ] && [ "${3:-}" = '#{pid}' ]; then
                 printf '4242\n'
             elif [ "${2:-}" = "-p" ] && [ "${3:-}" = '#{socket_path}' ]; then
                 printf '%s\n' "$FAKE_SOCKET_PATH"
+            elif [ "${2:-}" = "-p" ] && [ "${3:-}" = '#{version}' ]; then
+                printf '%s\n' "${FAKE_TMUX_VERSION#tmux }"
             elif [ "${2:-}" = "-p" ] && [ "${3:-}" = "-t" ]; then
                 case "${5:-}" in
-                    '#{session_id}|#{window_id}|#{pane_id}|#{session_name}|#{window_index}')
+                    '#{session_id}|#{window_id}|#{pane_id}|#{window_index}|#{session_name}')
                         printf '%s|%s|%s|%s|%s\n' \
                             "$FAKE_TARGET_SESSION_ID" "$FAKE_TARGET_WINDOW_ID" \
-                            "$FAKE_TARGET_PANE_ID" "$FAKE_TARGET_SESSION_NAME" \
-                            "$FAKE_TARGET_WINDOW_INDEX"
+                            "$FAKE_TARGET_PANE_ID" "$FAKE_TARGET_WINDOW_INDEX" \
+                            "$FAKE_TARGET_SESSION_NAME"
                         ;;
                     '#{pane_id}')
                         [ "$FAKE_PANE_EXISTS" -eq 1 ] && [ "${4:-}" = "$FAKE_TARGET_PANE_ID" ] \
                             && printf '%s\n' "$FAKE_TARGET_PANE_ID"
                         ;;
                     '#{window_id}')
-                        [ "$FAKE_WINDOW_EXISTS" -eq 1 ] && [ "${4:-}" = "$FAKE_TARGET_WINDOW_ID" ] \
+                        [ "$FAKE_WINDOW_EXISTS" -eq 1 ] \
+                            && { [ "${4:-}" = "$FAKE_TARGET_WINDOW_ID" ] || is_pane_id "${4:-}"; } \
                             && printf '%s\n' "$FAKE_TARGET_WINDOW_ID"
                         ;;
                     '#{session_id}')
@@ -74,7 +85,40 @@ tmux_cmd() {
             fi
             ;;
         list-clients)
-            [ -z "$FAKE_CLIENT_ROWS" ] || printf '%s\n' "$FAKE_CLIENT_ROWS"
+            if [ "${3:-}" = '#{client_name}|#{client_tty}|#{client_height}|#{client_width}' ]; then
+                if [ -n "${FAKE_CLIENT_DIMENSIONS+x}" ]; then
+                    printf '%s\n' "$FAKE_CLIENT_DIMENSIONS"
+                else
+                    printf '/dev/pts/2|/dev/pts/2|%s|%s\n' "$FAKE_CLIENT_HEIGHT" "$FAKE_CLIENT_WIDTH"
+                fi
+            else
+                [ -z "$FAKE_CLIENT_ROWS" ] || printf '%s\n' "$FAKE_CLIENT_ROWS"
+            fi
+            ;;
+        list-panes)
+            [ "$FAKE_INVENTORY_FAIL" -eq 0 ] || return 1
+            if [ "${4:-}" = '#{session_id}|#{window_id}|#{pane_id}' ]; then
+                if [ -n "${FAKE_SELECTION_ROWS+x}" ]; then
+                    printf '%s\n' "$FAKE_SELECTION_ROWS"
+                elif [ "$FAKE_PANE_EXISTS" -eq 1 ]; then
+                    printf '%s|%s|%s\n' "$FAKE_TARGET_SESSION_ID" "$FAKE_TARGET_WINDOW_ID" "$FAKE_TARGET_PANE_ID"
+                elif [ "$FAKE_WINDOW_EXISTS" -eq 1 ]; then
+                    printf '%s|%s|%%1\n' "$FAKE_TARGET_SESSION_ID" "$FAKE_TARGET_WINDOW_ID"
+                elif [ "$FAKE_SESSION_EXISTS" -eq 1 ]; then
+                    printf '%s|@99|%%1\n' "$FAKE_TARGET_SESSION_ID"
+                else
+                    printf '$99|@99|%%99\n'
+                fi
+            else
+                printf '%s\n' "$FAKE_PANE_ROWS"
+            fi
+            ;;
+        display-menu|display-popup)
+            printf '%s\n' "$@" >"$TEST_TEMP_DIR/picker.args"
+            [ "$cmd" != display-popup ] || return "$FAKE_POPUP_FAIL"
+            ;;
+        capture-pane)
+            printf 'recent pane output\n'
             ;;
         list-keys)
             [ -z "$FAKE_BINDING" ] || printf '%s\n' "$FAKE_BINDING"
@@ -110,7 +154,19 @@ tmux_cmd() {
             esac
             ;;
         switch-client)
-            [ "$FAKE_SWITCH_FAIL" -eq 0 ]
+            [ "$FAKE_SWITCH_FAIL" -eq 0 ] || return 1
+            [ "$FAKE_SWITCH_NOOP" -eq 0 ] || return 0
+            local row client_name="${3:-}" pane_id selected_pane="$FAKE_TARGET_PANE_ID"
+            [ "$FAKE_PANE_EXISTS" -eq 1 ] || selected_pane='%1'
+            local updated=""
+            while IFS= read -r row; do
+                IFS='|' read -r mode activity name tty pid sid pane_id session_name <<<"$row"
+                if [ "$name" = "$client_name" ]; then
+                    row="$mode|$activity|$name|$tty|$pid|$FAKE_TARGET_SESSION_ID|$selected_pane|$FAKE_TARGET_SESSION_NAME"
+                fi
+                updated+="$row"$'\n'
+            done <<<"$FAKE_CLIENT_ROWS"
+            FAKE_CLIENT_ROWS="${updated%$'\n'}"
             ;;
     esac
 }
@@ -641,7 +697,7 @@ tmux_cmd() {
 
     root="$(tmux_notify_inbox_root)"
     [ -z "$(find "$root" -mindepth 1 -maxdepth 1 -type d ! -name '*.lock' -print -quit)" ]
-    run rg 'select-window -t @2' "$TMUX_LOG"
+    run rg -F 'select-window -t $1:@2' "$TMUX_LOG"
     [ "$status" -eq 0 ]
     run rg 'select-pane -t %9' "$TMUX_LOG"
     [ "$status" -eq 1 ]
@@ -658,6 +714,128 @@ tmux_cmd() {
     [ "$status" -eq 1 ]
     root="$(tmux_notify_inbox_root)"
     [ -z "$(find "$root" -mindepth 1 -maxdepth 1 -type d ! -name '*.lock' -print -quit)" ]
+}
+
+@test "Inbox selection acknowledges both priorities without installed focus hooks" {
+    tmux_notify_inbox_enqueue '%9' attention Claude 'Permission'
+    tmux_notify_inbox_enqueue '%9' complete Claude 'Done'
+    id="$(printf '%s' '%9|attention' | sha256_hex_stdin)"
+
+    tmux_notify_inbox_select "$id" /dev/pts/2
+
+    [ "$TMUX_NOTIFY_INBOX_ATTENTION" -eq 0 ]
+    [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 0 ]
+    [ -z "$(tmux_notify_inbox_list)" ]
+}
+
+@test "Inbox stale selection retires both priorities even without an attached client" {
+    tmux_notify_inbox_enqueue '%9' attention Claude 'Permission'
+    tmux_notify_inbox_enqueue '%9' complete Claude 'Done'
+    id="$(printf '%s' '%9|complete' | sha256_hex_stdin)"
+    FAKE_PANE_EXISTS=0
+    FAKE_WINDOW_EXISTS=0
+    FAKE_SESSION_EXISTS=0
+    FAKE_CLIENT_ROWS=''
+
+    run tmux_notify_inbox_select "$id" /dev/pts/gone
+
+    [ "$status" -eq 1 ]
+    [ -z "$(tmux_notify_inbox_list)" ]
+}
+
+@test "Inbox selection retains both priorities when switch reports success without moving" {
+    tmux_notify_inbox_enqueue '%9' attention Claude 'Permission'
+    tmux_notify_inbox_enqueue '%9' complete Claude 'Done'
+    id="$(printf '%s' '%9|complete' | sha256_hex_stdin)"
+    FAKE_SWITCH_NOOP=1
+
+    run tmux_notify_inbox_select "$id" /dev/pts/2
+
+    [ "$status" -eq 1 ]
+    [ "$(tmux_notify_inbox_list | wc -l)" -eq 2 ]
+}
+
+@test "Inbox selection preserves both entries when all tmux queries fail" {
+    tmux_notify_inbox_enqueue '%9' attention Claude 'Permission'
+    tmux_notify_inbox_enqueue '%9' complete Claude 'Done'
+    id="$(printf '%s' '%9|complete' | sha256_hex_stdin)"
+    root="$(tmux_notify_inbox_root)"
+    FAKE_INBOX_ROOT="$root"
+    FAKE_DISPLAY_FAIL=1
+    FAKE_INVENTORY_FAIL=1
+    : >"$TMUX_LOG"
+
+    run tmux_notify_inbox_select "$id" /dev/pts/2
+
+    [ "$status" -eq 1 ]
+    [ "$(find "$root" -name pane_id | wc -l)" -eq 2 ]
+    run rg '^switch-client|^set-option' "$TMUX_LOG"
+    [ "$status" -eq 1 ]
+}
+
+@test "Inbox selection does not infer stale targets from failed or malformed inventory" {
+    tmux_notify_inbox_enqueue '%9' attention Claude 'Permission'
+    tmux_notify_inbox_enqueue '%9' complete Claude 'Done'
+    id="$(printf '%s' '%9|attention' | sha256_hex_stdin)"
+    FAKE_PANE_EXISTS=0
+    FAKE_WINDOW_EXISTS=0
+    FAKE_SESSION_EXISTS=0
+    FAKE_INVENTORY_FAIL=1
+    run tmux_notify_inbox_select "$id" /dev/pts/2
+    [ "$status" -eq 1 ]
+    FAKE_INVENTORY_FAIL=0
+    for FAKE_SELECTION_ROWS in '' '$99|@99|' '$99|@99|%99'$'\n''#{session_id}|@2|%9'; do
+        run tmux_notify_inbox_select "$id" /dev/pts/2
+        [ "$status" -eq 1 ]
+        [ "$(tmux_notify_inbox_list | wc -l)" -eq 2 ]
+    done
+}
+
+@test "Inbox closed pane follows its window into another session using one snapshot" {
+    tmux_notify_inbox_enqueue '%9' complete Claude 'Done'
+    id="$(printf '%s' '%9|complete' | sha256_hex_stdin)"
+    FAKE_PANE_EXISTS=0
+    FAKE_TARGET_SESSION_ID='$8'
+    : >"$TMUX_LOG"
+
+    tmux_notify_inbox_select "$id" /dev/pts/2
+
+    [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 0 ]
+    run rg -F 'switch-client -c /dev/pts/2 -t $8 ; select-window -t $8:@2' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+    [ "$(rg -c '^list-panes -a -F' "$TMUX_LOG")" -eq 1 ]
+}
+
+@test "Inbox closed pane prefers its recorded session when the window is linked" {
+    tmux_notify_inbox_enqueue '%9' complete Claude 'Done'
+    id="$(printf '%s' '%9|complete' | sha256_hex_stdin)"
+    FAKE_PANE_EXISTS=0
+    FAKE_SELECTION_ROWS=$'$8|@2|%1\n$1|@2|%1'
+
+    tmux_notify_inbox_select "$id" /dev/pts/2
+
+    run rg -F 'switch-client -c /dev/pts/2 -t $1 ; select-window -t $1:@2' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+    [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 0 ]
+}
+
+@test "Inbox corrupted empty session IDs cannot resolve an ambient target" {
+    tmux_notify_inbox_enqueue '%9' complete Claude 'Done'
+    id="$(printf '%s' '%9|complete' | sha256_hex_stdin)"
+    root="$(tmux_notify_inbox_root)"
+    printf '\n' >"$root/$id/session_id"
+    printf '\n' >"$root/$id/window_id"
+    FAKE_PANE_EXISTS=0
+    FAKE_WINDOW_EXISTS=0
+    FAKE_SESSION_EXISTS=0
+    : >"$TMUX_LOG"
+
+    run tmux_notify_inbox_select "$id" /dev/pts/2
+
+    [ "$status" -eq 1 ]
+    [ -z "$(tmux_notify_inbox_list)" ]
+    run rg '^switch-client|display-message -p -t' "$TMUX_LOG"
+    [ "$status" -eq 1 ]
 }
 
 @test "Inbox lock acquisition retries transient contention" {
@@ -1026,4 +1204,520 @@ bind-key -T prefix A run-shell -b "tmux-notify-jump --inbox-next"'
 
     run rg -F 'unbind-key -T prefix Z' "$TMUX_LOG"
     [ "$status" -eq 0 ]
+}
+
+@test "Inbox picker uses one live inventory and prioritizes attention" {
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    FAKE_TARGET_PANE_ID='%10'
+    tmux_notify_inbox_enqueue '%10' attention Claude 'Permission'
+    FAKE_PANE_ROWS=$'%9|$1|@2|8|1|renamed\n%10|$1|@2|8|2|renamed'
+    : >"$TMUX_LOG"
+
+    run tmux_notify_inbox_picker_rows
+
+    [ "$status" -eq 0 ]
+    [[ "${lines[0]}" == *$'\t%10\tattention\tClaude\trenamed:8.2\t'* ]]
+    [[ "${lines[1]}" == *$'\t%9\tcomplete\tCodex\trenamed:8.1\t'* ]]
+    [ "$(rg -c '^list-panes -a -F' "$TMUX_LOG")" -eq 1 ]
+    run rg 'display-message -p -t' "$TMUX_LOG"
+    [ "$status" -eq 1 ]
+}
+
+@test "Inbox picker filters kind source live session and recent time" {
+    now_ms() { printf 100000; }
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Old build'
+    old_key="$(printf '%s' '%9|complete' | sha256_hex_stdin)"
+    root="$(tmux_notify_inbox_root)"
+    printf '50000\n' >"$root/$old_key/last_ms"
+    FAKE_TARGET_PANE_ID='%10'
+    tmux_notify_inbox_enqueue '%10' attention Claude 'Permission'
+    FAKE_PANE_ROWS=$'%9|$1|@2|8|1|renamed\n%10|$1|@2|8|2|renamed'
+
+    run tmux_notify_inbox_picker_rows attention Claude renamed 10
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 1 ]
+    [[ "$output" == *$'\t%10\t'* ]]
+    run tmux_notify_inbox_picker_rows '' '' '$1' 10
+    [ "${#lines[@]}" -eq 1 ]
+    run tmux_notify_inbox_picker_rows '' '' work 0
+    [ -z "$output" ]
+}
+
+@test "Inbox next skips current pane while the picker marks it without changing IDs" {
+    FAKE_TARGET_PANE_ID='%1'
+    tmux_notify_inbox_enqueue '%1' attention Claude 'Current permission'
+    FAKE_TARGET_PANE_ID='%9'
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Other done'
+    FAKE_PANE_ROWS=$'%1|$1|@2|3|0|work\n%9|$1|@2|3|1|work'
+
+    tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+    [[ "$(cat "$TEST_TEMP_DIR/picker.args")" == *'work:3.0 [current]'* ]]
+    tmux_notify_inbox_next /dev/pts/2
+    [ "$TMUX_NOTIFY_INBOX_ATTENTION" -eq 1 ]
+    [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 0 ]
+    run rg 'select-pane -t %9' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+}
+
+@test "Inbox next leaves notices pending when only the current pane has entries" {
+    FAKE_TARGET_PANE_ID='%1'
+    tmux_notify_inbox_enqueue '%1' attention Claude 'Permission'
+    tmux_notify_inbox_enqueue '%1' complete Claude 'Done'
+    : >"$TMUX_LOG"
+
+    tmux_notify_inbox_next /dev/pts/2
+    [ "$TMUX_NOTIFY_INBOX_ATTENTION" -eq 1 ]
+    [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 1 ]
+    run rg '^switch-client' "$TMUX_LOG"
+    [ "$status" -eq 1 ]
+}
+
+@test "Inbox metadata and picker filters preserve pipes in session names" {
+    FAKE_TARGET_SESSION_NAME='work|qa|'
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    root="$(tmux_notify_inbox_root)"
+    id="$(printf '%s' '%9|complete' | sha256_hex_stdin)"
+    [ "$(cat "$root/$id/session_name")" = 'work|qa|' ]
+    [ "$(cat "$root/$id/window_index")" = 3 ]
+    FAKE_PANE_ROWS='%9|$1|@2|8|1|work|qa|'
+
+    run tmux_notify_inbox_picker_rows '' '' 'work|qa|'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *$'\twork|qa|:8.1\t'* ]]
+    tmux_notify_inbox_select "$id" /dev/pts/2
+    [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 0 ]
+}
+
+@test "Inbox menu truncates long labels before escaping tmux format markers" {
+    title="$(printf '%0500d' 0)"
+    tmux_notify_inbox_enqueue '%9' complete Codex "$title"
+    tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+    label="$(sed -n '10p' "$TEST_TEMP_DIR/picker.args")"
+    [ "${#label}" -le 60 ]
+    [[ "$label" == *'...' ]]
+}
+
+@test "Inbox menu reserves shortcut and border columns on a narrow client" {
+    FAKE_CLIENT_WIDTH=50
+    tmux_notify_inbox_enqueue '%9' complete Codex "$(printf '%0500d' 0)"
+    tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+    label="$(sed -n '10p' "$TEST_TEMP_DIR/picker.args")"
+    [ "${#label}" -le 42 ]
+    [[ "$label" == *'...' ]]
+}
+
+@test "Inbox menu fits wide Unicode labels on an 80-column client" {
+    # Each U+901A character occupies two terminal columns and three UTF-8 bytes.
+    title="$(printf '%0500d' 0)"
+    title="${title//0/通}"
+    tmux_notify_inbox_enqueue '%9' complete Codex "$title"
+    tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+    label="$(sed -n '10p' "$TEST_TEMP_DIR/picker.args")"
+    ascii="${label//通/}"
+    bytes="$(printf '%s' "$label" | wc -c)"
+    columns=$((${#ascii} + (bytes - ${#ascii}) / 3 * 2))
+    [ "$columns" -le 60 ]
+    [[ "$label" == *'通'* ]]
+    [[ "$label" == *'...' ]]
+}
+
+@test "Inbox menu fits emoji that target tmux counts wider than libc" {
+    title="$(printf '%0500d' 0)"
+    title="${title//0/☝}"
+    tmux_notify_inbox_enqueue '%9' complete Codex "$title"
+    tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+    label="$(sed -n '10p' "$TEST_TEMP_DIR/picker.args")"
+    ascii="${label//☝/}"
+    bytes="$(printf '%s' "$label" | wc -c)"
+    # tmux 3.7 counts U+261D as two columns, regardless of libc's width.
+    columns=$((${#ascii} + (bytes - ${#ascii}) / 3 * 2))
+    [ "$columns" -le 60 ]
+    [[ "$label" == 'complete Codex '* ]]
+    [[ "$label" == *'☝'*'...' ]]
+}
+
+@test "Inbox menu fits decomposed Hangul with utf8proc widths on a narrow client" {
+    FAKE_CLIENT_WIDTH=50
+    title="$(printf '%0500d' 0)"
+    title="${title//0/가}"
+    tmux_notify_inbox_enqueue '%9' complete Codex "$title"
+    tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+    label="$(sed -n '10p' "$TEST_TEMP_DIR/picker.args")"
+    without_leading="${label//ᄀ/}"
+    without_vowel="${label//ᅡ/}"
+    ascii="${without_leading//ᅡ/}"
+    bytes="$(printf '%s' "$label" | wc -c)"
+    leading_bytes="$(printf '%s' "$without_leading" | wc -c)"
+    vowel_bytes="$(printf '%s' "$without_vowel" | wc -c)"
+    # utf8proc counts U+1100 as two and U+1161 as one (libc uses zero).
+    columns=$((${#ascii} + (bytes - leading_bytes) / 3 * 2 + (bytes - vowel_bytes) / 3))
+    [ "$columns" -le 42 ]
+    [[ "$label" == 'complete Codex '* ]]
+    [[ "$label" == *'가'*'...' ]]
+}
+
+@test "Inbox picker menu escapes tmux formats and carries config cache socket" {
+    tmux_notify_inbox_enqueue '%9' complete Codex '#{pane_id}'
+    TMUX_NOTIFY_ENTRYPOINT="$TEST_TEMP_DIR/path with quotes' and spaces/tmux-notify-jump"
+    TMUX_NOTIFY_CONFIG="$TEST_TEMP_DIR/custom env"
+
+    tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+
+    args="$(cat "$TEST_TEMP_DIR/picker.args")"
+    [[ "$args" == *'##{pane_id}'* ]]
+    [[ "$args" == *'--inbox-select'* ]]
+    [[ "$args" == *'TMUX_NOTIFY_CONFIG='* ]]
+    [[ "$args" == *'XDG_CACHE_HOME='* ]]
+    [[ "$args" == *'TMUX_NOTIFY_TMUX_SOCKET='* ]]
+    [[ "$args" == *'--sender-tty'* ]]
+}
+
+write_picker_fzf_fake() {
+    mkdir -p "$TEST_TEMP_DIR/bin"
+    cat >"$TEST_TEMP_DIR/bin/fzf" <<'FAKE'
+#!/usr/bin/env bash
+[ -z "$FZF_DEFAULT_OPTS$FZF_DEFAULT_OPTS_FILE$FZF_DEFAULT_COMMAND" ] || exit 99
+for arg in "$@"; do
+    if [ "$arg" = --filter=probe ]; then
+        [ "${FZF_PROBE_FAIL:-0}" -eq 0 ] || exit 2
+        cat
+        exit 0
+    fi
+done
+printf '%s\n' "$@" >"$TEST_TEMP_DIR/fzf.args"
+cat >"$TEST_TEMP_DIR/fzf.rows"
+[ "${FZF_TEST_EXIT:-0}" -eq 0 ] || exit "$FZF_TEST_EXIT"
+head -n 1 "$TEST_TEMP_DIR/fzf.rows"
+FAKE
+    chmod +x "$TEST_TEMP_DIR/bin/fzf"
+    export PATH="$TEST_TEMP_DIR/bin:$PATH"
+}
+
+# Execute generated callbacks through the real entrypoint and config loader.
+# The external tmux stub rejects every call to the configured, wrong server.
+write_picker_callback_tmux_fake() {
+    export INBOX_CALLBACK_ROOT="$(tmux_notify_inbox_root)"
+    export INBOX_CALLBACK_SOCKET="$TMUX_NOTIFY_TMUX_SOCKET"
+    export TMUX_NOTIFY_CONFIG="$TEST_TEMP_DIR/callback.env"
+    printf "TMUX_NOTIFY_TMUX_SOCKET='%s'\n" "$TEST_TEMP_DIR/wrong.sock" >"$TMUX_NOTIFY_CONFIG"
+    mkdir -p "$TEST_TEMP_DIR/bin"
+    cat >"$TEST_TEMP_DIR/bin/tmux" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_TEMP_DIR/callback.calls"
+[ "${1:-}" = -S ] && [ "${2:-}" = "$INBOX_CALLBACK_SOCKET" ] || exit 99
+shift 2
+case "$1" in
+    show-option)
+        [ "${3:-}" != @tmux-notify-jump-inbox-root ] || printf '%s\n' "$INBOX_CALLBACK_ROOT"
+        ;;
+    display-message)
+        case "${3:-}" in
+            '#{pid}') printf '4242\n' ;;
+            '#{socket_path}') printf '%s\n' "$INBOX_CALLBACK_SOCKET" ;;
+            '#{version}') printf '3.7\n' ;;
+        esac
+        ;;
+    list-clients) printf '0|10|/dev/pts/2|/dev/pts/2|222|$1|%%9|work\n' ;;
+    list-panes)
+        case "${4:-}" in
+            '#{session_id}|#{window_id}|#{pane_id}') printf '$1|@2|%%9\n' ;;
+            *) printf '%%9|$1|@2|3|0|work\n' ;;
+        esac
+        ;;
+    capture-pane) printf 'preview from requested server\n' ;;
+esac
+exit 0
+FAKE
+    chmod +x "$TEST_TEMP_DIR/bin/tmux"
+    export PATH="$TEST_TEMP_DIR/bin:$PATH"
+    TMUX_NOTIFY_TMUX_SOCKET="$TEST_TEMP_DIR/wrong.sock"
+}
+
+@test "Inbox menu callback keeps the CLI socket after configuration reload" {
+    tmux_notify_inbox_enqueue '%9' attention Claude 'Permission'
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    write_picker_callback_tmux_fake
+
+    tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2 --tmux-socket "$INBOX_CALLBACK_SOCKET"
+    callback="$(sed -n '12p' "$TEST_TEMP_DIR/picker.args")"
+    run /bin/sh -c "exec /bin/sh -c ${callback#run-shell -b }"
+    [ "$status" -eq 0 ]
+    [ ! -e "$INBOX_CALLBACK_ROOT/$(printf '%s' '%9|attention' | sha256_hex_stdin)" ]
+    [ ! -e "$INBOX_CALLBACK_ROOT/$(printf '%s' '%9|complete' | sha256_hex_stdin)" ]
+    run rg -F 'select-pane -t %9' "$TEST_TEMP_DIR/callback.calls"
+    [ "$status" -eq 0 ]
+}
+
+@test "Inbox popup callback keeps the CLI socket after configuration reload" {
+    write_picker_fzf_fake
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    write_picker_callback_tmux_fake
+
+    tmux_notify_inbox_pick --sender-tty /dev/pts/2 --tmux-socket "$INBOX_CALLBACK_SOCKET"
+    callback="$(tail -n 1 "$TEST_TEMP_DIR/picker.args")"
+    run /bin/sh -c "$callback"
+    [ "$status" -eq 0 ]
+    [ ! -e "$INBOX_CALLBACK_ROOT/$(printf '%s' '%9|complete' | sha256_hex_stdin)" ]
+    run rg -F 'select-pane -t %9' "$TEST_TEMP_DIR/callback.calls"
+    [ "$status" -eq 0 ]
+}
+
+@test "Inbox preview callback keeps the CLI socket after configuration reload" {
+    write_picker_fzf_fake
+    export FZF_TEST_EXIT=130
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    write_picker_callback_tmux_fake
+
+    tmux_notify_inbox_pick --inline --sender-tty /dev/pts/2 --tmux-socket "$INBOX_CALLBACK_SOCKET"
+    preview="$(rg '^--preview=' "$TEST_TEMP_DIR/fzf.args")"
+    preview="${preview#--preview=}"
+    run /bin/sh -c "${preview//\{2\}/\'%9\'}"
+    [ "$status" -eq 0 ]
+    [ "$output" = 'preview from requested server' ]
+    [ -e "$INBOX_CALLBACK_ROOT/$(printf '%s' '%9|complete' | sha256_hex_stdin)" ]
+}
+
+@test "Inbox fzf selection shares validated jump and isolated fzf options" {
+    write_picker_fzf_fake
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    export FZF_DEFAULT_OPTS='--bind enter:abort'
+    export FZF_DEFAULT_OPTS_FILE=/missing/options
+    export FZF_DEFAULT_COMMAND='arbitrary defaults'
+
+    tmux_notify_inbox_pick --inline --query Codex --sender-tty /dev/pts/2
+
+    [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 0 ]
+    run rg 'select-pane -t %9' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+    args="$(cat "$TEST_TEMP_DIR/fzf.args")"
+    [[ "$args" == *'--query=Codex'* ]]
+    [[ "$args" == *'--inbox-preview'* ]]
+}
+
+@test "Inbox fzf cancellation preserves entries" {
+    write_picker_fzf_fake
+    tmux_notify_inbox_enqueue '%9' attention Claude 'Permission'
+    export FZF_TEST_EXIT=130
+
+    tmux_notify_inbox_pick --inline --sender-tty /dev/pts/2
+
+    [ "$TMUX_NOTIFY_INBOX_ATTENTION" -eq 1 ]
+    run rg '^switch-client' "$TMUX_LOG"
+    [ "$status" -eq 1 ]
+}
+
+@test "Inbox picker uses fzf popup only on supported tmux versions" {
+    write_picker_fzf_fake
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    tmux_notify_inbox_pick --sender-tty /dev/pts/2
+    [ "$(head -n 1 "$TEST_TEMP_DIR/picker.args")" = display-popup ]
+    [[ "$(cat "$TEST_TEMP_DIR/picker.args")" == *'--inline'* ]]
+
+    FAKE_TMUX_VERSION='tmux 3.1c'
+    tmux_notify_inbox_pick --sender-tty /dev/pts/2
+    [ "$(head -n 1 "$TEST_TEMP_DIR/picker.args")" = display-menu ]
+
+    FAKE_TMUX_VERSION='tmux 2.9a'
+    run tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'%9'* ]]
+}
+
+@test "Inbox picker falls back to menu when fzf lacks required options" {
+    write_picker_fzf_fake
+    export FZF_PROBE_FAIL=1
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    tmux_notify_inbox_pick --sender-tty /dev/pts/2
+    [ "$(head -n 1 "$TEST_TEMP_DIR/picker.args")" = display-menu ]
+    [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 1 ]
+}
+
+@test "Inbox popup omits titles on tmux 3.2 and enables them on 3.3" {
+    write_picker_fzf_fake
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    for version in 'tmux 3.2' 'tmux 3.2a' 'tmux 3.3'; do
+        FAKE_TMUX_VERSION="$version"
+        tmux_notify_inbox_pick --sender-tty /dev/pts/2
+        [ "$(head -n 1 "$TEST_TEMP_DIR/picker.args")" = display-popup ]
+        run rg -x -- '-T' "$TEST_TEMP_DIR/picker.args"
+        if [ "$version" = 'tmux 3.3' ]; then
+            [ "$status" -eq 0 ]
+        else
+            [ "$status" -eq 1 ]
+        fi
+    done
+}
+
+@test "Inbox picker falls back to menu after a failed popup without consuming entries" {
+    write_picker_fzf_fake
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    FAKE_POPUP_FAIL=1
+
+    tmux_notify_inbox_pick --sender-tty /dev/pts/2
+    [ "$(head -n 1 "$TEST_TEMP_DIR/picker.args")" = display-menu ]
+    [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 1 ]
+    run rg '^display-popup' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+}
+
+write_picker_entries() {
+    local root="" n
+    root="$(tmux_notify_inbox_root)"
+    for ((n = 1; n <= $1; n++)); do
+        mkdir -p "$root/$n"
+        printf 'complete\n' >"$root/$n/kind"
+        printf '%%9\n' >"$root/$n/pane_id"
+        printf 'Codex\n' >"$root/$n/source"
+        printf '%s\n' "$n" >"$root/$n/first_ms"
+        printf 'Notice %s\n' "$n" >"$root/$n/title"
+    done
+}
+
+@test "Inbox picker menu paginates beyond its shortcut keys" {
+    FAKE_CLIENT_HEIGHT=50
+    write_picker_entries 36
+    tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+    args="$(cat "$TEST_TEMP_DIR/picker.args")"
+    [[ "$args" == *'Next page'* ]]
+    [[ "$args" != *'Previous page'* ]]
+
+    tmux_notify_inbox_pick --menu --page 1 --sender-tty /dev/pts/2
+    args="$(cat "$TEST_TEMP_DIR/picker.args")"
+    [[ "$args" == *'Previous page'* ]]
+    [[ "$args" != *'Next page'* ]]
+    [[ "$args" == *'--inbox-select'* ]]
+}
+
+@test "Inbox menu pages fit a 24-row client including both navigation entries" {
+    write_picker_entries 60
+    for offset in 0 20 40; do
+        tmux_notify_inbox_pick --menu --offset "$offset" --sender-tty /dev/pts/2
+        args="$(cat "$TEST_TEMP_DIR/picker.args")"
+        line_count="$(wc -l <"$TEST_TEMP_DIR/picker.args")"
+        menu_height=$(((line_count - 9) / 3 + 2))
+        [ "$menu_height" -le 24 ]
+        [[ "$args" == *"Notice $((offset + 1))"* ]]
+        [[ "$args" == *"Notice $((offset + 20))"* ]]
+        if [ "$offset" -eq 0 ]; then
+            [[ "$args" != *'Previous page'* ]]
+        else
+            [[ "$args" == *'Previous page'* ]]
+        fi
+        if [ "$offset" -eq 40 ]; then
+            [[ "$args" != *'Next page'* ]]
+        else
+            [[ "$args" == *'Next page'* ]]
+        fi
+    done
+}
+
+@test "Inbox menu keeps the next offset when the terminal height changes" {
+    write_picker_entries 60
+    TMUX_NOTIFY_ENTRYPOINT=/bin/echo
+    tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+    callback="$(tail -n 1 "$TEST_TEMP_DIR/picker.args")"
+    # Decode the generated run-shell command into picker arguments.
+    run /bin/sh -c "exec /bin/sh -c ${callback#run-shell -b }"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'--offset 20'* ]]
+    FAKE_CLIENT_HEIGHT=14
+    tmux_notify_inbox_pick --menu --offset 20 --sender-tty /dev/pts/2
+    args="$(cat "$TEST_TEMP_DIR/picker.args")"
+    [[ "$args" == *'Notice 21'* ]]
+    [[ "$args" == *'Notice 30'* ]]
+    [[ "$args" != *'Notice 31'* ]]
+}
+
+@test "Inbox menu uses the invoking client dimensions from a batch inventory" {
+    write_picker_entries 12
+    FAKE_CLIENT_ROWS=$'0|10|/dev/pts/2|/dev/pts/2|222|$1|%1|work\n0|20|/dev/pts/9|/dev/pts/9|999|$1|%2|work'
+    FAKE_CLIENT_DIMENSIONS=$'/dev/pts/2|/dev/pts/2|50|80\n/dev/pts/9|/dev/pts/9|10|40'
+
+    tmux_notify_inbox_pick --menu --sender-tty /dev/pts/9
+    args="$(cat "$TEST_TEMP_DIR/picker.args")"
+    [ "$(rg -c -- '--inbox-select' "$TEST_TEMP_DIR/picker.args")" -eq 6 ]
+    [[ "$args" == *'Next page'* ]]
+    label="$(sed -n '10p' "$TEST_TEMP_DIR/picker.args")"
+    [ "${#label}" -le 32 ]
+    [[ "$label" == *'...' ]]
+    run rg -F 'list-clients -F #{client_name}|#{client_tty}|#{client_height}|#{client_width}' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+}
+
+@test "Inbox menu truncates navigation labels on the narrowest supported client" {
+    FAKE_CLIENT_WIDTH=9
+    write_picker_entries 60
+    tmux_notify_inbox_pick --menu --offset 20 --sender-tty /dev/pts/2
+    # Every entry, including Previous/Next, has one label column plus (key).
+    labels="$(awk 'NR > 9 && (NR - 10) % 3 == 0' "$TEST_TEMP_DIR/picker.args")"
+    while IFS= read -r label; do
+        [ "$label" = '.' ]
+    done <<<"$labels"
+    args="$(cat "$TEST_TEMP_DIR/picker.args")"
+    [[ "$args" == *'--offset'* ]]
+    [ "$(wc -l <"$TEST_TEMP_DIR/picker.args")" -eq 75 ]
+}
+
+@test "Inbox menu prints the list without consuming entries on tiny or unknown clients" {
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    for height in 4 '' unknown; do
+        FAKE_CLIENT_HEIGHT="$height"
+        : >"$TMUX_LOG"
+        run tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+        [ "$status" -eq 0 ]
+        [[ "$output" == *'%9'* ]]
+        [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 1 ]
+        run rg '^display-menu' "$TMUX_LOG"
+        [ "$status" -eq 1 ]
+    done
+}
+
+@test "Inbox menu prints the list without consuming entries on tiny or unknown widths" {
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    for width in 8 '' unknown; do
+        FAKE_CLIENT_WIDTH="$width"
+        : >"$TMUX_LOG"
+        run tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+        [ "$status" -eq 0 ]
+        [[ "$output" == *'%9'* ]]
+        [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 1 ]
+        run rg '^display-menu' "$TMUX_LOG"
+        [ "$status" -eq 1 ]
+    done
+}
+
+@test "Inbox selection follows a moved pane and does not consume on a detached caller" {
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+    id="$(printf '%s' '%9|complete' | sha256_hex_stdin)"
+    FAKE_TARGET_SESSION_ID='$8'
+    FAKE_TARGET_WINDOW_ID='@20'
+    run tmux_notify_inbox_select "$id" /dev/pts/gone
+    [ "$status" -eq 1 ]
+    [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 1 ]
+
+    tmux_notify_inbox_select "$id" /dev/pts/2
+    run rg -F 'switch-client -c /dev/pts/2 -t $8 ; select-window -t $8:@20' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+    [ "$TMUX_NOTIFY_INBOX_COMPLETE" -eq 0 ]
+}
+
+@test "Inbox preview validates pane IDs and captures bounded history" {
+    run tmux_notify_inbox_preview '%9'
+    [ "$status" -eq 0 ]
+    [ "$output" = 'recent pane output' ]
+    run rg -F 'capture-pane -p -t %9 -S -80' "$TMUX_LOG"
+    [ "$status" -eq 0 ]
+    run tmux_notify_inbox_preview 'work:0.0; kill-server'
+    [ "$status" -eq 1 ]
+    run tmux_notify_inbox_select '../../foreign' /dev/pts/2
+    [ "$status" -eq 1 ]
+}
+
+@test "Inbox callbacks quote literal shell metacharacters" {
+    value="literal ' quotes \$(touch $TEST_TEMP_DIR/should-not-exist) \\ backslash"
+    command="$(tmux_notify_shell_command printf '%s' "$value")"
+    run /bin/sh -c "$command"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$value" ]
+    [ ! -e "$TEST_TEMP_DIR/should-not-exist" ]
 }
