@@ -186,3 +186,50 @@ teardown() {
     run is_pane_id "main:0.1"
     [ "$status" -ne 0 ]
 }
+
+# =============================================================================
+# tmux_notify_tmux_key_is_valid() tests
+# =============================================================================
+
+@test "tmux_notify_tmux_key_is_valid: single letter returns success" {
+    run tmux_notify_tmux_key_is_valid u
+    [ "$status" -eq 0 ]
+    run tmux_notify_tmux_key_is_valid N
+    [ "$status" -eq 0 ]
+}
+
+@test "tmux_notify_tmux_key_is_valid: single digit returns success" {
+    run tmux_notify_tmux_key_is_valid 5
+    [ "$status" -eq 0 ]
+}
+
+@test "tmux_notify_tmux_key_is_valid: empty string returns failure" {
+    run tmux_notify_tmux_key_is_valid ""
+    [ "$status" -ne 0 ]
+}
+
+@test "tmux_notify_tmux_key_is_valid: no argument returns failure" {
+    run tmux_notify_tmux_key_is_valid
+    [ "$status" -ne 0 ]
+}
+
+@test "tmux_notify_tmux_key_is_valid: multiple characters return failure" {
+    run tmux_notify_tmux_key_is_valid un
+    [ "$status" -ne 0 ]
+}
+
+@test "tmux_notify_tmux_key_is_valid: modified key names return failure" {
+    # Widening the accepted syntax is deliberate; until then these must fail
+    # rather than bind a key name tmux cannot match in the prefix table.
+    for key in C-n M-n F1 Space Enter; do
+        run tmux_notify_tmux_key_is_valid "$key"
+        [ "$status" -ne 0 ]
+    done
+}
+
+@test "tmux_notify_tmux_key_is_valid: punctuation returns failure" {
+    run tmux_notify_tmux_key_is_valid "-"
+    [ "$status" -ne 0 ]
+    run tmux_notify_tmux_key_is_valid "/"
+    [ "$status" -ne 0 ]
+}

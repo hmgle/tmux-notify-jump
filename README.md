@@ -223,9 +223,9 @@ hooks, and the `prefix+N` binding, then reload the configured file with
 `tmux source-file ~/.tmux.conf` (or restart the server). The binding key must be
 free when initialization runs: tmux binds `prefix+n` to `next-window` by
 default, and a key your configuration or a plugin already took is reported and
-left alone. Pass `--tmux-key <key>` to the installer (or edit the
-`@tmux-notify-jump-key` line the block installs) to pick another one, and
-confirm with `tmux-notify-jump --doctor`. Pressing the binding
+left alone. Pass `--tmux-key <key>` to the installer or to `--tmux-init` (or
+edit the `@tmux-notify-jump-key` line the block installs) to pick another one,
+and confirm with `tmux-notify-jump --doctor`. Pressing the binding
 selects the oldest attention item first, then the oldest completion, and clears
 that exact pane as soon as it is visited. Repeated events for the same pane and
 priority collapse into one item with an updated count.
@@ -332,8 +332,16 @@ preserves the existing binding. Choose a key that is free: pass `--tmux-key
 block, or set `TMUX_NOTIFY_TMUX_KEY` / `TMUX_NOTIFY_KEY` in the environment, in
 that order of precedence. The key must be a single alphanumeric character;
 `--tmux-key` rejects anything else, and a configured value such as `C-n` is
-reported and replaced with `N` rather than being silently ignored. Run
-`tmux-notify-jump --doctor` afterwards: it resolves the key the same way
+reported and replaced with `N` rather than being silently ignored. `--tmux-key`
+is accepted only by `--tmux-init`, the one subcommand that binds a key.
+
+`--tmux-init --tmux-key <key>` also records the key in
+`@tmux-notify-jump-key`, so the binding, the option and `--doctor` agree and a
+later `--tmux-init` keeps the key instead of silently migrating the binding
+back. An inherited `TMUX_NOTIFY_TMUX_KEY` is not recorded: it may be a one-shot
+override for a single command. Reloading your tmux configuration re-applies the
+value in the configuration block, which is the durable place to change the key.
+Run `tmux-notify-jump --doctor` to confirm: it resolves the key the same way
 initialization does and reports the binding actually in effect.
 Changing the key or reinstalling under a different `--bindir` migrates the
 binding: initialization finds jump bindings by command rather than by key, so it

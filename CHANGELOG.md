@@ -6,10 +6,17 @@ Notable changes to tmux-notify-jump are documented in this file.
 
 ### Added
 
-- `--tmux-key <key>` is now accepted by `--tmux-init` and the other tmux
-  integration subcommands, so a jump key that collides with an existing binding
-  can be chosen without editing the installed configuration block. The flag
-  already existed for the installer; the entry point rejected it.
+- `--tmux-key <key>` is now accepted by `--tmux-init`, so a jump key that
+  collides with an existing binding can be chosen without editing the
+  installed configuration block. The flag already existed for the installer;
+  the entry point rejected it. Passing it also records the key in
+  `@tmux-notify-jump-key`, so the binding, the option and `--doctor` agree and
+  a later `--tmux-init` keeps it instead of migrating the binding back. An
+  inherited `TMUX_NOTIFY_TMUX_KEY` is left unrecorded, since it may be a
+  one-shot override for a single command. The marker that tells an explicit
+  flag from an inherited variable is private, unexported and cleared after the
+  user configuration is sourced, so neither the environment nor a configuration
+  file can forge it and have an inherited key recorded.
 
 ### Fixed
 
@@ -21,6 +28,10 @@ Notable changes to tmux-notify-jump are documented in this file.
   reported instead of being silently replaced with `N`. Previously a setting
   such as `C-n` left the configuration reading one key while the fallback key
   stayed bound, with no message explaining why nothing jumped.
+- `--tmux-key` is no longer accepted and silently ignored by `--tmux-uninit`
+  and the Inbox callbacks; it is scoped to `--tmux-init`. Key validation now
+  goes through one shared predicate instead of three copies that could drift
+  apart.
 
 ## [1.4.1] - 2026-10-13
 

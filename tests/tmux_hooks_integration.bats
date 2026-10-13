@@ -29,6 +29,13 @@ inbox_count() {
     tmux -S "$TMUX_SERVER_SOCKET" show-option -gqv "@tmux-notify-jump-$1"
 }
 
+# Print the configured Inbox jump key, empty when initialization never recorded
+# one. An unset option is not an error here.
+key_option() {
+    tmux -S "$TMUX_SERVER_SOCKET" show-option -gv @tmux-notify-jump-key \
+        2>/dev/null || true
+}
+
 # Print the prefix-table lines that carry an Inbox jump binding.
 jump_bindings() {
     tmux -S "$TMUX_SERVER_SOCKET" list-keys -T prefix | rg -F -- '--inbox-next' || true
@@ -183,13 +190,80 @@ teardown() {
     [[ "$output" == *'next-window'* ]]
 }
 
-@test "init --tmux-key overrides the configured key" {
-    # setup() left the binding on N; the flag must win and migrate it.
+@test "init --tmux-key overrides the configured key and records it" {
+    # setup() left the binding on N; the flag must win, migrate the binding and
+    # record the choice so the option, the binding and --doctor all agree.
     run env -u _QUIET "$PROJECT_ROOT/tmux-notify-jump" --tmux-init --tmux-key u
     [ "$status" -eq 0 ]
     bindings="$(jump_bindings)"
     [ "$(printf '%s\n' "$bindings" | rg -c . )" = "1" ]
     [[ "$bindings" == *' -T prefix u '* ]]
+    [ "$(key_option)" = "u" ]
+
+    # Without the recorded option, --doctor reported the fallback key and so
+    # named a binding that did not exist.
+    run "$PROJECT_ROOT/tmux-notify-jump" --doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'prefix+u jumps to next item'* ]]
+
+    # A plain re-initialization must keep the recorded key instead of silently
+    # migrating the binding back to the configured one.
+    "$PROJECT_ROOT/tmux-notify-jump" --tmux-init >/dev/null
+    [[ "$(jump_bindings)" == *' -T prefix u '* ]]
+}
+
+@test "an inherited TMUX_NOTIFY_TMUX_KEY stays ephemeral" {
+    # An environment override may be a one-shot for a single command, so it must
+    # not be written into the tmux option behind the user's back.
+    run env -u _QUIET TMUX_NOTIFY_TMUX_KEY=u \
+        "$PROJECT_ROOT/tmux-notify-jump" --tmux-init
+    [ "$status" -eq 0 ]
+    [[ "$(jump_bindings)" == *' -T prefix u '* ]]
+    [ -z "$(key_option)" ]
+
+    run "$PROJECT_ROOT/tmux-notify-jump" --doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'prefix+N missing'* ]]
+}
+
+@test "an inherited explicit-key marker cannot record an inherited key" {
+    # The marker is private, unexported and cleared after the user configuration
+    # is sourced, so the environment cannot forge it. Exporting it once let
+    # TMUX_NOTIFY_TMUX_KEY=u with the marker set persist the inherited key.
+    tmux -S "$TMUX_SERVER_SOCKET" set-option -g @tmux-notify-jump-key A
+
+    run env -u _QUIET _TMUX_NOTIFY_TMUX_KEY_EXPLICIT=1 TMUX_NOTIFY_TMUX_KEY=u \
+        "$PROJECT_ROOT/tmux-notify-jump" --tmux-init
+    [ "$status" -eq 0 ]
+    [[ "$(jump_bindings)" == *' -T prefix u '* ]]
+    [ "$(key_option)" = "A" ]
+
+    # The doctor reports the configured key, not the one-shot override.
+    run "$PROJECT_ROOT/tmux-notify-jump" --doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'prefix+A missing'* ]]
+}
+
+@test "a configuration file cannot forge the explicit-key marker" {
+    # The marker is cleared after load_user_config, so a sourced configuration
+    # file cannot mark its own override as explicit either.
+    cfg="$TEST_TEMP_DIR/forging-env"
+    printf '_TMUX_NOTIFY_TMUX_KEY_EXPLICIT=1\nTMUX_NOTIFY_TMUX_KEY=b\n' >"$cfg"
+    tmux -S "$TMUX_SERVER_SOCKET" set-option -g @tmux-notify-jump-key A
+
+    run env -u _QUIET TMUX_NOTIFY_CONFIG="$cfg" \
+        "$PROJECT_ROOT/tmux-notify-jump" --tmux-init
+    [ "$status" -eq 0 ]
+    [[ "$(jump_bindings)" == *' -T prefix b '* ]]
+    [ "$(key_option)" = "A" ]
+}
+
+@test "--tmux-key is only accepted by --tmux-init" {
+    run env -u _QUIET "$PROJECT_ROOT/tmux-notify-jump" --tmux-uninit --tmux-key u
+    [ "$status" -eq 1 ]
+    [[ "$output" == *'Unknown tmux integration option: --tmux-key'* ]]
+    # The rejected flag must not have uninstalled anything on the way out.
+    [ -n "$(jump_bindings)" ]
 }
 
 @test "init rejects a --tmux-key that cannot name a tmux key" {

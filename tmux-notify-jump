@@ -14,7 +14,22 @@ load_user_config
 TMUX_NOTIFY_ENTRYPOINT="$SCRIPT_DIR/tmux-notify-jump"
 export TMUX_NOTIFY_ENTRYPOINT
 
+# Only this process's own --tmux-key may mark the override as explicit. The
+# marker is private and deliberately not exported, and it is cleared after the
+# user configuration has been sourced, so neither the environment nor a
+# configuration file can forge it and have an inherited key recorded.
+unset _TMUX_NOTIFY_TMUX_KEY_EXPLICIT
+
+# Parse the options shared by the tmux integration subcommands.
+#
+# --tmux-key is accepted only where a key is actually bound, so callers opt in
+# instead of having the flag silently ignored by subcommands that cannot use it.
+# The first argument is that opt-in flag.
 parse_tmux_integration_args() {
+    local allow_key="${1:-0}"
+    if [ "$#" -gt 0 ]; then
+        shift
+    fi
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --tmux-socket)
@@ -24,14 +39,20 @@ parse_tmux_integration_args() {
                 export TMUX_NOTIFY_TMUX_SOCKET
                 ;;
             --tmux-key)
+                [ "$allow_key" = "1" ] \
+                    || die "Unknown tmux integration option: $1"
                 shift
                 [ "$#" -gt 0 ] || die "--tmux-key requires a key"
                 # Reject anything tmux cannot name instead of letting the
                 # library fall back to N behind the caller's back.
-                [[ "$1" =~ ^[A-Za-z0-9]$ ]] \
+                tmux_notify_tmux_key_is_valid "$1" \
                     || die "--tmux-key must be one alphanumeric character"
                 TMUX_NOTIFY_TMUX_KEY="$1"
                 export TMUX_NOTIFY_TMUX_KEY
+                # Only a flag on the command line is recorded in the tmux
+                # option; an inherited variable may be a one-shot override.
+                # Private and unexported: see the unset above.
+                _TMUX_NOTIFY_TMUX_KEY_EXPLICIT=1
                 ;;
             *)
                 die "Unknown tmux integration option: $1"
@@ -49,13 +70,13 @@ case "${1:-}" in
         ;;
     --tmux-init)
         shift
-        parse_tmux_integration_args "$@"
+        parse_tmux_integration_args 1 "$@"
         tmux_notify_tmux_init
         exit 0
         ;;
     --tmux-uninit)
         shift
-        parse_tmux_integration_args "$@"
+        parse_tmux_integration_args 0 "$@"
         tmux_notify_tmux_uninit
         exit 0
         ;;
@@ -78,7 +99,7 @@ case "${1:-}" in
             TMUX_NOTIFY_SENDER_TTY="$2"
             shift 2
         fi
-        parse_tmux_integration_args "$@"
+        parse_tmux_integration_args 0 "$@"
         tmux_notify_inbox_select "$INBOX_SELECTED_ID" "${TMUX_NOTIFY_SENDER_TTY:-}"
         exit $?
         ;;
@@ -86,7 +107,7 @@ case "${1:-}" in
         [ "$#" -ge 2 ] || die '--inbox-preview requires a pane ID'
         INBOX_PREVIEW_PANE="$2"
         shift 2
-        parse_tmux_integration_args "$@"
+        parse_tmux_integration_args 0 "$@"
         tmux_notify_inbox_preview "$INBOX_PREVIEW_PANE"
         exit $?
         ;;

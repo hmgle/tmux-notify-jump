@@ -2563,6 +2563,20 @@ tmux_notify_tmux_prefix_binding() {
     ' || true
 }
 
+# Report whether a value can name the Inbox jump key.
+#
+# The accepted syntax is a single alphanumeric character: that is what the
+# installer writes into @tmux-notify-jump-key and what a prefix-table lookup
+# can match. The entry point, this library and the installer all validate
+# through this predicate, so widening the syntax later is one change rather
+# than three that drift apart.
+tmux_notify_tmux_key_is_valid() {
+    case "${1:-}" in
+        [A-Za-z0-9]) return 0 ;;
+    esac
+    return 1
+}
+
 # Resolve the key the Inbox jump binding should use.
 #
 # An explicit --tmux-key (or TMUX_NOTIFY_TMUX_KEY) wins over TMUX_NOTIFY_KEY,
@@ -2578,13 +2592,10 @@ tmux_notify_tmux_effective_key() {
     local configured="" key=""
     configured="$(tmux_cmd show-option -gqv @tmux-notify-jump-key 2>/dev/null || true)"
     key="${TMUX_NOTIFY_TMUX_KEY:-${TMUX_NOTIFY_KEY:-${configured:-N}}}"
-    case "$key" in
-        [A-Za-z0-9]) ;;
-        *)
-            warn "Inbox key '$key' is not one alphanumeric character; using N"
-            key=N
-            ;;
-    esac
+    if ! tmux_notify_tmux_key_is_valid "$key"; then
+        warn "Inbox key '$key' is not one alphanumeric character; using N"
+        key=N
+    fi
     printf '%s' "$key"
 }
 
@@ -2637,6 +2648,16 @@ tmux_notify_tmux_init() {
     root="$(tmux_notify_inbox_default_root)"
     tmux_cmd set-option -gq @tmux-notify-jump-inbox-root "$root"
     key="$(tmux_notify_tmux_effective_key)"
+    # An explicit --tmux-key is the one override worth recording. Without it the
+    # binding, @tmux-notify-jump-key and --doctor disagree until something
+    # re-reads the option, and a later --tmux-init silently migrates the binding
+    # back to the configured key. An inherited TMUX_NOTIFY_TMUX_KEY stays
+    # ephemeral on purpose: it may be a one-shot override for a single command.
+    # The marker is private and set only by the entry point's own --tmux-key,
+    # so an inherited key cannot be recorded by forging it in the environment.
+    if [ "${_TMUX_NOTIFY_TMUX_KEY_EXPLICIT:-0}" = "1" ]; then
+        tmux_cmd set-option -gq @tmux-notify-jump-key "$key"
+    fi
     local status="" status_segment=""
     status="$(tmux_cmd show-option -gqv status-right 2>/dev/null || true)"
     status_segment="$(tmux_notify_tmux_status_segment)"

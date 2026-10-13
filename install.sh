@@ -1070,11 +1070,19 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-if ! [[ "$TMUX_KEY" =~ ^[A-Za-z0-9]$ ]]; then
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Validate against the rule the shipped library enforces, so widening the
+# accepted key syntax stays a one-line change there instead of drifting across
+# three copies. The subshell keeps the library's definitions out of the
+# installer's own namespace.
+[ -f "$REPO_DIR/tmux-notify-jump-lib.sh" ] \
+    || die "Missing source file: $REPO_DIR/tmux-notify-jump-lib.sh"
+if ! ( # shellcheck source=tmux-notify-jump-lib.sh
+    . "$REPO_DIR/tmux-notify-jump-lib.sh"
+    tmux_notify_tmux_key_is_valid "$TMUX_KEY" ); then
     die "--tmux-key must be one alphanumeric character"
 fi
-
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ -z "$BINDIR" ]; then
     BINDIR="$PREFIX/bin"
