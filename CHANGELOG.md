@@ -2,13 +2,18 @@
 
 Notable changes to tmux-notify-jump are documented in this file.
 
-## [Unreleased]
+## [1.4.1] - 2026-10-13
 
 ### Fixed
 
 - Installing or removing the tmux integration and inserting the Codex notify
   setting through symlinked configuration files now update each destination
   file and preserve the symlinks.
+
+### Tests
+
+- Added installer coverage for symlinked tmux, Codex, Claude, Kimi, and Grok
+  configuration destinations. The suite now contains 454 tests.
 
 ## [1.4.0] - 2026-10-13
 
