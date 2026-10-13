@@ -2526,8 +2526,7 @@ tmux_notify_doctor() {
         fi
     done
     local key="" binding=""
-    key="$(tmux_cmd show-option -gqv @tmux-notify-jump-key 2>/dev/null || true)"
-    key="${TMUX_NOTIFY_TMUX_KEY:-${key:-N}}"
+    key="$(tmux_notify_tmux_effective_key)"
     binding="$(tmux_notify_tmux_prefix_binding "$key")"
     if [[ "$binding" == *--inbox-next* ]]; then
         tmux_notify_doctor_line OK 'Inbox binding' "prefix+$key jumps to next item"
@@ -2562,6 +2561,31 @@ tmux_notify_tmux_prefix_binding() {
             }
         }
     ' || true
+}
+
+# Resolve the key the Inbox jump binding should use.
+#
+# An explicit --tmux-key (or TMUX_NOTIFY_TMUX_KEY) wins over TMUX_NOTIFY_KEY,
+# which wins over the @tmux-notify-jump-key option, which falls back to N.
+# Initialization and --doctor share this order so the doctor cannot report a key
+# initialization would never bind.
+#
+# A value that is not a single alphanumeric character cannot name a tmux key, so
+# it is reported instead of being quietly replaced. Silently falling back leaves
+# the configuration reading one key while the fallback key stays bound: nothing
+# jumps, and the taken key warning that would explain why never appears.
+tmux_notify_tmux_effective_key() {
+    local configured="" key=""
+    configured="$(tmux_cmd show-option -gqv @tmux-notify-jump-key 2>/dev/null || true)"
+    key="${TMUX_NOTIFY_TMUX_KEY:-${TMUX_NOTIFY_KEY:-${configured:-N}}}"
+    case "$key" in
+        [A-Za-z0-9]) ;;
+        *)
+            warn "Inbox key '$key' is not one alphanumeric character; using N"
+            key=N
+            ;;
+    esac
+    printf '%s' "$key"
 }
 
 # Print every prefix-table key bound to an Inbox jump command.
@@ -2608,13 +2632,11 @@ tmux_notify_tmux_hook_command() {
 }
 
 tmux_notify_tmux_init() {
-    local path="${TMUX_NOTIFY_ENTRYPOINT:-tmux-notify-jump}" quoted_path="" key="" configured_key="" root=""
+    local path="${TMUX_NOTIFY_ENTRYPOINT:-tmux-notify-jump}" quoted_path="" key="" root=""
     printf -v quoted_path '%q' "$path"
     root="$(tmux_notify_inbox_default_root)"
     tmux_cmd set-option -gq @tmux-notify-jump-inbox-root "$root"
-    configured_key="$(tmux_cmd show-option -gqv @tmux-notify-jump-key 2>/dev/null || true)"
-    key="${TMUX_NOTIFY_TMUX_KEY:-${configured_key:-N}}"
-    case "$key" in [A-Za-z0-9]) ;; *) key=N ;; esac
+    key="$(tmux_notify_tmux_effective_key)"
     local status="" status_segment=""
     status="$(tmux_cmd show-option -gqv status-right 2>/dev/null || true)"
     status_segment="$(tmux_notify_tmux_status_segment)"

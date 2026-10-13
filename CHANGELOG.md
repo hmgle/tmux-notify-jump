@@ -2,6 +2,26 @@
 
 Notable changes to tmux-notify-jump are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- `--tmux-key <key>` is now accepted by `--tmux-init` and the other tmux
+  integration subcommands, so a jump key that collides with an existing binding
+  can be chosen without editing the installed configuration block. The flag
+  already existed for the installer; the entry point rejected it.
+
+### Fixed
+
+- Initialization and `--doctor` now resolve the jump key in the same order:
+  `TMUX_NOTIFY_TMUX_KEY`, then `TMUX_NOTIFY_KEY`, then
+  `@tmux-notify-jump-key`, then `N`. The doctor previously ignored
+  `TMUX_NOTIFY_KEY`, so it could report a key initialization never bound.
+- A configured jump key that is not a single alphanumeric character is now
+  reported instead of being silently replaced with `N`. Previously a setting
+  such as `C-n` left the configuration reading one key while the fallback key
+  stayed bound, with no message explaining why nothing jumped.
+
 ## [1.4.1] - 2026-10-13
 
 ### Fixed

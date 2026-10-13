@@ -161,6 +161,53 @@ teardown() {
     [[ "$bindings" == *' -T prefix A '* ]]
 }
 
+@test "init keeps a key tmux already bound and binds a free one instead" {
+    # tmux binds prefix+n to next-window out of the box, so a configured key
+    # that collides with a default is the case that must not silently win.
+    tmux -S "$TMUX_SERVER_SOCKET" set-option -g @tmux-notify-jump-key n
+
+    run env -u _QUIET "$PROJECT_ROOT/tmux-notify-jump" --tmux-init
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'prefix+n is already bound; leaving it unchanged'* ]]
+    [ "$(jump_bindings)" = "" ]
+
+    tmux -S "$TMUX_SERVER_SOCKET" set-option -g @tmux-notify-jump-key u
+    run env -u _QUIET "$PROJECT_ROOT/tmux-notify-jump" --tmux-init
+    [ "$status" -eq 0 ]
+    [[ "$output" != *'already bound'* ]]
+    [[ "$(jump_bindings)" == *' -T prefix u '* ]]
+
+    run tmux -S "$TMUX_SERVER_SOCKET" list-keys -T prefix
+    [ "$status" -eq 0 ]
+    [[ "$output" == *' -T prefix n '* ]]
+    [[ "$output" == *'next-window'* ]]
+}
+
+@test "init --tmux-key overrides the configured key" {
+    # setup() left the binding on N; the flag must win and migrate it.
+    run env -u _QUIET "$PROJECT_ROOT/tmux-notify-jump" --tmux-init --tmux-key u
+    [ "$status" -eq 0 ]
+    bindings="$(jump_bindings)"
+    [ "$(printf '%s\n' "$bindings" | rg -c . )" = "1" ]
+    [[ "$bindings" == *' -T prefix u '* ]]
+}
+
+@test "init rejects a --tmux-key that cannot name a tmux key" {
+    run env -u _QUIET "$PROJECT_ROOT/tmux-notify-jump" --tmux-init --tmux-key C-n
+    [ "$status" -eq 1 ]
+    [[ "$output" == *'--tmux-key must be one alphanumeric character'* ]]
+}
+
+@test "init reports a configured key that cannot name a tmux key" {
+    tmux -S "$TMUX_SERVER_SOCKET" set-option -g @tmux-notify-jump-key C-n
+
+    run env -u _QUIET "$PROJECT_ROOT/tmux-notify-jump" --tmux-init
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Inbox key 'C-n' is not one alphanumeric character; using N"* ]]
+    # N was still free, so the fallback is what actually got bound.
+    [[ "$(jump_bindings)" == *' -T prefix N '* ]]
+}
+
 @test "uninit removes a jump binding the key option no longer names" {
     TMUX_NOTIFY_ENTRYPOINT="$PROJECT_ROOT/tmux-notify-jump"
     # Leave the binding on N while the option names A, the state a key change

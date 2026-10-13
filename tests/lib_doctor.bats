@@ -47,6 +47,7 @@ tmux_cmd() {
         show-option)
             case "$3" in
                 @tmux-notify-jump-inbox-root) printf '%s' "$FAKE_ROOT" ;;
+                @tmux-notify-jump-key) printf '%s' "${FAKE_KEY:-}" ;;
                 status-right) printf '%s' "$FAKE_STATUS" ;;
             esac
             ;;
@@ -212,6 +213,42 @@ tmux_cmd() {
     [[ "$output" == 'Error: Unknown doctor agent: unknown' ]]
     run tmux_notify_doctor_cli --agent-config
     [ "$status" -eq 1 ]
+}
+
+@test "doctor reports a jump key the option names and its live binding" {
+    FAKE_KEY='u'
+    FAKE_BINDING='bind-key -T prefix u run-shell -b "tmux-notify-jump --inbox-next"'
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'prefix+u jumps to next item'* ]]
+}
+
+@test "doctor resolves the jump key from the environment like init does" {
+    # TMUX_NOTIFY_KEY feeds initialization, so reporting the option value alone
+    # could name a key that was never bound.
+    FAKE_KEY='u'
+    FAKE_BINDING='bind-key -T prefix v run-shell -b "tmux-notify-jump --inbox-next"'
+    TMUX_NOTIFY_KEY='v'
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'prefix+v jumps to next item'* ]]
+
+    TMUX_NOTIFY_TMUX_KEY='b'
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'prefix+b missing'* ]]
+}
+
+@test "doctor reports a configured key that cannot name a tmux key" {
+    FAKE_KEY='C-n'
+    # test_helper exports _QUIET=1, which suppresses warn(); the entry point
+    # runs without it, so drop it to see what a user would see.
+    unset _QUIET
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Inbox key 'C-n' is not one alphanumeric character"* ]]
+    # The fallback is reported, so the binding shown is the one in effect.
+    [[ "$output" == *'prefix+N jumps to next item'* ]]
 }
 
 @test "doctor rejects malformed config specs before printing diagnostics or querying tmux" {
