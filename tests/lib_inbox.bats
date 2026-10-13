@@ -20,6 +20,7 @@ setup() {
     FAKE_TARGET_WINDOW_INDEX='3'
     FAKE_CLIENT_ROWS='0|10|/dev/pts/2|/dev/pts/2|222|$1|%1|work'
     FAKE_TMUX_VERSION='tmux 3.7'
+    unset FAKE_SERVER_VERSION
     FAKE_CLIENT_HEIGHT=24
     FAKE_CLIENT_WIDTH=80
     FAKE_SOCKET_PATH="$TMUX_NOTIFY_TMUX_SOCKET"
@@ -59,7 +60,7 @@ tmux_cmd() {
             elif [ "${2:-}" = "-p" ] && [ "${3:-}" = '#{socket_path}' ]; then
                 printf '%s\n' "$FAKE_SOCKET_PATH"
             elif [ "${2:-}" = "-p" ] && [ "${3:-}" = '#{version}' ]; then
-                printf '%s\n' "${FAKE_TMUX_VERSION#tmux }"
+                printf '%s\n' "${FAKE_SERVER_VERSION-${FAKE_TMUX_VERSION#tmux }}"
             elif [ "${2:-}" = "-p" ] && [ "${3:-}" = "-t" ]; then
                 case "${5:-}" in
                     '#{session_id}|#{window_id}|#{pane_id}|#{window_index}|#{session_name}')
@@ -864,10 +865,116 @@ tmux_cmd() {
 
 @test "development tmux version strings support Inbox features" {
     FAKE_TMUX_VERSION='tmux next-3.9'
+    _QUIET=0
 
     [ "$(tmux_notify_tmux_major_version)" = 3 ]
     run tmux_notify_tmux_version_at_least 3 9
     [ "$status" -eq 0 ]
+    run tmux_notify_tmux_version_at_least 3 10
+    [ "$status" -eq 1 ]
+
+    run tmux_notify_tmux_init
+    [ "$status" -eq 0 ]
+    [[ "$output" != *'tmux 3.0 or newer'* ]]
+    [ "$(rg -c '^set-hook' "$TMUX_LOG")" -eq 5 ]
+}
+
+@test "development tmux versions still report old releases as old" {
+    FAKE_TMUX_VERSION='tmux master-2.9'
+    _QUIET=0
+
+    [ "$(tmux_notify_tmux_major_version)" = 2 ]
+    run tmux_notify_tmux_version_at_least 3 0
+    [ "$status" -eq 1 ]
+    run tmux_notify_tmux_init
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'tmux 3.0 or newer'* ]]
+    run rg '^set-hook' "$TMUX_LOG"
+    [ "$status" -eq 1 ]
+}
+
+@test "tmux init refuses old server hooks even with a newer client binary" {
+    FAKE_SERVER_VERSION='2.9a'
+    FAKE_TMUX_VERSION='tmux next-3.9'
+    _QUIET=0
+
+    run tmux_notify_tmux_init
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'tmux 3.0 or newer'* ]]
+    run rg '^set-hook' "$TMUX_LOG"
+    [ "$status" -eq 1 ]
+    run tmux_notify_tmux_version_at_least 3 0
+    [ "$status" -eq 1 ]
+}
+
+@test "tmux init supports new server hooks even with an older client binary" {
+    FAKE_SERVER_VERSION='next-3.9'
+    FAKE_TMUX_VERSION='tmux 2.9a'
+    _QUIET=0
+
+    run tmux_notify_tmux_init
+    [ "$status" -eq 0 ]
+    [[ "$output" != *'tmux 3.0 or newer'* ]]
+    [ "$(rg -c '^set-hook' "$TMUX_LOG")" -eq 5 ]
+    run tmux_notify_tmux_version_at_least 3 9
+    [ "$status" -eq 0 ]
+}
+
+@test "tmux version checks fall back to the client when no server version answers" {
+    FAKE_TMUX_VERSION='tmux next-3.9'
+    FAKE_SERVER_VERSION=''
+
+    for FAKE_DISPLAY_FAIL in 0 1; do
+        [ "$(tmux_notify_tmux_major_version)" = 3 ]
+        run tmux_notify_tmux_version_at_least 3 9
+        [ "$status" -eq 0 ]
+    done
+}
+
+@test "unknown server versions do not fall back to a newer client binary" {
+    FAKE_SERVER_VERSION='unknown'
+
+    run tmux_notify_tmux_major_version
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+    run tmux_notify_tmux_version_at_least 3 0
+    [ "$status" -eq 1 ]
+    run rg -x -- '-V' "$TMUX_LOG"
+    [ "$status" -eq 1 ]
+}
+
+@test "tmux version parsing never skips a leading numeric component" {
+    FAKE_TMUX_VERSION='tmux 2 3.4'
+
+    [ "$(tmux_notify_tmux_major_version)" = 2 ]
+    run tmux_notify_tmux_version_at_least 3 0
+    [ "$status" -eq 1 ]
+}
+
+@test "major-only tmux versions consistently count as minor zero" {
+    for FAKE_TMUX_VERSION in 'tmux 3' 'tmux next-3'; do
+        [ "$(tmux_notify_tmux_major_version)" = 3 ]
+        run tmux_notify_tmux_version_at_least 3 0
+        [ "$status" -eq 0 ]
+        run tmux_notify_tmux_version_at_least 3 1
+        [ "$status" -eq 1 ]
+    done
+}
+
+@test "tmux version comparisons handle letter suffixes and two-digit minors" {
+    FAKE_TMUX_VERSION='tmux 3.9a'
+    run tmux_notify_tmux_version_at_least 3 9
+    [ "$status" -eq 0 ]
+    run tmux_notify_tmux_version_at_least 3 10
+    [ "$status" -eq 1 ]
+
+    FAKE_TMUX_VERSION='tmux 3.10'
+    run tmux_notify_tmux_version_at_least 3 9
+    [ "$status" -eq 0 ]
+    run tmux_notify_tmux_version_at_least 3 10
+    [ "$status" -eq 0 ]
+    run tmux_notify_tmux_version_at_least 4 0
+    [ "$status" -eq 1 ]
 }
 
 @test "tmux init quotes entrypoint paths in hooks and bindings" {
@@ -1512,6 +1619,23 @@ FAKE
     [ "$TMUX_NOTIFY_INBOX_ATTENTION" -eq 1 ]
     run rg '^switch-client' "$TMUX_LOG"
     [ "$status" -eq 1 ]
+}
+
+@test "development tmux versions display Inbox menus and popups without old-version warnings" {
+    FAKE_TMUX_VERSION='tmux next-3.9'
+    _QUIET=0
+    tmux_notify_inbox_enqueue '%9' complete Codex 'Done'
+
+    run tmux_notify_inbox_pick --menu --sender-tty /dev/pts/2
+    [ "$status" -eq 0 ]
+    [[ "$output" != *'Interactive Inbox menus require tmux 3.0'* ]]
+    [ "$(head -n 1 "$TEST_TEMP_DIR/picker.args")" = display-menu ]
+
+    write_picker_fzf_fake
+    run tmux_notify_inbox_pick --sender-tty /dev/pts/2
+    [ "$status" -eq 0 ]
+    [[ "$output" != *'Interactive Inbox menus require tmux 3.0'* ]]
+    [ "$(head -n 1 "$TEST_TEMP_DIR/picker.args")" = display-popup ]
 }
 
 @test "Inbox picker uses fzf popup only on supported tmux versions" {

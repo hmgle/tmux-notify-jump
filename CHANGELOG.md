@@ -2,6 +2,17 @@
 
 Notable changes to tmux-notify-jump are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- Development tmux versions such as `next-3.9` now enable supported Inbox
+  menus and popups and no longer trigger the old-version warning in `--doctor`.
+- Automatic acknowledgement hook initialization now checks the running tmux
+  server version, falling back to the client binary only when no server
+  version answers. Its version parser is shared with Inbox UI checks, so
+  different client and server builds no longer produce conflicting decisions.
+
 ## [1.5.0] - 2026-10-13
 
 ### Added

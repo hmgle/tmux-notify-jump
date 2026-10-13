@@ -13,6 +13,7 @@ setup() {
     printf '# user configuration\n' >"$TMUX_NOTIFY_CONFIG"
     FAKE_ROOT="$TEST_TEMP_DIR/cache/tmux-notify-jump/inbox/4242"
     FAKE_VERSION='3.7c'
+    unset FAKE_CLIENT_VERSION
     FAKE_RUNNING=1
     FAKE_STATUS="$(tmux_notify_tmux_status_segment)"
     FAKE_HOOKS=1
@@ -35,7 +36,7 @@ uname() { printf '%s\n' "$FAKE_OS"; }
 tmux_cmd() {
     printf '%s\n' "$*" >>"$TEST_TEMP_DIR/tmux.calls"
     case "$1" in
-        -V) printf 'tmux %s\n' "$FAKE_VERSION" ;;
+        -V) printf 'tmux %s\n' "${FAKE_CLIENT_VERSION:-$FAKE_VERSION}" ;;
         display-message)
             [ "$FAKE_RUNNING" -eq 1 ] || return 1
             case "$3" in
@@ -89,6 +90,26 @@ tmux_cmd() {
     [[ "$output" == *'missing or customized'* ]]
     [[ "$output" == *'prefix+N belongs to another command'* ]]
     [ "$(printf '%s\n' "$output" | rg -c 'acknowledgement missing')" -eq 5 ]
+}
+
+@test "doctor accepts development tmux version strings" {
+    FAKE_VERSION='next-3.9'
+
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'popup and menu supported'* ]]
+    [[ "$output" != *'menus and acknowledgement hooks need tmux 3.0'* ]]
+}
+
+@test "doctor checks the server version even with a newer client binary" {
+    FAKE_VERSION='2.9a'
+    FAKE_CLIENT_VERSION='next-3.9'
+
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'tmux executable'*'next-3.9'* ]]
+    [[ "$output" == *'menus and acknowledgement hooks need tmux 3.0'* ]]
+    [[ "$output" != *'popup and menu supported'* ]]
 }
 
 @test "doctor reports unsafe permissions without repairing them" {

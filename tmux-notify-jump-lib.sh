@@ -2271,18 +2271,29 @@ tmux_notify_inbox_pick() {
     tmux_cmd display-menu -c "$client" -T 'Inbox' -x C -y C "${items[@]}"
 }
 
-tmux_notify_tmux_version_at_least() {
-    local major="$1" minor="$2" version="" actual_major="" actual_minor=""
+# Report a normalized major.minor version, preferring the running server.
+# A client binary and a long-running server can be different builds. Fall
+# back to -V only when no server version answers. Allow development prefixes
+# such as next-, but never skip a leading numeric component. A missing minor
+# component counts as .0; an unknown version returns failure.
+tmux_notify_tmux_version_string() {
+    local version=""
     version="$(tmux_cmd display-message -p '#{version}' 2>/dev/null || true)"
     [ -n "$version" ] || version="$(tmux_cmd -V 2>/dev/null || true)"
     version="${version#tmux }"
-    if [[ "$version" =~ ([0-9]+)\.([0-9]+) ]]; then
-        actual_major="${BASH_REMATCH[1]}"
-        actual_minor="${BASH_REMATCH[2]}"
-        [ "$actual_major" -gt "$major" ] || { [ "$actual_major" -eq "$major" ] && [ "$actual_minor" -ge "$minor" ]; }
-        return $?
+    if [[ "$version" =~ ^[^0-9]*([0-9]+)(\.([0-9]+))? ]]; then
+        printf '%s.%s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[3]:-0}"
+        return 0
     fi
     return 1
+}
+
+tmux_notify_tmux_version_at_least() {
+    local major="$1" minor="$2" version="" actual_major="" actual_minor=""
+    version="$(tmux_notify_tmux_version_string)" || return 1
+    actual_major="${version%%.*}"
+    actual_minor="${version#*.}"
+    [ "$actual_major" -gt "$major" ] || { [ "$actual_major" -eq "$major" ] && [ "$actual_minor" -ge "$minor" ]; }
 }
 
 # Diagnostics never create/chmod state or install hooks. Optional capabilities
@@ -2540,10 +2551,9 @@ tmux_notify_doctor() {
 
 tmux_notify_tmux_major_version() {
     local version=""
-    version="$(tmux_cmd -V 2>/dev/null || true)"
-    version="${version#tmux }"
-    if [[ "$version" =~ ([0-9]+)\.[0-9]+ ]]; then
-        printf '%s' "${BASH_REMATCH[1]}"
+    version="$(tmux_notify_tmux_version_string || true)"
+    if [ -n "$version" ]; then
+        printf '%s' "${version%%.*}"
     fi
 }
 
