@@ -2,7 +2,7 @@
 
 Notable changes to tmux-notify-jump are documented in this file.
 
-## [Unreleased]
+## [1.5.0] - 2026-10-13
 
 ### Added
 
@@ -32,6 +32,12 @@ Notable changes to tmux-notify-jump are documented in this file.
   and the Inbox callbacks; it is scoped to `--tmux-init`. Key validation now
   goes through one shared predicate instead of three copies that could drift
   apart.
+
+### Tests
+
+- Added coverage for Inbox jump key resolution, the `--tmux-key` flag on
+  `--tmux-init`, and the private marker that keeps an inherited key from being
+  recorded. The suite now contains 472 tests.
 
 ## [1.4.1] - 2026-10-13
 
