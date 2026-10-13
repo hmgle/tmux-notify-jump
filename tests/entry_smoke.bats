@@ -886,6 +886,107 @@ FAKE
     [ "$config_mode" = "640" ]
 }
 
+@test "install.sh: configure-tmux follows and preserves a symlinked config" {
+    bindir="$TEST_TEMP_DIR/bin"
+    config_dir="$TEST_TEMP_DIR/home"
+    managed_dir="$TEST_TEMP_DIR/dotconfig/home"
+    mkdir -p "$config_dir" "$managed_dir"
+    target="$managed_dir/.tmux.conf"
+    config="$config_dir/.tmux.conf"
+    printf '%s\n' 'set -g mouse on' >"$target"
+    chmod 640 "$target"
+    ln -s ../dotconfig/home/.tmux.conf "$config"
+
+    run "$PROJECT_ROOT/install.sh" --bindir "$bindir" --symlink \
+        --configure-tmux --tmux-config "$config" --tmux-key n
+    [ "$status" -eq 0 ]
+
+    run "$PROJECT_ROOT/install.sh" --bindir "$bindir" --symlink \
+        --configure-tmux --tmux-config "$config" --tmux-key n
+    [ "$status" -eq 0 ]
+
+    [ -L "$config" ]
+    [ "$(readlink "$config")" = "../dotconfig/home/.tmux.conf" ]
+    run rg -c '^# BEGIN tmux-notify-jump$' "$target"
+    [ "$status" -eq 0 ]
+    [ "$output" = "1" ]
+    [[ "$(cat "$target")" == *"set -g mouse on"* ]]
+    [[ "$(cat "$target")" == *"set -g @tmux-notify-jump-key n"* ]]
+    target_mode="$(stat -c '%a' "$target" 2>/dev/null || stat -f '%Lp' "$target")"
+    [ "$target_mode" = "640" ]
+
+    run env TMUX_NOTIFY_TMUX_SOCKET="$TEST_TEMP_DIR/missing.sock" \
+        "$PROJECT_ROOT/install.sh" --bindir "$bindir" --uninstall \
+        --configure-tmux --tmux-config "$config" --tmux-key n
+    [ "$status" -eq 0 ]
+
+    [ -L "$config" ]
+    [ "$(readlink "$config")" = "../dotconfig/home/.tmux.conf" ]
+    [[ "$(cat "$target")" == *"set -g mouse on"* ]]
+    [[ "$(cat "$target")" != *"tmux-notify-jump"* ]]
+}
+
+@test "install.sh: configure-codex follows and preserves a symlinked config" {
+    bindir="$TEST_TEMP_DIR/bin"
+    config_dir="$TEST_TEMP_DIR/home"
+    managed_dir="$TEST_TEMP_DIR/dotconfig/home"
+    mkdir -p "$config_dir" "$managed_dir"
+    target="$managed_dir/config.toml"
+    config="$config_dir/config.toml"
+    printf '%s\n' '[projects.example]' >"$target"
+    ln -s ../dotconfig/home/config.toml "$config"
+
+    run "$PROJECT_ROOT/install.sh" --bindir "$bindir" --symlink \
+        --configure-codex --codex-config "$config"
+    [ "$status" -eq 0 ]
+
+    run "$PROJECT_ROOT/install.sh" --bindir "$bindir" --symlink \
+        --configure-codex --codex-config "$config"
+    [ "$status" -eq 0 ]
+
+    [ -L "$config" ]
+    [ "$(readlink "$config")" = "../dotconfig/home/config.toml" ]
+    run rg -c '^notify = ' "$target"
+    [ "$status" -eq 0 ]
+    [ "$output" = "1" ]
+    [[ "$(cat "$target")" == *'[projects.example]'* ]]
+    [[ "$(cat "$target")" == *"notify-codex.sh"* ]]
+}
+
+@test "install.sh: direct-write agent configs preserve symlinked destinations" {
+    bindir="$TEST_TEMP_DIR/bin"
+    config_dir="$TEST_TEMP_DIR/home"
+    managed_dir="$TEST_TEMP_DIR/dotconfig/home"
+    mkdir -p "$config_dir" "$managed_dir"
+    claude_target="$managed_dir/claude-settings.json"
+    kimi_target="$managed_dir/kimi-config.toml"
+    claude_config="$config_dir/claude-settings.json"
+    kimi_config="$config_dir/kimi-config.toml"
+    printf '{}\n' >"$claude_target"
+    printf '# existing policy\n' >"$kimi_target"
+    ln -s ../dotconfig/home/claude-settings.json "$claude_config"
+    ln -s ../dotconfig/home/kimi-config.toml "$kimi_config"
+    ln -s ../dotconfig/home/grok-hooks "$config_dir/grok-hooks"
+    mkdir "$managed_dir/grok-hooks"
+
+    run "$PROJECT_ROOT/install.sh" --bindir "$bindir" --symlink \
+        --configure-claude --claude-config "$claude_config" \
+        --configure-kimi --kimi-config "$kimi_config" \
+        --configure-grok --grok-hooks-path "$config_dir/grok-hooks"
+    [ "$status" -eq 0 ]
+
+    [ -L "$claude_config" ]
+    [ "$(readlink "$claude_config")" = "../dotconfig/home/claude-settings.json" ]
+    [[ "$(cat "$claude_target")" == *"notify-claude-code.sh"* ]]
+    [ -L "$kimi_config" ]
+    [ "$(readlink "$kimi_config")" = "../dotconfig/home/kimi-config.toml" ]
+    [[ "$(cat "$kimi_target")" == *"# existing policy"* ]]
+    [[ "$(cat "$kimi_target")" == *"notify-kimi-code.sh"* ]]
+    [ -L "$config_dir/grok-hooks" ]
+    [ "$(readlink "$config_dir/grok-hooks")" = "../dotconfig/home/grok-hooks" ]
+    [[ "$(cat "$managed_dir/grok-hooks/tmux-notify-jump.json")" == *"notify-grok.sh"* ]]
+}
+
 @test "install.sh: tmux uninstall clears runtime state before deletion" {
     bindir="$TEST_TEMP_DIR/bin"
     config="$TEST_TEMP_DIR/tmux.conf"

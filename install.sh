@@ -94,6 +94,24 @@ backup_file() {
     cp -p "$path" "$path.bak.$ts"
 }
 
+resolve_config_path() {
+    local path="$1" original="$1" link="" depth=0
+    while [ -L "$path" ]; do
+        link="$(readlink "$path" 2>/dev/null)" \
+            || die "Unable to read tmux config symlink: $path"
+        if [[ "$link" == /* ]]; then
+            path="$link"
+        else
+            path="$(dirname "$path")/$link"
+        fi
+        depth=$((depth + 1))
+        if [ "$depth" -gt 40 ]; then
+            die "configuration symlink chain is too long or cyclic: $original"
+        fi
+    done
+    printf '%s' "$path"
+}
+
 file_mode() {
     local path="$1" mode=""
     mode="$(stat -c '%a' "$path" 2>/dev/null || true)"
@@ -119,6 +137,10 @@ write_tmux_config_block() {
 configure_tmux() {
     local notify_cmd="$1"
     local cfg="$TMUX_CONFIG_PATH"
+    if [ -L "$cfg" ] && [ ! -e "$cfg" ]; then
+        die "tmux config symlink is dangling: $cfg"
+    fi
+    cfg="$(resolve_config_path "$cfg")"
     ensure_parent_dir "$cfg"
     if [ -f "$cfg" ]; then
         backup_file "$cfg"
@@ -153,6 +175,10 @@ configure_tmux() {
 
 unconfigure_tmux() {
     local cfg="$TMUX_CONFIG_PATH"
+    if [ -L "$cfg" ] && [ ! -e "$cfg" ]; then
+        return 0
+    fi
+    cfg="$(resolve_config_path "$cfg")"
     [ -f "$cfg" ] || return 0
     backup_file "$cfg"
     local tmp="" mode="" skip=0 line=""
@@ -192,6 +218,10 @@ configure_codex() {
     local notify_cmd="$1"
     local cfg="${CODEX_CONFIG_PATH:-$HOME/.codex/config.toml}"
 
+    if [ -L "$cfg" ] && [ ! -e "$cfg" ]; then
+        die "Codex config symlink is dangling: $cfg"
+    fi
+    cfg="$(resolve_config_path "$cfg")"
     ensure_parent_dir "$cfg"
 
     toml_root_has_notify_key() {

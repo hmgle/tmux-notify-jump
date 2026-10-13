@@ -85,6 +85,9 @@ Optional: configure hooks (makes backups; won’t overwrite existing `notify=` /
 ./install.sh --prefix "$HOME/.local" --symlink --configure-tmux
 ```
 
+Installer-owned rewrites follow symlinked configuration files and preserve the
+symlinks.
+
 Uninstall:
 
 ```bash

@@ -2,6 +2,14 @@
 
 Notable changes to tmux-notify-jump are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- Installing or removing the tmux integration and inserting the Codex notify
+  setting through symlinked configuration files now update each destination
+  file and preserve the symlinks.
+
 ## [1.4.0] - 2026-10-13
 
 ### Added
