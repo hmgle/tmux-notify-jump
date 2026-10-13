@@ -862,6 +862,14 @@ tmux_cmd() {
     [ "$status" -eq 1 ]
 }
 
+@test "development tmux version strings support Inbox features" {
+    FAKE_TMUX_VERSION='tmux next-3.9'
+
+    [ "$(tmux_notify_tmux_major_version)" = 3 ]
+    run tmux_notify_tmux_version_at_least 3 9
+    [ "$status" -eq 0 ]
+}
+
 @test "tmux init quotes entrypoint paths in hooks and bindings" {
     TMUX_NOTIFY_ENTRYPOINT='/tmp/bin with spaces/tmux-notify-jump'
 

@@ -2276,7 +2276,7 @@ tmux_notify_tmux_version_at_least() {
     version="$(tmux_cmd display-message -p '#{version}' 2>/dev/null || true)"
     [ -n "$version" ] || version="$(tmux_cmd -V 2>/dev/null || true)"
     version="${version#tmux }"
-    if [[ "$version" =~ ^([0-9]+)\.([0-9]+) ]]; then
+    if [[ "$version" =~ ([0-9]+)\.([0-9]+) ]]; then
         actual_major="${BASH_REMATCH[1]}"
         actual_minor="${BASH_REMATCH[2]}"
         [ "$actual_major" -gt "$major" ] || { [ "$actual_major" -eq "$major" ] && [ "$actual_minor" -ge "$minor" ]; }
@@ -2542,9 +2542,8 @@ tmux_notify_tmux_major_version() {
     local version=""
     version="$(tmux_cmd -V 2>/dev/null || true)"
     version="${version#tmux }"
-    version="${version%%.*}"
-    if [[ "$version" =~ ^[0-9]+$ ]]; then
-        printf '%s' "$version"
+    if [[ "$version" =~ ([0-9]+)\.[0-9]+ ]]; then
+        printf '%s' "${BASH_REMATCH[1]}"
     fi
 }
 
