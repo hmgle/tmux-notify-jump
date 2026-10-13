@@ -2,7 +2,7 @@
 
 Notable changes to tmux-notify-jump are documented in this file.
 
-## [Unreleased]
+## [1.4.0] - 2026-10-13
 
 ### Added
 
@@ -57,6 +57,12 @@ Notable changes to tmux-notify-jump are documented in this file.
 - Target metadata preserves session names containing pipe characters.
 - Inbox selection retains notices when target inventory queries fail or are
   incomplete, and follows a closed pane's window across session moves/links.
+
+### Tests
+
+- Added focused coverage for Inbox configuration callbacks, target resolution,
+  diagnostics, reporter metadata, popup/menu compatibility, and Unicode menu
+  sizing. The suite now contains 451 tests.
 
 ## [1.3.0] - 2026-09-23
 
