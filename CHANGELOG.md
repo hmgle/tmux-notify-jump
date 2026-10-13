@@ -2,7 +2,7 @@
 
 Notable changes to tmux-notify-jump are documented in this file.
 
-## [Unreleased]
+## [1.5.1] - 2026-10-13
 
 ### Fixed
 
@@ -12,6 +12,12 @@ Notable changes to tmux-notify-jump are documented in this file.
   server version, falling back to the client binary only when no server
   version answers. Its version parser is shared with Inbox UI checks, so
   different client and server builds no longer produce conflicting decisions.
+
+### Tests
+
+- Added coverage for development tmux version strings, mixed client and
+  server versions, missing minor components, and the picker commands those
+  builds now enable. The suite now contains 484 tests.
 
 ## [1.5.0] - 2026-10-13
 
