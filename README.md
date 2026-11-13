@@ -645,8 +645,11 @@ directory by default. This opt-in operation requires `jq`, backs up changes,
 preserves existing hooks and symlinks, and is idempotent. It does not change
 `[tui]` settings. Existing TOML configs also require Python 3.11+ for safe
 inspection. The installer checks the selected config and, when hooks.json is
-elsewhere, its sibling `config.toml`. If either contains inline `hooks`, it
-refuses JSON hook edits and asks you to merge into one source manually. Codex
+elsewhere, its sibling `config.toml`. If either contains nonempty inline event
+arrays, it refuses JSON hook edits and asks you to merge into one source
+manually. Trust metadata under `[hooks.state]`, an empty `[hooks]` table and
+empty event arrays do not establish a second source, so they permit reinstall
+and asynchronous upgrades while keeping the TOML unchanged. Codex
 merges inline and JSON hooks, which can execute the same handler twice.
 Unreadable/invalid TOML or an unavailable parser also stops automatic hook
 configuration; notification delivery still does not require Python.

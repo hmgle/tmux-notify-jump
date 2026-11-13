@@ -221,16 +221,81 @@ JSON
         [ ! -e "$CFG.tmp."* ]
         [ ! -e "$CODEX_CONFIG_PATH.bak."* ]
     done <<'TOML'
-[hooks]
 [[hooks.Stop]]
 hooks = { Stop = [{ hooks = [{ type = "command", command = "notify-codex.sh" }] }] }
-"hooks".Stop = []
-['hooks'.PermissionRequest]
-"\u0068ooks" = {}
+"hooks".Stop = [{}]
+"\u0068ooks" = { PermissionRequest = [{ hooks = [{ type = "command", command = "notify-codex.sh" }] }] }
 TOML
     rm "$CFG"
     install_hooks
     [ "$status" -ne 0 ]
+    [ ! -e "$CFG" ]
+}
+
+@test "Codex hooks installer accepts empty inline events without modifying TOML" {
+    python3 -c 'import tomllib' 2>/dev/null || skip 'Existing TOML inspection needs Python 3.11+'
+    mkdir -p "${CFG%/*}"
+    local content
+    while IFS= read -r content; do
+        printf '%s\n' "$content" >"${CFG%/*}/config.toml"
+        install_hooks
+        [ "$status" -eq 0 ]
+        jq -e '.hooks.PermissionRequest | length == 1' "$CFG"
+        [ "$(cat "${CFG%/*}/config.toml")" = "$content" ]
+        [ ! -e "${CFG%/*}/config.toml.bak."* ]
+        [ ! -e "$CFG.bak."* ]
+    done <<'TOML'
+[hooks]
+hooks = {}
+"hooks".Stop = []
+"\u0068ooks" = { PermissionRequest = [], Stop = [] }
+TOML
+}
+
+@test "Codex hooks installer remains idempotent and upgrades async after trust" {
+    python3 -c 'import tomllib' 2>/dev/null || skip 'Existing TOML inspection needs Python 3.11+'
+    install_hooks
+    [ "$status" -eq 0 ]
+    cat >"${CFG%/*}/config.toml" <<'TOML'
+[hooks.state."PermissionRequest:trusted-hook"]
+enabled = true
+trusted_hash = "sha256:keep-this-trust-hash"
+[hooks.state."Stop:disabled-hook"]
+enabled = false
+TOML
+    cp "${CFG%/*}/config.toml" "$TEST_TEMP_DIR/trusted.toml"
+    before="$(cat "$CFG")"
+    install_hooks
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'already configured'* ]]
+    [ "$(cat "$CFG")" = "$before" ]
+    [ ! -e "$CFG.bak."* ]
+    jq '.hooks.PermissionRequest[0].hooks[0].async = false' "$CFG" >"$TEST_TEMP_DIR/sync.json"
+    cp "$TEST_TEMP_DIR/sync.json" "$CFG"
+    install_hooks
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'trust the new definition with /hooks'* ]]
+    jq -e '.hooks.PermissionRequest | length == 1 and .[0].hooks[0].async == true' "$CFG"
+    cmp "$TEST_TEMP_DIR/sync.json" "$CFG.bak."*
+    install_hooks
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'already configured'* ]]
+    cmp "$TEST_TEMP_DIR/trusted.toml" "${CFG%/*}/config.toml"
+    [ ! -e "${CFG%/*}/config.toml.bak."* ]
+}
+
+@test "Codex hook trust state does not hide nonempty inline event groups" {
+    python3 -c 'import tomllib' 2>/dev/null || skip 'Existing TOML inspection needs Python 3.11+'
+    mkdir -p "${CFG%/*}"
+    cat >"${CFG%/*}/config.toml" <<'TOML'
+[[hooks.Stop]]
+hooks = [{type = "command", command = "notify-codex.sh"}]
+[hooks.state."Stop:trusted-hook"]
+trusted_hash = "sha256:keep"
+TOML
+    install_hooks
+    [ "$status" -ne 0 ]
+    [[ "$output" == *'contains inline hooks'* ]]
     [ ! -e "$CFG" ]
 }
 

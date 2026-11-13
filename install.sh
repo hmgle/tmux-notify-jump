@@ -342,7 +342,20 @@ import tomllib
 
 with open(sys.argv[1], 'rb') as handle:
     config = tomllib.load(handle)
-print('inline' if 'hooks' in config else 'none')
+hooks = config.get('hooks', {})
+if not isinstance(hooks, dict):
+    raise ValueError('hooks must be a table')
+# Mirror HookEventsToml::is_empty, which counts matcher groups, not handlers.
+# hooks.state stores trust/enabled metadata and is not an inline event source.
+events = (
+    'PreModelRequest', 'PostModelRequest', 'PreToolUse', 'PermissionRequest',
+    'PostToolUse', 'PreCompact', 'PostCompact', 'SessionStart', 'SessionEnd',
+    'UserPromptSubmit', 'SubagentStart', 'SubagentStop', 'Stop', 'Interrupt',
+)
+groups = [hooks.get(event, []) for event in events]
+if any(not isinstance(value, list) for value in groups):
+    raise ValueError('hook events must be arrays')
+print('inline' if any(groups) else 'none')
 PY
     )"; then
         die "Cannot check Codex config for inline hooks (need valid TOML and Python 3.11+); merge PermissionRequest manually: $config"

@@ -33,8 +33,9 @@ Notable changes to tmux-notify-jump are documented in this file.
 - Approval notification hooks run asynchronously. Reinstalling upgrades matching
   synchronous handlers in place and prompts for renewed Codex hook trust.
 - Codex hook installation checks existing TOML with Python 3.11+ and refuses
-  JSON edits when inline hooks exist, avoiding duplicate hook sources. Invalid
-  TOML or an unavailable parser leaves hook configuration untouched.
+  JSON edits when nonempty inline events exist, avoiding duplicate hook sources.
+  Trust state and empty event arrays permit idempotent reinstalls and async
+  upgrades. Invalid TOML or an unavailable parser leaves hooks untouched.
 
 ### Tests
 
