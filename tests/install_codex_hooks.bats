@@ -58,6 +58,58 @@ install_hooks() {
     done
 }
 
+@test "Codex hooks installer refuses a directory without leaving temporary files" {
+    mkdir -p "$CFG"
+    printf 'keep\n' >"$CFG/keep"
+    install_hooks
+    [ "$status" -ne 0 ]
+    [[ "$output" == *'not a regular file; not modifying'* ]]
+    [[ "$output" != *'Configured Codex PermissionRequest'* ]]
+    [ -d "$CFG" ]
+    [ "$(cat "$CFG/keep")" = keep ]
+    local entries=("$CFG"/*)
+    [ "${#entries[@]}" -eq 1 ]
+    [ ! -e "$CFG.bak."* ]
+    [ ! -e "$CFG.tmp."* ]
+}
+
+@test "Codex hooks installer refuses symlinks to directories without changing the link" {
+    local target="$TEST_TEMP_DIR/target"
+    mkdir -p "$target" "${CFG%/*}"
+    printf 'keep\n' >"$target/keep"
+    ln -s "$target" "$CFG"
+    install_hooks
+    [ "$status" -ne 0 ]
+    [[ "$output" == *'not a regular file; not modifying'* ]]
+    [ -L "$CFG" ]
+    [ "$(readlink "$CFG")" = "$target" ]
+    [ "$(cat "$target/keep")" = keep ]
+    local entries=("$target"/*)
+    [ "${#entries[@]}" -eq 1 ]
+    [ ! -e "$target.bak."* ]
+    [ ! -e "$target.tmp."* ]
+}
+
+@test "Codex hooks installer refuses FIFOs and symlinks to FIFOs" {
+    mkdir -p "${CFG%/*}"
+    mkfifo "$CFG"
+    install_hooks
+    [ "$status" -ne 0 ]
+    [[ "$output" == *'not a regular file; not modifying'* ]]
+    [ -p "$CFG" ]
+    [ ! -e "$CFG.bak."* ]
+    [ ! -e "$CFG.tmp."* ]
+    mv "$CFG" "$TEST_TEMP_DIR/target.fifo"
+    ln -s "$TEST_TEMP_DIR/target.fifo" "$CFG"
+    install_hooks
+    [ "$status" -ne 0 ]
+    [[ "$output" == *'not a regular file; not modifying'* ]]
+    [ -L "$CFG" ]
+    [ -p "$TEST_TEMP_DIR/target.fifo" ]
+    [ ! -e "$TEST_TEMP_DIR/target.fifo.bak."* ]
+    [ ! -e "$TEST_TEMP_DIR/target.fifo.tmp."* ]
+}
+
 @test "Codex hooks default path follows the explicit Codex config directory" {
     python3 -c 'import tomllib' 2>/dev/null || skip 'Existing TOML inspection needs Python 3.11+'
     run "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" \

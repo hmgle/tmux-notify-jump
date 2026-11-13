@@ -39,6 +39,8 @@ Notable changes to tmux-notify-jump are documented in this file.
 - Explicit Codex hook paths now explain that overrides do not register a config
   folder. Nonstandard filenames prompt users to place or link the file as
   `hooks.json` in an active Codex config folder and verify it through `/hooks`.
+- Codex hook installation rejects existing directories and special files,
+  including symlink targets, before writing temporary files or reporting success.
 
 ### Tests
 

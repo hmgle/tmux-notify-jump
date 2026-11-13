@@ -389,6 +389,9 @@ configure_codex_hooks() {
         echo 'Place or symlink this file as hooks.json in an active Codex config folder, then check /hooks.' >&2
     fi
     cfg="$(resolve_config_path "$cfg")"
+    if [ -e "$cfg" ] && [ ! -f "$cfg" ]; then
+        die "Codex hooks path exists but is not a regular file; not modifying: $cfg"
+    fi
     if [ -f "$cfg" ]; then
         input="$cfg"
         # Validate the whole source before editing: a malformed unrelated
