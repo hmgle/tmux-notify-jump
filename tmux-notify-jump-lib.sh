@@ -2549,7 +2549,7 @@ tmux_notify_doctor_agents() {
     base="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local -a wrappers=(notify-codex.sh notify-claude-code.sh notify-kimi-code.sh notify-grok.sh notify-opencode.sh notify-pi.sh notify-step.sh notify-omp.sh)
     local -a configs=(
-        "${CODEX_CONFIG_PATH:-$home/.codex/config.toml}"
+        "${CODEX_CONFIG_PATH:-${CODEX_HOME:-$home/.codex}/config.toml}"
         "${CLAUDE_CONFIG_PATH:-$home/.claude/settings.json}"
         "${KIMI_CONFIG_PATH:-$home/.kimi-code/config.toml}"
         "${GROK_HOOKS_PATH:-${GROK_HOME:-$home/.grok}/hooks}/tmux-notify-jump.json"

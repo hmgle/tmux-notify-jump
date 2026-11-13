@@ -21,7 +21,7 @@ setup() {
     FAKE_OS=Linux
     FAKE_PASSTHROUGH=off
     FAKE_FOCUS_EVENTS=off
-    unset CODEX_HOOKS_PATH TMUX_NOTIFY_TERMINAL_METHOD
+    unset CODEX_HOME CODEX_CONFIG_PATH CODEX_HOOKS_PATH TMUX_NOTIFY_TERMINAL_METHOD
     for tool in tmux fzf jq ps notify-send xdotool; do
         printf '#!/usr/bin/env bash\nexit 0\n' >"$TEST_TEMP_DIR/bin/$tool"
     done
@@ -297,6 +297,32 @@ TOML
     run tmux_notify_doctor
     [ "$status" -eq 0 ]
     [[ "$output" == *'OSC 777 via client TTY; current tmux pane passthrough not required'* ]]
+}
+
+@test "doctor honors CODEX_HOME and explicit Codex path overrides" {
+    python3 -c 'import tomllib' 2>/dev/null || skip 'Python 3.11+ is optional'
+    export CODEX_HOME="$TEST_TEMP_DIR/custom codex"
+    mkdir -p "$CODEX_HOME"
+    printf '[tui]\nnotifications = false\n' >"$CODEX_HOME/config.toml"
+    printf '{"hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":"notify-codex.sh"}]}]}}\n' >"$CODEX_HOME/hooks.json"
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"$CODEX_HOME/config.toml"* ]]
+    [[ "$output" == *'PermissionRequest reference found'* ]]
+    export CODEX_CONFIG_PATH="$TEST_TEMP_DIR/override.toml"
+    printf '[tui]\nnotifications = false\n' >"$CODEX_CONFIG_PATH"
+    export CODEX_HOOKS_PATH="$TEST_TEMP_DIR/override-hooks.json"
+    printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"notify-codex.sh"}]}]}}\n' >"$CODEX_HOOKS_PATH"
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"$CODEX_CONFIG_PATH"* ]]
+    [[ "$output" == *'Stop reference found'* ]]
+    [[ "$output" != *'PermissionRequest reference found'* ]]
+    printf '[tui]\nnotifications = false\n' >"$TEST_TEMP_DIR/cli.toml"
+    run tmux_notify_doctor_cli --agent-config "codex=$TEST_TEMP_DIR/cli.toml"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"$TEST_TEMP_DIR/cli.toml"* ]]
+    [[ "$output" != *"$CODEX_CONFIG_PATH"* ]]
 }
 
 @test "doctor accepts explicit profile config paths and rejects unknown agents" {

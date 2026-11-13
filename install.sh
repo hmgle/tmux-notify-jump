@@ -47,7 +47,8 @@ Options:
   --configure-step  Configure Step Code (step) extension (opt-in)
   --configure-omp   Configure omp coding agent extension (opt-in)
   --configure-tmux  Configure tmux status, hooks, and prefix key (opt-in)
-  --codex-config <path>  Codex config.toml path (default: ~/.codex/config.toml)
+  --codex-config <path>  Codex config.toml path (default: \$CODEX_HOME/config.toml,
+                        or ~/.codex/config.toml when CODEX_HOME is unset/empty)
   --codex-hooks-path <path> Codex hooks.json path (default: beside Codex config)
   --claude-config <path> Claude settings.json path (default: ~/.claude/settings.json)
   --kimi-config <path>   Kimi config.toml path (default: ~/.kimi-code/config.toml)
@@ -220,7 +221,7 @@ trim_ws() {
 
 configure_codex() {
     local notify_cmd="$1"
-    local cfg="${CODEX_CONFIG_PATH:-$HOME/.codex/config.toml}"
+    local cfg="${CODEX_CONFIG_PATH:-${CODEX_HOME:-$HOME/.codex}/config.toml}"
 
     if [ -L "$cfg" ] && [ ! -e "$cfg" ]; then
         die "Codex config symlink is dangling: $cfg"
@@ -331,7 +332,7 @@ configure_codex() {
 
 configure_codex_hooks() {
     local notify_cmd="$1" cfg="" cmd="" tmp="" input=/dev/null
-    cfg="${CODEX_HOOKS_PATH:-$(dirname "${CODEX_CONFIG_PATH:-$HOME/.codex/config.toml}")/hooks.json}"
+    cfg="${CODEX_HOOKS_PATH:-$(dirname "${CODEX_CONFIG_PATH:-${CODEX_HOME:-$HOME/.codex}/config.toml}")/hooks.json}"
     command -v jq >/dev/null 2>&1 || die 'jq is required to configure Codex hooks'
     if [ -L "$cfg" ] && [ ! -e "$cfg" ]; then
         die "Codex hooks symlink is dangling: $cfg"

@@ -11,7 +11,7 @@ setup() {
     export TMUX_PANE='%9'
     export CAPTURE_FILE="$TEST_TEMP_DIR/args"
     export TMUX_NOTIFY_JUMP_SH="$TEST_TEMP_DIR/bin/jump"
-    unset CODEX_NOTIFY_EVENTS CODEX_NOTIFY_EXCLUDE_EVENTS CODEX_NOTIFY_DEBUG
+    unset CODEX_HOME CODEX_NOTIFY_EVENTS CODEX_NOTIFY_EXCLUDE_EVENTS CODEX_NOTIFY_DEBUG CODEX_NOTIFY_DEBUG_LOG
     mkdir -p "$TEST_TEMP_DIR/bin"
     cat >"$TEST_TEMP_DIR/bin/jump" <<'SH'
 #!/usr/bin/env bash
@@ -89,4 +89,17 @@ native_codex() {
     native_codex '{"hook_event_name":"PermissionRequest","tool_name":"mcp__test__tool","tool_input":{"description":"Access example.com"}}'
     [ "$status" -eq 0 ]
     rg -qx 'Access example.com' "$CAPTURE_FILE"
+}
+
+@test "Codex debug log honors CODEX_HOME and explicit log path without HOME" {
+    export CODEX_HOME="$TEST_TEMP_DIR/custom codex" CODEX_NOTIFY_DEBUG=1
+    native_codex '{"hook_event_name":"PermissionRequest"}'
+    [ "$status" -eq 0 ]
+    [ -f "$CODEX_HOME/log/notify-codex.log" ]
+    [ ! -e "$HOME/.codex" ]
+    unset HOME
+    export CODEX_NOTIFY_DEBUG_LOG="$TEST_TEMP_DIR/explicit.log"
+    native_codex '{"hook_event_name":"PermissionRequest"}'
+    [ "$status" -eq 0 ]
+    [ -f "$CODEX_NOTIFY_DEBUG_LOG" ]
 }

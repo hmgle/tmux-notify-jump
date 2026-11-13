@@ -6,7 +6,7 @@ setup() {
     setup_temp_dir
     command -v jq >/dev/null || skip 'jq is not installed'
     export HOME="$TEST_TEMP_DIR/home"
-    unset CODEX_CONFIG_PATH CODEX_HOOKS_PATH
+    unset CODEX_CONFIG_PATH CODEX_HOOKS_PATH CODEX_HOME
     CFG="$TEST_TEMP_DIR/config/hooks.json"
 }
 
@@ -112,4 +112,41 @@ JSON
     [ "$status" -eq 0 ]
     jq 'del(.hooks.PermissionRequest) | .hooks' "$CFG" >"$TEST_TEMP_DIR/actual-hooks"
     cmp "$TEST_TEMP_DIR/expected-hooks" "$TEST_TEMP_DIR/actual-hooks"
+}
+
+@test "Codex installation honors CODEX_HOME for config and hooks" {
+    export CODEX_HOME="$TEST_TEMP_DIR/custom codex"
+    run "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" \
+        --configure-codex --configure-codex-hooks
+    [ "$status" -eq 0 ]
+    rg -q '^notify = ' "$CODEX_HOME/config.toml"
+    jq -e '.hooks.PermissionRequest | length == 1' "$CODEX_HOME/hooks.json"
+    [ ! -e "$HOME/.codex" ]
+}
+
+@test "Codex explicit config and hooks paths override CODEX_HOME" {
+    export CODEX_HOME="$TEST_TEMP_DIR/unused-codex"
+    export CODEX_CONFIG_PATH="$TEST_TEMP_DIR/env-profile/config.toml"
+    export CODEX_HOOKS_PATH="$TEST_TEMP_DIR/env-hooks.json"
+    run "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" \
+        --configure-codex --configure-codex-hooks
+    [ "$status" -eq 0 ]
+    [ -f "$CODEX_CONFIG_PATH" ]
+    [ -f "$CODEX_HOOKS_PATH" ]
+    run "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" \
+        --configure-codex --configure-codex-hooks \
+        --codex-config "$TEST_TEMP_DIR/cli-profile/config.toml" --codex-hooks-path "$CFG"
+    [ "$status" -eq 0 ]
+    [ -f "$TEST_TEMP_DIR/cli-profile/config.toml" ]
+    [ -f "$CFG" ]
+    [ ! -e "$CODEX_HOME" ]
+}
+
+@test "Codex empty CODEX_HOME falls back to HOME" {
+    export CODEX_HOME=''
+    run "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" \
+        --configure-codex --configure-codex-hooks
+    [ "$status" -eq 0 ]
+    [ -f "$HOME/.codex/config.toml" ]
+    [ -f "$HOME/.codex/hooks.json" ]
 }

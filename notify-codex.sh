@@ -31,10 +31,13 @@ log_debug() {
     [ "${CODEX_NOTIFY_DEBUG:-0}" = "1" ] || return 0
     local logfile="${CODEX_NOTIFY_DEBUG_LOG:-}"
     if [ -z "$logfile" ]; then
-        local home="${HOME:-}"
+        local codex_home="${CODEX_HOME:-}"
+        if [ -z "$codex_home" ] && [ -n "${HOME:-}" ]; then
+            codex_home="$HOME/.codex"
+        fi
         # Fail open: hooks may run without HOME; skip logging instead of crashing.
-        [ -n "$home" ] || return 0
-        logfile="$home/.codex/log/notify-codex.log"
+        [ -n "$codex_home" ] || return 0
+        logfile="$codex_home/log/notify-codex.log"
     fi
     mkdir -p "$(dirname "$logfile")" 2>/dev/null || true
     printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$logfile" 2>/dev/null || true

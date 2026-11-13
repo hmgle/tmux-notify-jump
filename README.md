@@ -460,7 +460,9 @@ Agent checks use the installer's standard user-level locations and honor
 `CODEX_CONFIG_PATH`, `CLAUDE_CONFIG_PATH`, `KIMI_CONFIG_PATH`, `GROK_HOOKS_PATH`,
 `OPENCODE_PLUGIN_PATH`, `PI_EXTENSION_PATH`, `STEP_EXTENSION_PATH`, and
 `OMP_EXTENSION_PATH` when set. Runtime config precedence and profile selection
-are not inferred. For a custom/profile/project file, repeat `--agent-config
+are not inferred. Codex defaults to `${CODEX_HOME:-$HOME/.codex}/config.toml`;
+`CODEX_CONFIG_PATH` overrides it, and `--agent-config codex=...` takes precedence
+for diagnostics. For a custom/profile/project file, repeat `--agent-config
 <agent=path>` with `codex`, `claude`, `kimi`, `grok`, `opencode`, `pi`, `step`, or
 `omp`, for example:
 
@@ -472,6 +474,13 @@ tmux-notify-jump --doctor --agent-config omp="$HOME/.omp/profiles/work/agent/ext
 
 CLI flags override environment variables where applicable.
 
+- `CODEX_HOME`: Codex home directory (default: `~/.codex` when unset or empty).
+  Codex installation, diagnostics and the wrapper debug log honor it.
+- `CODEX_CONFIG_PATH`: Codex config file for installation and diagnostics
+  (default: `$CODEX_HOME/config.toml`); `--codex-config` overrides it in the
+  installer. The adjacent `hooks.json` is used unless overridden.
+- `CODEX_HOOKS_PATH`: Codex hooks JSON file for installation and diagnostics;
+  `--codex-hooks-path` overrides it in the installer.
 - `TMUX_NOTIFY_CONFIG`: env file to load before running (unset defaults to
   `~/.config/tmux-notify-jump/env`; explicitly empty disables file loading).
   Relative paths resolve against the invocation directory and are fixed as
@@ -577,7 +586,7 @@ Notes:
 
 Use `notify-codex.sh` as your Codex `notify` hook; it triggers on `agent-turn-complete` and calls `tmux-notify-jump` (or `TMUX_NOTIFY_JUMP_SH` if set).
 
-`~/.codex/config.toml`:
+`$CODEX_HOME/config.toml` (default: `~/.codex/config.toml`):
 
 ```toml
 notify = ["/path/to/notify-codex.sh"]
@@ -632,6 +641,10 @@ configure those files manually. This structural check does not establish that
 matchers, commands or MCP tools work at runtime.
 Open `/hooks` in Codex to review and trust the definition;
 an installed command alone does not establish that Codex will run it.
+The selected config defaults to `${CODEX_HOME:-$HOME/.codex}/config.toml`.
+Explicit config/hooks paths take precedence over `CODEX_HOME`. The wrapper's
+debug log defaults to `$CODEX_HOME/log/notify-codex.log`; set
+`CODEX_NOTIFY_DEBUG_LOG` to override it.
 
 Equivalent `hooks.json` entry (merge with existing hooks):
 
