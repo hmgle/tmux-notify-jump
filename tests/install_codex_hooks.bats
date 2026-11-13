@@ -22,6 +22,7 @@ install_hooks() {
     [ "$status" -eq 0 ]
     [[ "$output" == *'trust the new definition with /hooks'* ]]
     jq -e '.hooks | keys == ["PermissionRequest"]' "$CFG"
+    jq -e '.hooks.PermissionRequest[0].hooks[0].async == true' "$CFG"
     command="$(jq -r '.hooks.PermissionRequest[0].hooks[0].command' "$CFG")"
     run bash -c "$command" </dev/null
     [ "$status" -eq 0 ]
@@ -149,4 +150,32 @@ JSON
     [ "$status" -eq 0 ]
     [ -f "$HOME/.codex/config.toml" ]
     [ -f "$HOME/.codex/hooks.json" ]
+}
+
+@test "Codex installer upgrades its synchronous hook without duplicating handlers" {
+    install_hooks
+    [ "$status" -eq 0 ]
+    jq '.hooks.PermissionRequest[0].matcher = "Bash" |
+        .hooks.PermissionRequest[0].hooks[0] |= (.async = false | .timeout = 3 | .statusMessage = "keep") |
+        .hooks.PermissionRequest[0].hooks += [{type:"command",command:"unrelated",async:false}]' \
+        "$CFG" >"$TEST_TEMP_DIR/sync.json"
+    cp "$TEST_TEMP_DIR/sync.json" "$CFG"
+    install_hooks
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'trust the new definition with /hooks'* ]]
+    jq -e '.hooks.PermissionRequest | length == 1 and
+        .[0].matcher == "Bash" and (.[0].hooks | length == 2 and
+        .[0].async == true and .[0].timeout == 3 and .[0].statusMessage == "keep" and
+        .[1].command == "unrelated" and .[1].async == false)' "$CFG"
+    cmp "$TEST_TEMP_DIR/sync.json" "$CFG.bak."*
+    before="$(cat "$CFG")"
+    install_hooks
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'already configured'* ]]
+    [ "$(cat "$CFG")" = "$before" ]
+    jq 'del(.hooks.PermissionRequest[0].hooks[0].async)' "$CFG" >"$TEST_TEMP_DIR/no-async.json"
+    cp "$TEST_TEMP_DIR/no-async.json" "$CFG"
+    install_hooks
+    [ "$status" -eq 0 ]
+    jq -e '.hooks.PermissionRequest[0].hooks[0].async == true' "$CFG"
 }

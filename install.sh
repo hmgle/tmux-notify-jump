@@ -396,7 +396,9 @@ configure_codex_hooks() {
     printf -v cmd '%q' "$notify_cmd"
     if [ "$input" != /dev/null ] && jq -e --arg cmd "$cmd" '
         any(.hooks.PermissionRequest[]?.hooks[]?;
-            .type == "command" and .command == $cmd)' "$cfg" >/dev/null; then
+            .type == "command" and .command == $cmd) and
+        all(.hooks.PermissionRequest[]?.hooks[]? |
+            select(.type == "command" and .command == $cmd); .async == true)' "$cfg" >/dev/null; then
         echo "Codex approval hook already configured: $cfg"
         echo 'Review and trust it with /hooks in Codex; registration is not verified.'
         return 0
@@ -404,8 +406,15 @@ configure_codex_hooks() {
     ensure_parent_dir "$cfg"
     tmp="$(mktemp "${cfg}.tmp.XXXXXX")"
     if ! jq -s --arg cmd "$cmd" '
-        (.[0] // {}) | .hooks.PermissionRequest = ((.hooks.PermissionRequest // []) +
-            [{hooks: [{type: "command", command: $cmd, timeout: 10}]}])' "$input" >"$tmp"; then
+        def ours: .type == "command" and .command == $cmd;
+        (.[0] // {}) |
+        if any(.hooks.PermissionRequest[]?.hooks[]?; ours) then
+            .hooks.PermissionRequest |= map(
+                if any(.hooks[]?; ours) then
+                    .hooks |= map(if ours then .async = true else . end)
+                else . end)
+        else .hooks.PermissionRequest = ((.hooks.PermissionRequest // []) +
+            [{hooks: [{type: "command", command: $cmd, async: true, timeout: 10}]}]) end' "$input" >"$tmp"; then
         rm -f "$tmp"
         die "Could not prepare Codex hooks: $cfg"
     fi

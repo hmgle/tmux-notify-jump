@@ -638,9 +638,15 @@ preserves existing hooks and symlinks, and is idempotent. It does not change
 handler fields against the supported Codex v0.168.0 structure, including
 unrelated events. Invalid or unfamiliar fields/handler variants are refused;
 configure those files manually. This structural check does not establish that
-matchers, commands or MCP tools work at runtime.
-Open `/hooks` in Codex to review and trust the definition;
-an installed command alone does not establish that Codex will run it.
+matchers, commands or MCP tools work at runtime. Open `/hooks` in Codex to review
+and trust the definition; an installed command alone does not establish that
+Codex will run it.
+
+Notification handlers run with `"async": true` so Codex does not wait for
+side-channel notification work. Rerunning the installer upgrades this tool's
+matching synchronous approval handlers in place, preserving their matchers,
+timeouts and other handlers. Changed definitions need review again in `/hooks`.
+
 The selected config defaults to `${CODEX_HOME:-$HOME/.codex}/config.toml`.
 Explicit config/hooks paths take precedence over `CODEX_HOME`. The wrapper's
 debug log defaults to `$CODEX_HOME/log/notify-codex.log`; set
@@ -655,6 +661,7 @@ Equivalent `hooks.json` entry (merge with existing hooks):
       "hooks": [{
         "type": "command",
         "command": "/path/to/notify-codex.sh",
+        "async": true,
         "timeout": 10
       }]
     }]
@@ -667,9 +674,10 @@ priority. It runs before automatic or user approval, so it does not prove Codex
 is waiting for a human. The wrapper sends no approval decision or hook stdout,
 including in debug mode, and notification failures leave Codex running.
 
-For a native completion setup, register `Stop` with the same handler and remove
-this wrapper's legacy `notify` registration to avoid duplicate completion
-notifications. `Stop` uses `last_assistant_message` and `cwd`; another Stop
+For a native completion setup, register `Stop` with the same asynchronous
+handler and remove this wrapper's legacy `notify` registration to avoid
+duplicate completion notifications. `Stop` uses `last_assistant_message` and
+`cwd`; another Stop
 hook may still request continuation, so this event is not proof of a settled
 run. Plan-mode prompts and async questions remain native TUI events; they are
 not emitted by the legacy notify command or these two hook adapters.
