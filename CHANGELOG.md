@@ -52,12 +52,15 @@ Notable changes to tmux-notify-jump are documented in this file.
 ### Tests
 
 - Added protocol, PTY, wrapper, installer and diagnostics coverage. The suite
-  contains 539 tests, including nested hook schemas, Codex home/path precedence,
+  contains 540 tests, including nested hook schemas, Codex home/path precedence,
   special-file targets, empty commands, trust-state reinstalls, discovery paths,
   notification filters, hook feature switches, mixed hook sources and
   asynchronous hook upgrades. Linux/X11 Jump
   and Dismiss were verified on a disposable tmux server, along with WezTerm
   OSC-to-desktop notification requests.
+- Codex path tests accept `timeout` or `gtimeout` for blocking regressions. If
+  neither is installed, only those two tests skip; discovery and dangling-link
+  tests still run.
 
 ## [1.5.1] - 2026-10-13
 

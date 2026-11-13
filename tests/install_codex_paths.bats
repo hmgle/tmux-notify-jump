@@ -7,7 +7,6 @@ setup() {
     export HOME="$TEST_TEMP_DIR/home"
     unset CODEX_HOME CODEX_CONFIG_PATH CODEX_HOOKS_PATH
     command -v jq >/dev/null || skip 'jq is not installed'
-    command -v timeout >/dev/null || skip 'timeout is needed for blocking regressions'
     mkdir -p "$TEST_TEMP_DIR/config"
     mkfifo "$TEST_TEMP_DIR/fifo"
     mkdir "$TEST_TEMP_DIR/directory"
@@ -17,6 +16,16 @@ setup() {
 }
 
 teardown() { teardown_temp_dir; }
+
+require_timeout() {
+    if command -v timeout >/dev/null 2>&1; then
+        TIMEOUT_CMD=timeout
+    elif command -v gtimeout >/dev/null 2>&1; then
+        TIMEOUT_CMD=gtimeout
+    else
+        skip 'timeout or gtimeout is needed only for blocking regressions'
+    fi
+}
 
 assert_rejected_config() {
     [ "$status" -eq 1 ]
@@ -36,11 +45,12 @@ assert_rejected_config() {
 }
 
 @test "Codex config entry points reject nonregular paths before reading or writing" {
+    require_timeout
     local flag target
     for flag in --configure-codex --configure-codex-hooks; do
         for target in "$TEST_TEMP_DIR/fifo" "$TEST_TEMP_DIR/directory" /dev/null \
             "$TEST_TEMP_DIR/fifo-link" "$TEST_TEMP_DIR/directory-link" "$TEST_TEMP_DIR/device-link"; do
-            run timeout 5 "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" \
+            run "$TIMEOUT_CMD" 5 "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" \
                 "$flag" --codex-config "$target" \
                 --codex-hooks-path "$TEST_TEMP_DIR/config/hooks.json"
             assert_rejected_config
@@ -49,10 +59,11 @@ assert_rejected_config() {
 }
 
 @test "Codex hooks reject nonregular sibling TOML before parsing" {
+    require_timeout
     local target
     for target in "$TEST_TEMP_DIR/fifo" "$TEST_TEMP_DIR/directory" /dev/null; do
         ln -s "$target" "$TEST_TEMP_DIR/config/config.toml"
-        run timeout 5 "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" \
+        run "$TIMEOUT_CMD" 5 "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" \
             --configure-codex-hooks --codex-hooks-path "$TEST_TEMP_DIR/config/hooks.json"
         assert_rejected_config
         [ -L "$TEST_TEMP_DIR/config/config.toml" ]
@@ -60,7 +71,7 @@ assert_rejected_config() {
         rm "$TEST_TEMP_DIR/config/config.toml"
     done
     mkfifo "$TEST_TEMP_DIR/config/config.toml"
-    run timeout 5 "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" \
+    run "$TIMEOUT_CMD" 5 "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" \
         --configure-codex-hooks --codex-hooks-path "$TEST_TEMP_DIR/config/hooks.json"
     assert_rejected_config
     [ -p "$TEST_TEMP_DIR/config/config.toml" ]
@@ -70,7 +81,7 @@ assert_rejected_config() {
     ln -s "$TEST_TEMP_DIR/missing.toml" "$TEST_TEMP_DIR/config/config.toml"
     local flag
     for flag in --configure-codex --configure-codex-hooks; do
-        run timeout 5 "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" \
+        run "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" \
             "$flag" --codex-config "$TEST_TEMP_DIR/config/config.toml"
         [ "$status" -eq 1 ]
         [[ "$output" == *'Codex config symlink is dangling'* ]]
