@@ -339,8 +339,54 @@ configure_codex_hooks() {
     cfg="$(resolve_config_path "$cfg")"
     if [ -f "$cfg" ]; then
         input="$cfg"
-        if ! jq -e 'type == "object" and ((.hooks // {}) | type == "object") and
-            ((.hooks.PermissionRequest // []) | type == "array")' "$cfg" >/dev/null 2>&1; then
+        # Validate the whole source before editing: a malformed unrelated
+        # event also prevents Codex from loading our appended handler. Keep
+        # this conservative against the v0.168.0 protocol/config hook types;
+        # unfamiliar fields or handler variants require manual configuration.
+        if ! jq -es '
+            def only_keys($allowed): (keys - $allowed | length) == 0;
+            def optional($key; rule):
+                if has($key) then .[$key] | rule else true end;
+            def nullable(rule): . == null or rule;
+            def text: type == "string" and test("\\S");
+            def uint: type == "number" and . >= 0 and . <= 9007199254740991 and floor == .;
+            def toml_value:
+                if type == "object" then all(.[]; toml_value)
+                elif type == "array" then all(.[]; toml_value)
+                elif type == "number" then . >= -9007199254740991 and . <= 9007199254740991
+                else . != null end;
+            def handler:
+                type == "object" and
+                optional("timeout"; nullable(uint)) and
+                optional("statusMessage"; nullable(type == "string")) and
+                (if .type == "command" then
+                    only_keys(["type", "command", "commandWindows", "command_windows",
+                        "timeout", "async", "statusMessage", "additionalContextLimit"]) and
+                    (.command | text) and
+                    (has("commandWindows") and has("command_windows") | not) and
+                    optional("commandWindows"; nullable(text)) and
+                    optional("command_windows"; nullable(text)) and
+                    optional("async"; type == "boolean") and
+                    optional("additionalContextLimit"; nullable(uint))
+                elif .type == "mcp_tool" then
+                    only_keys(["type", "server", "tool", "input", "timeout", "statusMessage"]) and
+                    (.server | text) and (.tool | text) and
+                    optional("input"; type == "object" and toml_value)
+                else false end);
+            def group:
+                type == "object" and only_keys(["matcher", "hooks"]) and
+                optional("matcher"; nullable(type == "string")) and
+                optional("hooks"; type == "array" and all(.[]; handler));
+            length == 1 and (.[0] | type == "object" and
+                only_keys(["description", "hooks"]) and
+                optional("description"; nullable(type == "string")) and
+                optional("hooks"; type == "object" and
+                    only_keys(["PreModelRequest", "PostModelRequest", "PreToolUse",
+                        "PermissionRequest", "PostToolUse", "PreCompact", "PostCompact",
+                        "SessionStart", "SessionEnd", "UserPromptSubmit", "SubagentStart",
+                        "SubagentStop", "Stop", "Interrupt"]) and
+                    all(.[]; type == "array" and all(.[]; group))))
+        ' "$cfg" >/dev/null 2>&1; then
             die "Codex hooks has invalid JSON or incompatible schema; not modifying: $cfg"
         fi
     fi

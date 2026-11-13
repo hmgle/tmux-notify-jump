@@ -625,7 +625,12 @@ the selected Codex config. Pass `--codex-hooks-path <file>` (or
 `CODEX_HOOKS_PATH`) for another location; `--codex-config` selects the config
 directory by default. This opt-in operation requires `jq`, backs up changes,
 preserves existing hooks and symlinks, and is idempotent. It does not change
-`[tui]` settings. Open `/hooks` in Codex to review and trust the definition;
+`[tui]` settings. Before editing, it validates all events, matcher groups and
+handler fields against the supported Codex v0.168.0 structure, including
+unrelated events. Invalid or unfamiliar fields/handler variants are refused;
+configure those files manually. This structural check does not establish that
+matchers, commands or MCP tools work at runtime.
+Open `/hooks` in Codex to review and trust the definition;
 an installed command alone does not establish that Codex will run it.
 
 Equivalent `hooks.json` entry (merge with existing hooks):

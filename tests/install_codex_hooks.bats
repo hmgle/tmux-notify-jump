@@ -65,3 +65,51 @@ install_hooks() {
     rg -q '^notify = ' "$TEST_TEMP_DIR/profile/config.toml"
     [ ! -e "$HOME/.codex/hooks.json" ]
 }
+
+@test "Codex hooks installer validates every nested event before editing" {
+    mkdir -p "${CFG%/*}"
+    local content
+    while IFS= read -r content; do
+        printf '%s' "$content" >"$CFG"
+        install_hooks
+        [ "$status" -ne 0 ]
+        [[ "$output" == *'incompatible schema; not modifying'* ]]
+        [ "$(cat "$CFG")" = "$content" ]
+        [ ! -e "$CFG.bak."* ]
+        [ ! -e "$CFG.tmp."* ]
+    done <<'JSON'
+{"hooks":{"PermissionRequest":[null]}}
+{"hooks":{"PermissionRequest":[{"hooks":null}]}}
+{"hooks":{"PermissionRequest":[{"hooks":[null]}]}}
+{"hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":7}]}]}}
+{"hooks":{"PermissionRequest":[]},"description":false}
+{"hooks":{"Stop":null}}
+{"hooks":{"Stop":[{"matcher":false}]}}
+{"hooks":{"Stop":[{"hooks":[{"type":"command"}]}]}}
+{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo ok","async":null}]}]}}
+{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo ok","timeout":-1}]}]}}
+{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo ok","timeout":1.5}]}]}}
+{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo ok","statusMessage":0}]}]}}
+{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo ok","additionalContextLimit":"5"}]}]}}
+{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo ok","commandWindows":false}]}]}}
+{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo ok","commandWindows":"a","command_windows":"b"}]}]}}
+{"hooks":{"Stop":[{"hooks":[{"type":"mcp_tool","server":"test"}]}]}}
+{"hooks":{"Stop":[{"hooks":[{"type":"mcp_tool","server":"test","tool":"log","input":{"nested":[null]}}]}]}}
+{"hooks":{"Stop":[{"hooks":[{"type":"unknown","command":"echo ok"}]}]}}
+{"hooks":{"FutureEvent":[]}}
+{"hooks":null}
+{} {}
+JSON
+}
+
+@test "Codex hooks installer preserves supported command and MCP configurations" {
+    mkdir -p "${CFG%/*}"
+    cat >"$CFG" <<'JSON'
+{"description":null,"hooks":{"Stop":[{"matcher":null,"hooks":[{"type":"command","command":"echo ok","command_windows":"echo windows","async":false,"timeout":null,"statusMessage":null,"additionalContextLimit":0},{"type":"mcp_tool","server":"test","tool":"log","input":{"nested":[true,3,"ok",{"key":"value"}]},"timeout":5}]}],"SessionStart":[{}]}}
+JSON
+    jq '.hooks' "$CFG" >"$TEST_TEMP_DIR/expected-hooks"
+    install_hooks
+    [ "$status" -eq 0 ]
+    jq 'del(.hooks.PermissionRequest) | .hooks' "$CFG" >"$TEST_TEMP_DIR/actual-hooks"
+    cmp "$TEST_TEMP_DIR/expected-hooks" "$TEST_TEMP_DIR/actual-hooks"
+}
