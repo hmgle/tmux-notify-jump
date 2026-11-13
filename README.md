@@ -6,10 +6,12 @@
 [![Quality Gate](https://github.com/hmgle/tmux-notify-jump/actions/workflows/quality-gate.yml/badge.svg)](https://github.com/hmgle/tmux-notify-jump/actions/workflows/quality-gate.yml)
 [![Release](https://img.shields.io/github/v/release/hmgle/tmux-notify-jump)](https://github.com/hmgle/tmux-notify-jump/releases/latest)
 
-Send a tmux-native or desktop notification on Linux and macOS.
+Send a tmux-native, desktop or terminal notification on Linux and macOS.
 
 - If tmux is available, you can jump to a target tmux pane when you click an action button.
 - If tmux is not available, you can still use it as a notification + “focus my terminal” helper (`--focus-only`).
+- Optional OSC 777 delivery requests notifications from supported local terminals,
+  including over SSH; see [terminal notifications](#terminal-notifications-over-ssh).
 
 In other words: it’s tmux-aware, but not tmux-only.
 

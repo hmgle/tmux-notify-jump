@@ -4,6 +4,8 @@ Notable changes to tmux-notify-jump are documented in this file.
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-13
+
 ### Added
 
 - Optional OSC 777 notifications through the target session's ordinary client
@@ -21,43 +23,39 @@ Notable changes to tmux-notify-jump are documented in this file.
 ### Fixed
 
 - Codex hook installation validates nested structures across every event before
-  editing; malformed or unfamiliar schemas are left untouched. Valid empty
-  `prompt` and `agent` handlers are preserved even though Codex skips execution.
-  Empty command/Windows override and MCP server/tool strings are also preserved
-  as valid schema fields, leaving execution warnings to Codex.
+  editing and preserves valid handlers, including empty strings and the
+  `prompt` and `agent` variants that Codex currently skips at runtime.
 - Codex installation, diagnostics and wrapper debug logs honor `CODEX_HOME`,
   with explicit file paths taking precedence.
-- Codex duplicate-reminder diagnostics apply the wrapper event whitelist and
-  blacklist, avoiding warnings for notification channels disabled by filtering.
-- Codex diagnostics honor the global hooks feature switch and its old alias,
-  excluding disabled hooks from duplicate warnings while retaining independent
-  legacy notifications and trust-review reminders.
+- Codex duplicate-reminder diagnostics honor wrapper event filters and the
+  global hooks switch, including its old alias. Disabled hooks retain trust
+  reminders while legacy notifications are checked independently.
 - Approval notification hooks run asynchronously. Reinstalling upgrades matching
   synchronous handlers in place and prompts for renewed Codex hook trust.
 - Codex hook installation checks existing TOML with Python 3.11+ and refuses
   JSON edits when nonempty inline events exist, avoiding duplicate hook sources.
   Trust state and empty event arrays permit idempotent reinstalls and async
   upgrades. Invalid TOML or an unavailable parser leaves hooks untouched.
-- Explicit Codex config and hook paths explain that overrides do not register
-  a config folder. Nonstandard filenames prompt users to place or link the file
-  as `hooks.json` in an active Codex config folder and verify it through `/hooks`.
-  The same discovery notice applies to standalone legacy notify installation.
-  Combined installations print the general notice only once and retain the
-  hooks-specific guidance.
+- Explicit Codex config and hook paths report that overrides do not register
+  a config folder. Hooks must be discoverable as `hooks.json` in an active
+  Codex config folder. Combined installations print this guidance once.
 - Both Codex installers validate config files and symlink targets before reads
   or writes, including sibling TOML checked for inline hooks. Directories,
   FIFOs, devices and other special files are rejected without blocking or
   reporting a successful configuration.
 
-### Tests
+### Dependencies and validation
 
+- Existing TOML inspection for `--configure-codex-hooks` requires Python 3.11+.
+  Structured Codex diagnostics also use Python 3.11+ when available. Notification
+  delivery does not require Python; wrappers continue to use `jq`.
 - Added protocol, PTY, wrapper, installer and diagnostics coverage. The suite
   contains 540 tests, including nested hook schemas, Codex home/path precedence,
   special-file targets, empty commands, trust-state reinstalls, discovery paths,
   notification filters, hook feature switches, mixed hook sources and
-  asynchronous hook upgrades. Linux/X11 Jump
-  and Dismiss were verified on a disposable tmux server, along with WezTerm
-  OSC-to-desktop notification requests.
+  asynchronous hook upgrades. Linux/X11 Jump and Dismiss were verified on a
+  disposable tmux server, along with WezTerm OSC-to-desktop notification requests.
+  Native macOS notification UI was not manually tested for this release.
 - Codex path tests accept `timeout` or `gtimeout` for blocking regressions. If
   neither is installed, only those two tests skip; discovery and dangling-link
   tests still run.
