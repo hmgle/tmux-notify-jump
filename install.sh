@@ -221,14 +221,23 @@ trim_ws() {
     printf '%s' "$value"
 }
 
+resolve_codex_file() {
+    local path="$1" label="$2"
+    if [ -L "$path" ] && [ ! -e "$path" ]; then
+        die "$label symlink is dangling: $path"
+    fi
+    path="$(resolve_config_path "$path")" || return 1
+    if [ -e "$path" ] && [ ! -f "$path" ]; then
+        die "$label path exists but is not a regular file; not modifying: $path"
+    fi
+    printf '%s' "$path"
+}
+
 configure_codex() {
     local notify_cmd="$1"
     local cfg="${CODEX_CONFIG_PATH:-${CODEX_HOME:-$HOME/.codex}/config.toml}"
 
-    if [ -L "$cfg" ] && [ ! -e "$cfg" ]; then
-        die "Codex config symlink is dangling: $cfg"
-    fi
-    cfg="$(resolve_config_path "$cfg")"
+    cfg="$(resolve_codex_file "$cfg" 'Codex config')" || return 1
     ensure_parent_dir "$cfg"
 
     toml_root_has_notify_key() {
@@ -334,7 +343,8 @@ configure_codex() {
 
 check_codex_inline_hooks() {
     local config="$1" source=""
-    [ -e "$config" ] || [ -L "$config" ] || return 0
+    config="$(resolve_codex_file "$config" 'Codex config')" || return 1
+    [ -f "$config" ] || return 0
     # A real TOML parser avoids confusing comments, quoted keys and multiline
     # strings with inline hooks. Refuse an unchecked source rather than create
     # a second representation that Codex would merge and potentially run twice.
@@ -376,9 +386,6 @@ configure_codex_hooks() {
     if [ "$(dirname "$cfg")" != "$(dirname "$config")" ]; then
         check_codex_inline_hooks "$(dirname "$cfg")/config.toml"
     fi
-    if [ -L "$cfg" ] && [ ! -e "$cfg" ]; then
-        die "Codex hooks symlink is dangling: $cfg"
-    fi
     if [ -n "$CODEX_HOOKS_PATH" ] || [ -n "$CODEX_CONFIG_PATH" ]; then
         echo 'Codex discovery unverified: path overrides do not register a config folder; hooks.json must be in an active Codex config folder. Check /hooks in Codex.'
     fi
@@ -388,10 +395,7 @@ configure_codex_hooks() {
         echo "Warning: file is not named hooks.json; Codex will not discover it directly: $cfg" >&2
         echo 'Place or symlink this file as hooks.json in an active Codex config folder, then check /hooks.' >&2
     fi
-    cfg="$(resolve_config_path "$cfg")"
-    if [ -e "$cfg" ] && [ ! -f "$cfg" ]; then
-        die "Codex hooks path exists but is not a regular file; not modifying: $cfg"
-    fi
+    cfg="$(resolve_codex_file "$cfg" 'Codex hooks')" || return 1
     if [ -f "$cfg" ]; then
         input="$cfg"
         # Validate the whole source before editing: a malformed unrelated

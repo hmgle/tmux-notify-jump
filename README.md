@@ -652,8 +652,10 @@ active config layers; check discovery and trust with `/hooks`.
 
 This opt-in operation requires `jq`, backs up changes, preserves existing
 hooks and symlinks, and is idempotent. It does not change `[tui]` settings.
-The hooks path must be absent or resolve to a regular file; directories,
-FIFOs, sockets and other special files are rejected without replacement.
+Both Codex installers require config paths to be absent or resolve to regular
+files. This includes hooks.json and sibling TOML inspected for inline hooks;
+directories, FIFOs, sockets, devices and dangling symlinks are rejected before
+reading or writing them.
 Existing TOML configs also require Python 3.11+ for safe
 inspection. The installer checks the selected config and, when hooks.json is
 elsewhere, its sibling `config.toml`. If either contains nonempty inline event
