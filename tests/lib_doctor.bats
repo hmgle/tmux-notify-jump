@@ -278,6 +278,69 @@ TOML
     [[ "$output" == *'legacy notify and Stop both reference the wrapper'* ]]
 }
 
+@test "Codex doctor excludes hooks disabled by either feature key" {
+    python3 -c 'import tomllib' 2>/dev/null || skip 'Python 3.11+ is optional'
+    mkdir -p "$HOME/.codex"
+    local key
+    for key in hooks codex_hooks; do
+        cat >"$HOME/.codex/config.toml" <<TOML
+[features]
+$key = false
+[[hooks.Stop]]
+hooks = [{type = "command", command = "notify-codex.sh"}]
+[tui]
+notifications = true
+TOML
+        run tmux_notify_doctor
+        [ "$status" -eq 0 ]
+        [[ "$output" != *'possible duplicate'* ]]
+        [[ "$output" == *'Stop reference found'*'hooks disabled in selected config'* ]]
+        printf '{"hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":"notify-codex.sh"}]}]}}\n' >"$HOME/.codex/hooks.json"
+        run tmux_notify_doctor
+        [ "$status" -eq 0 ]
+        [[ "$output" != *'possible duplicate'* ]]
+        [[ "$output" == *'PermissionRequest reference found'*'hooks disabled in selected config'* ]]
+        rm "$HOME/.codex/hooks.json"
+    done
+}
+
+@test "Codex doctor canonical hooks feature overrides its legacy alias" {
+    python3 -c 'import tomllib' 2>/dev/null || skip 'Python 3.11+ is optional'
+    mkdir -p "$HOME/.codex"
+    printf '{"hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":"notify-codex.sh"}]}],"Stop":[{"hooks":[{"type":"command","command":"notify-codex.sh"}]}]}}\n' >"$HOME/.codex/hooks.json"
+    printf '[features]\nhooks = true\ncodex_hooks = false\n' >"$HOME/.codex/config.toml"
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'possible duplicate reminders'* ]]
+    [[ "$output" == *'possible duplicate approval reminders'* ]]
+    [[ "$output" != *'hooks disabled'* ]]
+    printf '[features]\nhooks = false\ncodex_hooks = true\n' >"$HOME/.codex/config.toml"
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" != *'possible duplicate'* ]]
+    [[ "$output" == *'hooks disabled in selected config'* ]]
+}
+
+@test "Codex doctor retains legacy and native diagnostics when hooks are disabled" {
+    python3 -c 'import tomllib' 2>/dev/null || skip 'Python 3.11+ is optional'
+    mkdir -p "$HOME/.codex"
+    cat >"$HOME/.codex/config.toml" <<'TOML'
+notify = ["notify-codex.sh"]
+[features]
+hooks = false
+[tui]
+notification_method = "osc777"
+TOML
+    printf '{"hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":"notify-codex.sh"}]}],"Stop":[{"hooks":[{"type":"command","command":"notify-codex.sh"}]}]}}\n' >"$HOME/.codex/hooks.json"
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'possible duplicate reminders depending on routing'* ]]
+    [[ "$output" != *'possible duplicate completion notifications'* ]]
+    [[ "$output" != *'possible duplicate approval reminders'* ]]
+    [[ "$output" == *'hooks disabled in selected config'* ]]
+    [[ "$output" == *'Codex OSC passthrough'* ]]
+}
+
 @test "doctor handles commented Codex references and invalid TOML without mutations" {
     python3 -c 'import tomllib' 2>/dev/null || skip 'Python 3.11+ is optional'
     mkdir -p "$HOME/.codex"

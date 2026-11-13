@@ -451,7 +451,11 @@ config and adjacent `hooks.json` (override with `CODEX_HOOKS_PATH`, or pass
 `--agent-config codex=/path/to/hooks.json` for a hooks-only check). Diagnostics
 report possible duplicate completion/approval channels after applying the
 current `CODEX_NOTIFY_EVENTS` / `CODEX_NOTIFY_EXCLUDE_EVENTS` filters, and remind
-you to review `/hooks`. Explicit native OSC settings also trigger read-only
+you to review `/hooks`. A selected config with `[features] hooks = false`
+(or the old `codex_hooks` alias) suppresses hook-based duplicate warnings;
+the canonical `hooks` key takes precedence when both are set. Trust reminders
+note that hooks are disabled, while top-level `notify` remains independent.
+Explicit native OSC settings also trigger read-only
 checks of the current pane's effective `allow-passthrough` and server `focus-events`.
 Other panes, config layers, hook trust and local terminal delivery remain
 unverified. Hook references still trigger trust-review reminders even when

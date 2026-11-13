@@ -27,6 +27,9 @@ Notable changes to tmux-notify-jump are documented in this file.
   with explicit file paths taking precedence.
 - Codex duplicate-reminder diagnostics apply the wrapper event whitelist and
   blacklist, avoiding warnings for notification channels disabled by filtering.
+- Codex diagnostics honor the global hooks feature switch and its old alias,
+  excluding disabled hooks from duplicate warnings while retaining independent
+  legacy notifications and trust-review reminders.
 - Approval notification hooks run asynchronously. Reinstalling upgrades matching
   synchronous handlers in place and prompts for renewed Codex hook trust.
 

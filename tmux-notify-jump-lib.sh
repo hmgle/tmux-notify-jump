@@ -2455,7 +2455,7 @@ tmux_notify_doctor_private_path() {
 }
 
 tmux_notify_doctor_codex() {
-    local config="$1" hooks="" summary="" method="" condition=""
+    local config="$1" hooks="" summary="" method="" condition="" hooks_enabled=1
     local legacy=0 stop=0 permission=0 native_complete=0 native_approval=0 native_any=0
     hooks="${CODEX_HOOKS_PATH:-$(dirname "$config")/hooks.json}"
     case "$config" in *.json) hooks="$config"; config="" ;; esac
@@ -2485,6 +2485,11 @@ try:
         return native is True or isinstance(native, list) and event in native
     notify = config.get('notify', [])
     legacy = isinstance(notify, list) and any(isinstance(arg, str) and 'notify-codex.sh' in arg for arg in notify)
+    features = config.get('features', {})
+    # v0.168.0 defaults hooks on; the canonical key overrides its old alias.
+    hooks_enabled = features.get('hooks', features.get('codex_hooks', True))
+    if not isinstance(hooks_enabled, bool):
+        raise ValueError('invalid hooks feature toggle')
     def registered(event):
         for table in (config.get('hooks', {}), hooks.get('hooks', {})):
             for group in table.get(event, []):
@@ -2500,6 +2505,7 @@ try:
         int(native is True or isinstance(native, list) and bool(native)),
         method if method in ('auto', 'osc9', 'osc777', 'bel') else 'unknown',
         condition if condition in ('unfocused', 'always') else 'unknown',
+        int(hooks_enabled),
     ))))
 except (ImportError, OSError, ValueError, TypeError, AttributeError):
     sys.exit(1)
@@ -2508,12 +2514,16 @@ PY
         tmux_notify_doctor_line WARN 'Codex notifications' 'settings unverified; need readable valid config and optional Python 3.11+ for TOML'
         return 0
     fi
-    IFS='|' read -r legacy stop permission native_complete native_approval native_any method condition <<<"$summary"
+    IFS='|' read -r legacy stop permission native_complete native_approval native_any method condition hooks_enabled <<<"$summary"
     tmux_notify_doctor_line OK 'Codex TUI settings' "method=$method condition=$condition (selected files only; runtime precedence unverified)"
-    local legacy_enabled=0 stop_enabled=0 permission_enabled=0
+    local legacy_enabled=0 stop_enabled=0 permission_enabled=0 trust_note=""
     if [ "$legacy" = 1 ] && tmux_notify_codex_event_enabled agent-turn-complete; then legacy_enabled=1; fi
-    if [ "$stop" = 1 ] && tmux_notify_codex_event_enabled Stop; then stop_enabled=1; fi
-    if [ "$permission" = 1 ] && tmux_notify_codex_event_enabled PermissionRequest; then permission_enabled=1; fi
+    if [ "$hooks_enabled" = 1 ]; then
+        if [ "$stop" = 1 ] && tmux_notify_codex_event_enabled Stop; then stop_enabled=1; fi
+        if [ "$permission" = 1 ] && tmux_notify_codex_event_enabled PermissionRequest; then permission_enabled=1; fi
+    else
+        trust_note='; hooks disabled in selected config'
+    fi
     if [ "$legacy_enabled" = 1 ] && [ "$stop_enabled" = 1 ]; then
         tmux_notify_doctor_line WARN 'Codex completion' 'legacy notify and Stop both reference the wrapper; possible duplicate completion notifications'
     fi
@@ -2521,12 +2531,12 @@ PY
         tmux_notify_doctor_line WARN 'Codex completion' 'wrapper and native TUI completion enabled; possible duplicate reminders depending on routing and focus'
     fi
     if [ "$permission" = 1 ]; then
-        tmux_notify_doctor_line WARN 'Codex hook trust' 'PermissionRequest reference found; review /hooks in Codex (trust and runtime registration unverified)'
+        tmux_notify_doctor_line WARN 'Codex hook trust' "PermissionRequest reference found; review /hooks in Codex (trust and runtime registration unverified)$trust_note"
         if [ "$permission_enabled" = 1 ] && [ "$native_approval" = 1 ]; then
             tmux_notify_doctor_line WARN 'Codex approval' 'wrapper and native TUI approval enabled; possible duplicate approval reminders'
         fi
     elif [ "$stop" = 1 ]; then
-        tmux_notify_doctor_line WARN 'Codex hook trust' 'Stop reference found; review /hooks in Codex (trust and runtime registration unverified)'
+        tmux_notify_doctor_line WARN 'Codex hook trust' "Stop reference found; review /hooks in Codex (trust and runtime registration unverified)$trust_note"
     fi
     if [ "$native_any" = 1 ] && { [ "$method" = osc777 ] || [ "$method" = osc9 ]; }; then
         local passthrough="" focus=""
