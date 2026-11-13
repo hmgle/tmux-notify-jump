@@ -2,6 +2,28 @@
 
 Notable changes to tmux-notify-jump are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Optional OSC 777 notifications through the target session's ordinary client
+  terminals, with `--terminal-method`, global and per-agent settings. SSH users
+  can request local terminal toasts while retaining the Inbox. Delivery handles
+  hidden panes, redirected output, detachment, deduplication and bounded UTF-8
+  fields without requiring passthrough through the current tmux server.
+- Codex native `PermissionRequest` and `Stop` stdin payload support alongside
+  legacy completion notifications. Opt-in `--configure-codex-hooks` installs
+  only the approval hook to avoid duplicating legacy completion events.
+- Codex diagnostics for possible duplicate notification channels, hook trust
+  review, native OSC passthrough and focus tracking. Structured TOML inspection
+  uses optional Python 3.11+; notification delivery does not require it.
+
+### Tests
+
+- Added protocol, PTY, wrapper, installer and diagnostics coverage. The suite
+  contains 504 tests. Linux/X11 Jump and Dismiss were verified on a disposable
+  tmux server, along with WezTerm OSC-to-desktop notification requests.
+
 ## [1.5.1] - 2026-10-13
 
 ### Fixed

@@ -19,6 +19,9 @@ setup() {
     FAKE_HOOKS=1
     FAKE_BINDING='bind-key -T prefix N run-shell -b "tmux-notify-jump --inbox-next"'
     FAKE_OS=Linux
+    FAKE_PASSTHROUGH=off
+    FAKE_FOCUS_EVENTS=off
+    unset CODEX_HOOKS_PATH TMUX_NOTIFY_TERMINAL_METHOD
     for tool in tmux fzf jq ps notify-send xdotool; do
         printf '#!/usr/bin/env bash\nexit 0\n' >"$TEST_TEMP_DIR/bin/$tool"
     done
@@ -50,6 +53,12 @@ tmux_cmd() {
                 @tmux-notify-jump-inbox-root) printf '%s' "$FAKE_ROOT" ;;
                 @tmux-notify-jump-key) printf '%s' "${FAKE_KEY:-}" ;;
                 status-right) printf '%s' "$FAKE_STATUS" ;;
+            esac
+            ;;
+        show-options)
+            case "${*: -1}" in
+                allow-passthrough) printf '%s\n' "$FAKE_PASSTHROUGH" ;;
+                focus-events) printf '%s\n' "$FAKE_FOCUS_EVENTS" ;;
             esac
             ;;
         show-hooks)
@@ -221,6 +230,73 @@ tmux_cmd() {
     [ "$status" -eq 0 ]
     [ "$(printf '%s\n' "$output" | rg -c 'missing or not executable')" -eq 8 ]
     [ ! -x "$TEST_TEMP_DIR/installed/notify-codex.sh" ]
+}
+
+@test "doctor parses Codex settings and warns about independent completion channels" {
+    python3 -c 'import tomllib' 2>/dev/null || skip 'Python 3.11+ is optional'
+    mkdir -p "$HOME/.codex"
+    cat >"$HOME/.codex/config.toml" <<'TOML'
+notify = ["notify-codex.sh"]
+[tui]
+notification_method = "osc777"
+notification_condition = "unfocused"
+TOML
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'possible duplicate reminders'* ]]
+    [[ "$output" == *'passthrough off or unavailable'* ]]
+    [[ "$output" == *'focus-events off or unavailable'* ]]
+    FAKE_PASSTHROUGH=on
+    run tmux_notify_doctor
+    [[ "$output" == *'hidden panes need allow-passthrough all'* ]]
+    FAKE_PASSTHROUGH=all
+    FAKE_FOCUS_EVENTS=on
+    run tmux_notify_doctor
+    [[ "$output" == *'allows hidden-pane passthrough'* ]]
+    [[ "$output" != *'focus-events off or unavailable'* ]]
+}
+
+@test "doctor distinguishes native event filters and reports unverified hook trust" {
+    python3 -c 'import tomllib' 2>/dev/null || skip 'Python 3.11+ is optional'
+    mkdir -p "$HOME/.codex"
+    cat >"$HOME/.codex/config.toml" <<'TOML'
+notify = ["notify-codex.sh"]
+[tui]
+notifications = ["plan-mode-prompt", "async-question"]
+notification_method = "osc777"
+notification_condition = "always"
+TOML
+    printf '{"hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":"notify-codex.sh"}]}]}}\n' >"$HOME/.codex/hooks.json"
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" != *'possible duplicate'* ]]
+    [[ "$output" == *'trust and runtime registration unverified'* ]]
+    [[ "$output" != *'focus-events off or unavailable'* ]]
+    printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"notify-codex.sh"}]}]}}\n' >"$HOME/.codex/hooks.json"
+    run tmux_notify_doctor
+    [[ "$output" == *'legacy notify and Stop both reference the wrapper'* ]]
+}
+
+@test "doctor handles commented Codex references and invalid TOML without mutations" {
+    python3 -c 'import tomllib' 2>/dev/null || skip 'Python 3.11+ is optional'
+    mkdir -p "$HOME/.codex"
+    printf '# notify = ["notify-codex.sh"]\n[tui]\nnotifications = false\n' >"$HOME/.codex/config.toml"
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" != *'possible duplicate'* ]]
+    [[ "$output" != *'Codex OSC passthrough'* ]]
+    printf '[invalid' >"$HOME/.codex/config.toml"
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'Codex notifications'*'settings unverified'* ]]
+    [ "$(cat "$HOME/.codex/config.toml")" = '[invalid' ]
+}
+
+@test "doctor reports client TTY OSC without requiring pane passthrough" {
+    TMUX_NOTIFY_TERMINAL_METHOD=osc777
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'OSC 777 via client TTY; current tmux pane passthrough not required'* ]]
 }
 
 @test "doctor accepts explicit profile config paths and rejects unknown agents" {

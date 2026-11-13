@@ -2454,6 +2454,93 @@ tmux_notify_doctor_private_path() {
     [ "$mode" = "$expected" ]
 }
 
+tmux_notify_doctor_codex() {
+    local config="$1" hooks="" summary="" method="" condition=""
+    local legacy=0 stop=0 permission=0 native_complete=0 native_approval=0 native_any=0
+    hooks="${CODEX_HOOKS_PATH:-$(dirname "$config")/hooks.json}"
+    case "$config" in *.json) hooks="$config"; config="" ;; esac
+    [ -f "$config" ] || [ -f "$hooks" ] || return 0
+    if ! command -v python3 >/dev/null 2>&1; then
+        tmux_notify_doctor_line WARN 'Codex notifications' 'settings unverified; optional Python 3.11+ parses TOML'
+        return 0
+    fi
+    if ! summary="$(python3 - "$config" "$hooks" <<'PY'
+import json
+import os
+import sys
+
+try:
+    config = {}
+    if sys.argv[1] and os.path.isfile(sys.argv[1]):
+        import tomllib
+        with open(sys.argv[1], 'rb') as handle:
+            config = tomllib.load(handle)
+    hooks = {}
+    if os.path.isfile(sys.argv[2]):
+        with open(sys.argv[2], encoding='utf-8') as handle:
+            hooks = json.load(handle)
+    tui = config.get('tui', {})
+    native = tui.get('notifications', True)
+    def enabled(event):
+        return native is True or isinstance(native, list) and event in native
+    notify = config.get('notify', [])
+    legacy = isinstance(notify, list) and any(isinstance(arg, str) and 'notify-codex.sh' in arg for arg in notify)
+    def registered(event):
+        for table in (config.get('hooks', {}), hooks.get('hooks', {})):
+            for group in table.get(event, []):
+                for handler in group.get('hooks', []):
+                    if handler.get('type') == 'command' and 'notify-codex.sh' in handler.get('command', ''):
+                        return True
+        return False
+    method = tui.get('notification_method', 'auto')
+    condition = tui.get('notification_condition', 'unfocused')
+    print('|'.join(map(str, (
+        int(legacy), int(registered('Stop')), int(registered('PermissionRequest')),
+        int(enabled('agent-turn-complete')), int(enabled('approval-requested')),
+        int(native is True or isinstance(native, list) and bool(native)),
+        method if method in ('auto', 'osc9', 'osc777', 'bel') else 'unknown',
+        condition if condition in ('unfocused', 'always') else 'unknown',
+    ))))
+except (ImportError, OSError, ValueError, TypeError, AttributeError):
+    sys.exit(1)
+PY
+    )"; then
+        tmux_notify_doctor_line WARN 'Codex notifications' 'settings unverified; need readable valid config and optional Python 3.11+ for TOML'
+        return 0
+    fi
+    IFS='|' read -r legacy stop permission native_complete native_approval native_any method condition <<<"$summary"
+    tmux_notify_doctor_line OK 'Codex TUI settings' "method=$method condition=$condition (selected files only; runtime precedence unverified)"
+    if [ "$legacy" = 1 ] && [ "$stop" = 1 ]; then
+        tmux_notify_doctor_line WARN 'Codex completion' 'legacy notify and Stop both reference the wrapper; possible duplicate completion notifications'
+    fi
+    if { [ "$legacy" = 1 ] || [ "$stop" = 1 ]; } && [ "$native_complete" = 1 ]; then
+        tmux_notify_doctor_line WARN 'Codex completion' 'wrapper and native TUI completion enabled; possible duplicate reminders depending on routing and focus'
+    fi
+    if [ "$permission" = 1 ]; then
+        tmux_notify_doctor_line WARN 'Codex hook trust' 'PermissionRequest reference found; review /hooks in Codex (trust and runtime registration unverified)'
+        if [ "$native_approval" = 1 ]; then
+            tmux_notify_doctor_line WARN 'Codex approval' 'wrapper and native TUI approval enabled; possible duplicate approval reminders'
+        fi
+    elif [ "$stop" = 1 ]; then
+        tmux_notify_doctor_line WARN 'Codex hook trust' 'Stop reference found; review /hooks in Codex (trust and runtime registration unverified)'
+    fi
+    if [ "$native_any" = 1 ] && { [ "$method" = osc777 ] || [ "$method" = osc9 ]; }; then
+        local passthrough="" focus=""
+        passthrough="$(tmux_cmd show-options -pAv allow-passthrough 2>/dev/null || true)"
+        case "$passthrough" in
+            all) tmux_notify_doctor_line OK 'Codex OSC passthrough' 'current pane allows hidden-pane passthrough; outer terminal support unverified' ;;
+            on) tmux_notify_doctor_line WARN 'Codex OSC passthrough' 'current pane permits visible panes only; hidden panes need allow-passthrough all' ;;
+            *) tmux_notify_doctor_line WARN 'Codex OSC passthrough' 'current pane passthrough off or unavailable; native OSC may be filtered' ;;
+        esac
+        if [ "$condition" = unfocused ]; then
+            focus="$(tmux_cmd show-options -sv focus-events 2>/dev/null || true)"
+            if [ "$focus" != on ]; then
+                tmux_notify_doctor_line WARN 'Codex focus tracking' 'focus-events off or unavailable; try notification_condition="always" to diagnose native TUI delivery'
+            fi
+        fi
+    fi
+}
+
 # These are user-level installation paths, not proof of runtime registration.
 # Explicit agent=path inputs let diagnostics inspect profiles/project configs
 # without copying every agent's evolving path or config precedence rules.
@@ -2495,6 +2582,9 @@ tmux_notify_doctor_agents() {
         else
             tmux_notify_doctor_line WARN "Config $agent" "$path (no wrapper text reference; check hook/bridge configuration)"
         fi
+        if [ "$agent" = codex ]; then
+            tmux_notify_doctor_codex "$path"
+        fi
     done
 }
 
@@ -2521,6 +2611,11 @@ tmux_notify_doctor() {
         tmux_notify_doctor_line WARN 'Configuration' "$config (absent; using environment/defaults)"
     fi
     tmux_notify_doctor_line OK 'Routing mode' "$(tmux_notify_remote_mode)"
+    case "${TMUX_NOTIFY_TERMINAL_METHOD:-none}" in
+        none) tmux_notify_doctor_line OK 'Terminal notifications' 'none (agent-specific overrides may enable OSC)' ;;
+        osc777) tmux_notify_doctor_line OK 'Terminal notifications' 'OSC 777 via client TTY; current tmux pane passthrough not required; terminal support unverified' ;;
+        *) tmux_notify_doctor_line WARN 'Terminal notifications' 'invalid TMUX_NOTIFY_TERMINAL_METHOD; use none or osc777' ;;
+    esac
     if ! command -v tmux >/dev/null 2>&1; then
         tmux_notify_doctor_line FAIL 'tmux' 'unavailable; Inbox and jump need tmux (focus-only remains available)'
         return 1
