@@ -23,6 +23,8 @@ Notable changes to tmux-notify-jump are documented in this file.
 - Codex hook installation validates nested structures across every event before
   editing; malformed or unfamiliar schemas are left untouched. Valid empty
   `prompt` and `agent` handlers are preserved even though Codex skips execution.
+  Empty command/Windows override and MCP server/tool strings are also preserved
+  as valid schema fields, leaving execution warnings to Codex.
 - Codex installation, diagnostics and wrapper debug logs honor `CODEX_HOME`,
   with explicit file paths taking precedence.
 - Codex duplicate-reminder diagnostics apply the wrapper event whitelist and
@@ -37,17 +39,18 @@ Notable changes to tmux-notify-jump are documented in this file.
   Trust state and empty event arrays permit idempotent reinstalls and async
   upgrades. Invalid TOML or an unavailable parser leaves hooks untouched.
 - Explicit Codex config and hook paths explain that overrides do not register
-  a config folder. Nonstandard filenames prompt users to place or link the file as
-  `hooks.json` in an active Codex config folder and verify it through `/hooks`.
+  a config folder. Nonstandard filenames prompt users to place or link the file
+  as `hooks.json` in an active Codex config folder and verify it through `/hooks`.
 - Codex hook installation rejects existing directories and special files,
   including symlink targets, before writing temporary files or reporting success.
 
 ### Tests
 
 - Added protocol, PTY, wrapper, installer and diagnostics coverage. The suite
-  contains 528 tests, including nested hook schemas, Codex home/path precedence,
-  trust-state reinstalls, discovery paths, notification filters, hook feature
-  switches, mixed hook sources and asynchronous hook upgrades. Linux/X11 Jump
+  contains 534 tests, including nested hook schemas, Codex home/path precedence,
+  special-file targets, empty commands, trust-state reinstalls, discovery paths,
+  notification filters, hook feature switches, mixed hook sources and
+  asynchronous hook upgrades. Linux/X11 Jump
   and Dismiss were verified on a disposable tmux server, along with WezTerm
   OSC-to-desktop notification requests.
 

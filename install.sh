@@ -403,7 +403,8 @@ configure_codex_hooks() {
             def optional($key; rule):
                 if has($key) then .[$key] | rule else true end;
             def nullable(rule): . == null or rule;
-            def text: type == "string" and test("\\S");
+            # String fields may be empty; execution checks belong to Codex.
+            def text: type == "string";
             def uint: type == "number" and . >= 0 and . <= 9007199254740991 and floor == .;
             def toml_value:
                 if type == "object" then all(.[]; toml_value)

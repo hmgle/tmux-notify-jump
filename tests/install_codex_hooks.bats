@@ -136,6 +136,7 @@ install_hooks() {
 {"hooks":{"PermissionRequest":[{"hooks":null}]}}
 {"hooks":{"PermissionRequest":[{"hooks":[null]}]}}
 {"hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":7}]}]}}
+{"hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":null}]}]}}
 {"hooks":{"PermissionRequest":[]},"description":false}
 {"hooks":{"Stop":null}}
 {"hooks":{"Stop":[{"matcher":false}]}}
@@ -146,8 +147,11 @@ install_hooks() {
 {"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo ok","statusMessage":0}]}]}}
 {"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo ok","additionalContextLimit":"5"}]}]}}
 {"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo ok","commandWindows":false}]}]}}
+{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo ok","command_windows":7}]}]}}
 {"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo ok","commandWindows":"a","command_windows":"b"}]}]}}
 {"hooks":{"Stop":[{"hooks":[{"type":"mcp_tool","server":"test"}]}]}}
+{"hooks":{"Stop":[{"hooks":[{"type":"mcp_tool","server":null,"tool":"log"}]}]}}
+{"hooks":{"Stop":[{"hooks":[{"type":"mcp_tool","server":"test","tool":7}]}]}}
 {"hooks":{"Stop":[{"hooks":[{"type":"mcp_tool","server":"test","tool":"log","input":{"nested":[null]}}]}]}}
 {"hooks":{"Stop":[{"hooks":[{"type":"unknown","command":"echo ok"}]}]}}
 {"hooks":{"FutureEvent":[]}}
@@ -172,6 +176,26 @@ JSON
     mkdir -p "${CFG%/*}"
     cat >"$CFG" <<'JSON'
 {"hooks":{"Stop":[{"hooks":[{"type":"prompt"},{"type":"agent"}]}],"PermissionRequest":[{"matcher":"Bash","hooks":[{"type":"agent"},{"type":"prompt"}]}]}}
+JSON
+    cp "$CFG" "$TEST_TEMP_DIR/original.json"
+    install_hooks
+    [ "$status" -eq 0 ]
+    jq -e '.hooks.PermissionRequest | length == 2 and .[1].hooks[0].async == true' "$CFG"
+    jq 'del(.hooks.PermissionRequest[1])' "$CFG" >"$TEST_TEMP_DIR/preserved.json"
+    run jq -e --slurp '.[0] == .[1]' "$TEST_TEMP_DIR/original.json" "$TEST_TEMP_DIR/preserved.json"
+    [ "$status" -eq 0 ]
+    cmp "$TEST_TEMP_DIR/original.json" "$CFG.bak."*
+    before="$(cat "$CFG")"
+    install_hooks
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'already configured'* ]]
+    [ "$(cat "$CFG")" = "$before" ]
+}
+
+@test "Codex hooks installer preserves empty and whitespace string fields" {
+    mkdir -p "${CFG%/*}"
+    cat >"$CFG" <<'JSON'
+{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"","commandWindows":"echo Windows"},{"type":"command","command":" \t","commandWindows":""},{"type":"command","command":"echo Unix","command_windows":""},{"type":"command","command":"","commandWindows":null},{"type":"mcp_tool","server":"","tool":"log"},{"type":"mcp_tool","server":"test","tool":" \t"}]}],"PermissionRequest":[{"hooks":[{"type":"command","command":"","command_windows":"echo Windows"}]}]}}
 JSON
     cp "$CFG" "$TEST_TEMP_DIR/original.json"
     install_hooks

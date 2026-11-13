@@ -670,6 +670,9 @@ handler fields against the supported Codex v0.168.0 structure, including
 unrelated events. Invalid or unfamiliar fields/handler variants are refused;
 configure those files manually. Empty `prompt` and `agent` handlers are valid
 and preserved, although Codex v0.168.0 skips their execution with a warning.
+Empty or whitespace command strings (including Windows overrides) and MCP
+server/tool strings are also preserved. Codex checks the selected platform's
+command and MCP names at runtime, skipping empty values with warnings.
 This structural check does not establish that matchers, commands or MCP tools
 work at runtime. Open `/hooks` in Codex to review
 and trust the definition; an installed command alone does not establish that
