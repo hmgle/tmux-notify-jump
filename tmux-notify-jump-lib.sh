@@ -2510,15 +2510,19 @@ PY
     fi
     IFS='|' read -r legacy stop permission native_complete native_approval native_any method condition <<<"$summary"
     tmux_notify_doctor_line OK 'Codex TUI settings' "method=$method condition=$condition (selected files only; runtime precedence unverified)"
-    if [ "$legacy" = 1 ] && [ "$stop" = 1 ]; then
+    local legacy_enabled=0 stop_enabled=0 permission_enabled=0
+    if [ "$legacy" = 1 ] && tmux_notify_codex_event_enabled agent-turn-complete; then legacy_enabled=1; fi
+    if [ "$stop" = 1 ] && tmux_notify_codex_event_enabled Stop; then stop_enabled=1; fi
+    if [ "$permission" = 1 ] && tmux_notify_codex_event_enabled PermissionRequest; then permission_enabled=1; fi
+    if [ "$legacy_enabled" = 1 ] && [ "$stop_enabled" = 1 ]; then
         tmux_notify_doctor_line WARN 'Codex completion' 'legacy notify and Stop both reference the wrapper; possible duplicate completion notifications'
     fi
-    if { [ "$legacy" = 1 ] || [ "$stop" = 1 ]; } && [ "$native_complete" = 1 ]; then
+    if { [ "$legacy_enabled" = 1 ] || [ "$stop_enabled" = 1 ]; } && [ "$native_complete" = 1 ]; then
         tmux_notify_doctor_line WARN 'Codex completion' 'wrapper and native TUI completion enabled; possible duplicate reminders depending on routing and focus'
     fi
     if [ "$permission" = 1 ]; then
         tmux_notify_doctor_line WARN 'Codex hook trust' 'PermissionRequest reference found; review /hooks in Codex (trust and runtime registration unverified)'
-        if [ "$native_approval" = 1 ]; then
+        if [ "$permission_enabled" = 1 ] && [ "$native_approval" = 1 ]; then
             tmux_notify_doctor_line WARN 'Codex approval' 'wrapper and native TUI approval enabled; possible duplicate approval reminders'
         fi
     elif [ "$stop" = 1 ]; then
@@ -3391,6 +3395,13 @@ is_event_enabled() {
         return 0
     fi
     return 1
+}
+
+# Shared by the Codex adapter and diagnostics so default event policy cannot
+# drift. Call after loading user configuration.
+tmux_notify_codex_event_enabled() {
+    is_event_enabled "$1" "${CODEX_NOTIFY_EVENTS:-}" "${CODEX_NOTIFY_EXCLUDE_EVENTS:-}" \
+        'agent-turn-complete,PermissionRequest,Stop'
 }
 
 # Format notification title with optional event type

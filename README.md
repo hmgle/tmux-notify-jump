@@ -449,12 +449,15 @@ agent configuration, so an unavailable server stops those further checks.
 For Codex, optional Python 3.11+ enables structured checks of the selected TOML
 config and adjacent `hooks.json` (override with `CODEX_HOOKS_PATH`, or pass
 `--agent-config codex=/path/to/hooks.json` for a hooks-only check). Diagnostics
-report possible duplicate completion/approval channels and remind you to
-review `/hooks`. Explicit native OSC settings also trigger read-only checks of
-the current pane's effective `allow-passthrough` and server `focus-events`.
+report possible duplicate completion/approval channels after applying the
+current `CODEX_NOTIFY_EVENTS` / `CODEX_NOTIFY_EXCLUDE_EVENTS` filters, and remind
+you to review `/hooks`. Explicit native OSC settings also trigger read-only
+checks of the current pane's effective `allow-passthrough` and server `focus-events`.
 Other panes, config layers, hook trust and local terminal delivery remain
-unverified. Without the optional parser, these checks warn and skip; wrappers
-and terminal notifications do not require Python.
+unverified. Hook references still trigger trust-review reminders even when
+wrapper filters disable their notifications. Without the optional parser,
+these checks warn and skip; wrappers and terminal notifications do not require
+Python.
 
 Agent checks use the installer's standard user-level locations and honor
 `CODEX_CONFIG_PATH`, `CLAUDE_CONFIG_PATH`, `KIMI_CONFIG_PATH`, `GROK_HOOKS_PATH`,

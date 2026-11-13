@@ -18,10 +18,23 @@ Notable changes to tmux-notify-jump are documented in this file.
   review, native OSC passthrough and focus tracking. Structured TOML inspection
   uses optional Python 3.11+; notification delivery does not require it.
 
+### Fixed
+
+- Codex hook installation validates nested structures across every event before
+  editing; malformed or unfamiliar schemas are left untouched.
+- Codex installation, diagnostics and wrapper debug logs honor `CODEX_HOME`,
+  with explicit file paths taking precedence.
+- Codex duplicate-reminder diagnostics apply the wrapper event whitelist and
+  blacklist, avoiding warnings for notification channels disabled by filtering.
+- Approval notification hooks run asynchronously. Reinstalling upgrades matching
+  synchronous handlers in place and prompts for renewed Codex hook trust.
+
 ### Tests
 
 - Added protocol, PTY, wrapper, installer and diagnostics coverage. The suite
-  contains 504 tests. Linux/X11 Jump and Dismiss were verified on a disposable
+  contains 514 tests, including nested hook schemas, Codex home/path precedence,
+  notification filters and asynchronous hook upgrades. Linux/X11 Jump and
+  Dismiss were verified on a disposable
   tmux server, along with WezTerm OSC-to-desktop notification requests.
 
 ## [1.5.1] - 2026-10-13

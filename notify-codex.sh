@@ -62,17 +62,14 @@ MAX_TITLE="$(normalize_int "${CODEX_NOTIFY_MAX_TITLE:-${TMUX_NOTIFY_MAX_TITLE:-8
 MAX_BODY="$(normalize_int "${CODEX_NOTIFY_MAX_BODY:-${TMUX_NOTIFY_MAX_BODY:-200}}" 200)"
 TIMEOUT_MS="$(normalize_int "${CODEX_NOTIFY_TIMEOUT_MS:-${TMUX_NOTIFY_TIMEOUT:-0}}" 0)"
 
-# Event filtering configuration
-CODEX_EVENTS="${CODEX_NOTIFY_EVENTS:-}"          # whitelist (empty=default, *=all)
-CODEX_EXCLUDE="${CODEX_NOTIFY_EXCLUDE_EVENTS:-}" # blacklist
-CODEX_DEFAULT_EVENTS="agent-turn-complete,PermissionRequest,Stop"
+# Event filtering is shared with diagnostics in the library.
 CODEX_SHOW_TYPE="${CODEX_NOTIFY_SHOW_EVENT_TYPE:-1}"  # show event type in title
 
 EVENT_TYPE="$(jq -r '(.hook_event_name // .type // empty) | select(type == "string")' <<<"$payload" 2>/dev/null || true)"
 EVENT_TYPE="$(trim_ws "$EVENT_TYPE")"
 
 # Check if event is enabled
-if ! is_event_enabled "$EVENT_TYPE" "$CODEX_EVENTS" "$CODEX_EXCLUDE" "$CODEX_DEFAULT_EVENTS"; then
+if ! tmux_notify_codex_event_enabled "$EVENT_TYPE"; then
     log_debug "event not enabled: $EVENT_TYPE"
     exit 0
 fi

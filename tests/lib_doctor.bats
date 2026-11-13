@@ -22,6 +22,7 @@ setup() {
     FAKE_PASSTHROUGH=off
     FAKE_FOCUS_EVENTS=off
     unset CODEX_HOME CODEX_CONFIG_PATH CODEX_HOOKS_PATH TMUX_NOTIFY_TERMINAL_METHOD
+    unset CODEX_NOTIFY_EVENTS CODEX_NOTIFY_EXCLUDE_EVENTS
     for tool in tmux fzf jq ps notify-send xdotool; do
         printf '#!/usr/bin/env bash\nexit 0\n' >"$TEST_TEMP_DIR/bin/$tool"
     done
@@ -323,6 +324,66 @@ TOML
     [ "$status" -eq 0 ]
     [[ "$output" == *"$TEST_TEMP_DIR/cli.toml"* ]]
     [[ "$output" != *"$CODEX_CONFIG_PATH"* ]]
+}
+
+@test "Codex doctor duplicate warnings honor whitelist and blacklist policy" {
+    python3 -c 'import tomllib' 2>/dev/null || skip 'Python 3.11+ is optional'
+    mkdir -p "$HOME/.codex"
+    printf 'notify = ["notify-codex.sh"]\n[tui]\nnotifications = true\n' >"$HOME/.codex/config.toml"
+    printf '{"hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":"notify-codex.sh"}]}],"Stop":[{"hooks":[{"type":"command","command":"notify-codex.sh"}]}]}}\n' >"$HOME/.codex/hooks.json"
+    CODEX_NOTIFY_EXCLUDE_EVENTS=PermissionRequest
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" != *'possible duplicate approval reminders'* ]]
+    [[ "$output" == *'possible duplicate completion notifications'* ]]
+    [[ "$output" == *'PermissionRequest reference found'* ]]
+    CODEX_NOTIFY_EXCLUDE_EVENTS='*'
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" != *'possible duplicate'* ]]
+    unset CODEX_NOTIFY_EXCLUDE_EVENTS
+    CODEX_NOTIFY_EVENTS=PermissionRequest
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'possible duplicate approval reminders'* ]]
+    [[ "$output" != *'possible duplicate completion notifications'* ]]
+    [[ "$output" != *'possible duplicate reminders depending on routing'* ]]
+    CODEX_NOTIFY_EVENTS='*'
+    CODEX_NOTIFY_EXCLUDE_EVENTS=$' agent-turn-complete \n Stop '
+    run tmux_notify_doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'possible duplicate approval reminders'* ]]
+    [[ "$output" != *'possible duplicate completion notifications'* ]]
+    CODEX_NOTIFY_EVENTS=agent-turn-complete
+    unset CODEX_NOTIFY_EXCLUDE_EVENTS
+    run tmux_notify_doctor
+    [[ "$output" == *'possible duplicate reminders depending on routing'* ]]
+    [[ "$output" != *'possible duplicate approval reminders'* ]]
+    [[ "$output" != *'possible duplicate completion notifications'* ]]
+}
+
+@test "Codex CLI doctor applies filters loaded from the shared configuration file" {
+    python3 -c 'import tomllib' 2>/dev/null || skip 'Python 3.11+ is optional'
+    mkdir -p "$HOME/.codex"
+    printf 'notify = ["notify-codex.sh"]\n' >"$HOME/.codex/config.toml"
+    printf 'CODEX_NOTIFY_EXCLUDE_EVENTS="*"\n' >>"$TMUX_NOTIFY_CONFIG"
+    cat >"$TEST_TEMP_DIR/bin/tmux" <<'SH'
+#!/usr/bin/env bash
+[ "${1:-}" != -S ] || shift 2
+case "$1" in
+    -V) echo 'tmux 3.7' ;;
+    display-message)
+        case "${*: -1}" in
+            '#{pid}') echo 4242 ;;
+            '#{version}') echo 3.7 ;;
+            '#{socket_path}') echo "$TMUX_NOTIFY_TMUX_SOCKET" ;;
+        esac ;;
+esac
+SH
+    run "$PROJECT_ROOT/tmux-notify-jump" --doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'Config codex'* ]]
+    [[ "$output" != *'possible duplicate'* ]]
 }
 
 @test "doctor accepts explicit profile config paths and rejects unknown agents" {
