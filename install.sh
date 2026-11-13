@@ -49,7 +49,9 @@ Options:
   --configure-tmux  Configure tmux status, hooks, and prefix key (opt-in)
   --codex-config <path>  Codex config.toml path (default: \$CODEX_HOME/config.toml,
                         or ~/.codex/config.toml when CODEX_HOME is unset/empty)
-  --codex-hooks-path <path> Codex hooks.json path (default: beside Codex config)
+  --codex-hooks-path <path> Hook output path (default: hooks.json beside Codex config)
+                           Does not register a Codex config folder; use hooks.json
+                           in an active folder or link it there, then check /hooks
   --claude-config <path> Claude settings.json path (default: ~/.claude/settings.json)
   --kimi-config <path>   Kimi config.toml path (default: ~/.kimi-code/config.toml)
   --grok-hooks-path <path> Grok hooks dir (default: \$GROK_HOME/hooks or ~/.grok/hooks)
@@ -376,6 +378,15 @@ configure_codex_hooks() {
     fi
     if [ -L "$cfg" ] && [ ! -e "$cfg" ]; then
         die "Codex hooks symlink is dangling: $cfg"
+    fi
+    if [ -n "$CODEX_HOOKS_PATH" ]; then
+        echo 'Codex discovery unverified: path overrides do not register a config folder; hooks.json must be in an active Codex config folder. Check /hooks in Codex.'
+    fi
+    # Check the discovery-facing name before following symlinks: a hooks.json
+    # link in an active config folder can legitimately point to another name.
+    if [ "${cfg##*/}" != hooks.json ]; then
+        echo "Warning: file is not named hooks.json; Codex will not discover it directly: $cfg" >&2
+        echo 'Place or symlink this file as hooks.json in an active Codex config folder, then check /hooks.' >&2
     fi
     cfg="$(resolve_config_path "$cfg")"
     if [ -f "$cfg" ]; then

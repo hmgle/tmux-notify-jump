@@ -489,7 +489,8 @@ CLI flags override environment variables where applicable.
   (default: `$CODEX_HOME/config.toml`); `--codex-config` overrides it in the
   installer. The adjacent `hooks.json` is used unless overridden.
 - `CODEX_HOOKS_PATH`: Codex hooks JSON file for installation and diagnostics;
-  `--codex-hooks-path` overrides it in the installer.
+  `--codex-hooks-path` overrides it in the installer. This tool-specific override
+  does not register the path with Codex; see the discovery requirements below.
 - `TMUX_NOTIFY_CONFIG`: env file to load before running (unset defaults to
   `~/.config/tmux-notify-jump/env`; explicitly empty disables file loading).
   Relative paths resolve against the invocation directory and are fixed as
@@ -641,9 +642,16 @@ completion integration:
 `--configure-codex-hooks` adds only `PermissionRequest` to `hooks.json` beside
 the selected Codex config. Pass `--codex-hooks-path <file>` (or
 `CODEX_HOOKS_PATH`) for another location; `--codex-config` selects the config
-directory by default. This opt-in operation requires `jq`, backs up changes,
-preserves existing hooks and symlinks, and is idempotent. It does not change
-`[tui]` settings. Existing TOML configs also require Python 3.11+ for safe
+directory by default. These overrides select files for this tool; they do not
+register a config folder with Codex. Codex v0.168.0 discovers files named
+`hooks.json` in active config-layer folders and does not read `CODEX_HOOKS_PATH`.
+For another output location, place or symlink the file as `hooks.json` in a
+folder Codex actually loads. The installer warns about other filenames and
+cannot verify active config layers; check discovery and trust with `/hooks`.
+
+This opt-in operation requires `jq`, backs up changes, preserves existing
+hooks and symlinks, and is idempotent. It does not change `[tui]` settings.
+Existing TOML configs also require Python 3.11+ for safe
 inspection. The installer checks the selected config and, when hooks.json is
 elsewhere, its sibling `config.toml`. If either contains nonempty inline event
 arrays, it refuses JSON hook edits and asks you to merge into one source

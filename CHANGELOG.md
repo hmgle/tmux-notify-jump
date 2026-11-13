@@ -36,15 +36,18 @@ Notable changes to tmux-notify-jump are documented in this file.
   JSON edits when nonempty inline events exist, avoiding duplicate hook sources.
   Trust state and empty event arrays permit idempotent reinstalls and async
   upgrades. Invalid TOML or an unavailable parser leaves hooks untouched.
+- Explicit Codex hook paths now explain that overrides do not register a config
+  folder. Nonstandard filenames prompt users to place or link the file as
+  `hooks.json` in an active Codex config folder and verify it through `/hooks`.
 
 ### Tests
 
 - Added protocol, PTY, wrapper, installer and diagnostics coverage. The suite
-  contains 522 tests, including nested hook schemas, Codex home/path precedence,
-  notification filters, hook feature switches, mixed hook sources and
-  asynchronous hook upgrades. Linux/X11 Jump and
-  Dismiss were verified on a disposable
-  tmux server, along with WezTerm OSC-to-desktop notification requests.
+  contains 528 tests, including nested hook schemas, Codex home/path precedence,
+  trust-state reinstalls, discovery paths, notification filters, hook feature
+  switches, mixed hook sources and asynchronous hook upgrades. Linux/X11 Jump
+  and Dismiss were verified on a disposable tmux server, along with WezTerm
+  OSC-to-desktop notification requests.
 
 ## [1.5.1] - 2026-10-13
 

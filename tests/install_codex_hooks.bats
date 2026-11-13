@@ -357,3 +357,40 @@ TOML
     [ "$status" -eq 0 ]
     jq -e '.hooks.PermissionRequest | length == 1' "$CFG"
 }
+
+@test "Codex hook path overrides explain that discovery is not registered" {
+    install_hooks
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'path overrides do not register a config folder'* ]]
+    [[ "$output" == *'Check /hooks in Codex'* ]]
+    [[ "$output" != *'file is not named hooks.json'* ]]
+    install_hooks
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'already configured'* ]]
+    [[ "$output" == *'path overrides do not register a config folder'* ]]
+}
+
+@test "Codex installer warns for nonstandard hook filenames and keeps staging supported" {
+    CFG="$TEST_TEMP_DIR/staging/approval.json"
+    install_hooks
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'file is not named hooks.json; Codex will not discover it directly'* ]]
+    [[ "$output" == *'Place or symlink this file as hooks.json in an active Codex config folder'* ]]
+    jq -e '.hooks.PermissionRequest | length == 1' "$CFG"
+    install_hooks
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'already configured'* ]]
+    [[ "$output" == *'will not discover it directly'* ]]
+    [ ! -e "$CFG.bak."* ]
+}
+
+@test "Codex hooks discovery warning uses the symlink name rather than its target" {
+    mkdir -p "${CFG%/*}" "$TEST_TEMP_DIR/staging"
+    printf '{"hooks":{}}\n' >"$TEST_TEMP_DIR/staging/approval.json"
+    ln -s "$TEST_TEMP_DIR/staging/approval.json" "$CFG"
+    install_hooks
+    [ "$status" -eq 0 ]
+    [[ "$output" != *'file is not named hooks.json'* ]]
+    [ -L "$CFG" ]
+    jq -e '.hooks.PermissionRequest | length == 1' "$TEST_TEMP_DIR/staging/approval.json"
+}
