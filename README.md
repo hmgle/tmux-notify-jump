@@ -628,6 +628,8 @@ Notes:
 - `--codex-config` / `CODEX_CONFIG_PATH` only select the file to edit; they do
   not register it with Codex. Both Codex configuration commands report this
   discovery limitation for explicit config paths, including on reinstall.
+  A combined installation prints the general notice once, followed by the
+  hooks-specific guidance.
   Confirm that Codex actually loads the selected config folder.
 
 ### Native Codex lifecycle hooks

@@ -109,3 +109,25 @@ assert_rejected_config() {
     [ -f "$CODEX_HOME/config.toml" ]
     [ ! -e "$CODEX_HOOKS_PATH" ]
 }
+
+@test "Combined Codex installation prints discovery notices once including on reinstall" {
+    python3 -c 'import tomllib' 2>/dev/null || skip 'Existing TOML inspection needs Python 3.11+'
+    local attempt
+    for attempt in first repeat; do
+        run "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" \
+            --configure-codex --configure-codex-hooks \
+            --codex-config "$TEST_TEMP_DIR/profile/config.toml"
+        [ "$status" -eq 0 ]
+        [ "$(printf '%s\n' "$output" | rg -c '^Codex discovery unverified:')" -eq 1 ]
+        [ "$(printf '%s\n' "$output" | rg -c '^hooks.json must be in an active Codex config folder\.')" -eq 1 ]
+        [ -f "$TEST_TEMP_DIR/profile/config.toml" ]
+        [ -f "$TEST_TEMP_DIR/profile/hooks.json" ]
+    done
+    export CODEX_HOME="$TEST_TEMP_DIR/codex-home"
+    export CODEX_HOOKS_PATH="$TEST_TEMP_DIR/override/hooks.json"
+    run "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" \
+        --configure-codex --configure-codex-hooks
+    [ "$status" -eq 0 ]
+    [ "$(printf '%s\n' "$output" | rg -c '^Codex discovery unverified:')" -eq 1 ]
+    [ "$(printf '%s\n' "$output" | rg -c '^hooks.json must be in an active Codex config folder\.')" -eq 1 ]
+}

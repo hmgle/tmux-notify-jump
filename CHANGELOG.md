@@ -42,6 +42,8 @@ Notable changes to tmux-notify-jump are documented in this file.
   a config folder. Nonstandard filenames prompt users to place or link the file
   as `hooks.json` in an active Codex config folder and verify it through `/hooks`.
   The same discovery notice applies to standalone legacy notify installation.
+  Combined installations print the general notice only once and retain the
+  hooks-specific guidance.
 - Both Codex installers validate config files and symlink targets before reads
   or writes, including sibling TOML checked for inline hooks. Directories,
   FIFOs, devices and other special files are rejected without blocking or
