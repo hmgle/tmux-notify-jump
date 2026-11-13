@@ -275,6 +275,11 @@ if [ -n "$bell_arg" ]; then
     args+=("$bell_arg")
 fi
 
+terminal_method="$(tmux_notify_agent_terminal_method KIMI)"
+if [ -n "$terminal_method" ]; then
+    args+=(--terminal-method "$terminal_method")
+fi
+
 if [ "${KIMI_NOTIFY_DEBUG:-0}" = "1" ]; then
     log_debug "jump_sh=$JUMP_SH"
     log_debug "event=$EVENT_NAME label=$EVENT_LABEL target=${TARGET:-} timeout=$TIMEOUT_MS timeout_source=$TIMEOUT_MS_SOURCE"

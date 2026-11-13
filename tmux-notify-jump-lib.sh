@@ -301,7 +301,7 @@ require_arg() {
 #   --target, --focus-only, --title, --body, --sender-tty, --tmux-socket
 #   --no-activate, --list, --dry-run, --quiet, --timeout, --ui
 #   --max-title, --max-body, --dedupe-ms, --bell, --no-bell, --detach, --notify-kind,
-#   --notify-source, --inbox-pick, --doctor
+#   --notify-source, --terminal-method, --inbox-pick, --doctor
 #
 # Special return values in _PARSE_CONSUMED:
 #   "help" - caller should print_usage and exit 0
@@ -391,6 +391,12 @@ parse_common_opt() {
             BELL=0
             [ "$opt" != "--bell" ] || BELL=1
             _PARSE_CONSUMED=1
+            return 0
+            ;;
+        --terminal-method)
+            require_arg "$opt" "$#"
+            TERMINAL_METHOD="$1"
+            _PARSE_CONSUMED=2
             return 0
             ;;
         --timeout)
@@ -514,6 +520,10 @@ validate_common_options() {
     validate_timeout
     validate_ui_mode
     validate_notify_kind
+    case "${TERMINAL_METHOD:-none}" in
+        none|osc777) ;;
+        *) die "--terminal-method must be one of: none, osc777" ;;
+    esac
     validate_nonneg_int "$MAX_TITLE" "--max-title"
     validate_nonneg_int "$MAX_BODY" "--max-body"
     validate_nonneg_int "$DEDUPE_MS" "--dedupe-ms"
@@ -547,6 +557,7 @@ print_dry_run_common() {
     log "Notification kind: ${NOTIFY_KIND:-complete}"
     log "Notification source: ${NOTIFY_SOURCE:-tmux-notify-jump}"
     log "Terminal bell: $(is_truthy "${BELL:-0}" && echo "yes" || echo "no") (requires a tmux target)"
+    log "Terminal notification: ${TERMINAL_METHOD:-none} (requires a tmux target)"
     if [ -n "${SENDER_CLIENT_TTY:-}" ]; then
         log "Sender tmux client tty: $SENDER_CLIENT_TTY"
     fi
@@ -1785,6 +1796,77 @@ tmux_notify_agent_bell_arg() {
     fi
 }
 
+tmux_notify_agent_terminal_method() {
+    local variable="${1}_NOTIFY_TERMINAL_METHOD"
+    printf '%s' "${!variable:-}"
+}
+
+# OSC fields contain plain UTF-8, no control characters or field delimiters.
+# Bound each field to 255 bytes for terminals with small notification buffers.
+# Byte-wise validation keeps the same behavior with or without a UTF-8 locale.
+tmux_notify_osc_field() {
+    local LC_ALL=C text="${1:-}" out="" char="" chunk="" width=1 i=0
+    while [ "$i" -lt "${#text}" ]; do
+        char="${text:i:1}"
+        width=1
+        case "$char" in
+            [$'\001'-$'\037'$'\177'-$'\301']|[$'\365'-$'\377']) char=' ' ;;
+            ';') char='；' ;;
+            [$'\302'-$'\337']) width=2 ;;
+            [$'\340'-$'\357']) width=3 ;;
+            [$'\360'-$'\364']) width=4 ;;
+        esac
+        if [ "$width" -gt 1 ]; then
+            chunk="${text:i:width}"
+            if [[ "$chunk" =~ ^([$'\302'-$'\337'][$'\200'-$'\277']|$'\340'[$'\240'-$'\277'][$'\200'-$'\277']|[$'\341'-$'\354'$'\356'-$'\357'][$'\200'-$'\277']{2}|$'\355'[$'\200'-$'\237'][$'\200'-$'\277']|$'\360'[$'\220'-$'\277'][$'\200'-$'\277']{2}|[$'\361'-$'\363'][$'\200'-$'\277']{3}|$'\364'[$'\200'-$'\217'][$'\200'-$'\277']{2})$ ]]; then
+                char="$chunk"
+                # UTF-8 encoded C1 controls, including OSC and ST.
+                [[ "$char" != $'\302'[$'\200'-$'\237'] ]] || char=' '
+            else
+                char=' '
+                width=1
+            fi
+        fi
+        if [ "$((${#out} + ${#char}))" -gt 252 ]; then
+            printf '%s…' "$out"
+            return 0
+        fi
+        out+="$char"
+        i=$((i + width))
+    done
+    printf '%s' "$out"
+}
+
+tmux_notify_write_osc777() (
+    local tty="$1" title="$2" body="$3"
+    case "$tty" in /dev/*) ;; *) return 1 ;; esac
+    [ -c "$tty" ] && [ -w "$tty" ] || return 1
+    exec 3>"$tty" || return 1
+    [ -t 3 ] || return 1
+    printf '\033]777;notify;%s;%s\033\134' "$title" "$body" >&3
+)
+
+tmux_notify_terminal_notification() {
+    local session_id="$1" rows="$2" title="$3" body="$4" row="" tty="" seen=$'\n'
+    [ "${TERMINAL_METHOD:-none}" = osc777 ] || return 0
+    [ -n "$session_id" ] || return 0
+    title="$(tmux_notify_osc_field "$title")"
+    body="$(tmux_notify_osc_field "$body")"
+    while IFS= read -r row; do
+        [ -n "$row" ] || continue
+        read_tmux_client_row "$row"
+        [ "$CLIENT_SESSION_ID" = "$session_id" ] || continue
+        tty="$CLIENT_TTY"
+        [ -n "$tty" ] || continue
+        case "$seen" in *$'\n'"$tty"$'\n'*) continue ;; esac
+        seen+="$tty"$'\n'
+        if ! tmux_notify_write_osc777 "$tty" "$title" "$body" 2>/dev/null; then
+            log_debug "terminal notification skipped: cannot write to client tty=$tty"
+        fi
+    done <<<"$rows"
+    return 0
+}
+
 # Open only a terminal device supplied by the tmux client inventory. Use a
 # subshell so the private descriptor never replaces a caller's descriptor.
 # Writing the client TTY bypasses pane input/output and tmux's alert-bell hook.
@@ -1839,6 +1921,7 @@ tmux_notify_route_notification() {
     local visible=0 local_client=0 remote_client=0 unknown_client=0
     if [ "$target_info_available" -eq 1 ]; then
         tmux_notify_ring_bell "$session_id" "$rows"
+        tmux_notify_terminal_notification "$session_id" "$rows" "$title" "$body"
     fi
     local remote_target_client=0 unknown_target_client=0 row message client_state
     while IFS= read -r row; do

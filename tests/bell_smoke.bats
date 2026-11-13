@@ -9,12 +9,14 @@ setup() {
     export TMUX_NOTIFY_TMUX_SOCKET="$TEST_TEMP_DIR/tmux.sock"
     export TMUX_PANE='%9'
     export TMUX_NOTIFY_BELL=0
+    export TMUX_NOTIFY_TERMINAL_METHOD=none
     export TMUX_NOTIFY_REMOTE_MODE=tmux
     export TMUX_NOTIFY_DEBUG=0
     unset TMUX_NOTIFY_JUMP_SH TMUX_NOTIFY_ALREADY_DETACHED
     local prefix
     for prefix in CODEX CLAUDE KIMI GROK OPENCODE PI OMP; do
         unset "${prefix}_NOTIFY_BELL" "${prefix}_NOTIFY_EVENTS" "${prefix}_NOTIFY_EXCLUDE_EVENTS"
+        unset "${prefix}_NOTIFY_TERMINAL_METHOD"
     done
     export CAPTURE_FILE="$TEST_TEMP_DIR/args"
     mkdir -p "$TEST_TEMP_DIR/bin"
@@ -113,6 +115,42 @@ CASES
     run "$PROJECT_ROOT/tmux-notify-jump-hook.sh" --event alert-activity --pane-id %9
     [ "$status" -eq 0 ]
     ! rg -q -- '^--(no-)?bell$' "$CAPTURE_FILE"
+}
+
+@test "all agent wrappers forward an explicit terminal method override" {
+    command -v jq >/dev/null || skip 'jq is not installed'
+    export TMUX_NOTIFY_JUMP_SH="$TEST_TEMP_DIR/bin/capture-jump"
+    local script prefix payload
+    while IFS='|' read -r script prefix payload; do
+        run env "${prefix}_NOTIFY_TERMINAL_METHOD=osc777" "$PROJECT_ROOT/$script" "$payload" <<<"$payload"
+        [ "$status" -eq 0 ]
+        rg -A1 -x -- '--terminal-method' "$CAPTURE_FILE" | rg -qx osc777
+    done <<'CASES'
+notify-codex.sh|CODEX|{"type":"agent-turn-complete"}
+notify-claude-code.sh|CLAUDE|{"hook_event_name":"Stop"}
+notify-kimi-code.sh|KIMI|{"hook_event_name":"Stop"}
+notify-grok.sh|GROK|{"hookEventName":"stop","reason":"end_turn"}
+notify-opencode.sh|OPENCODE|{"event_type":"session.idle"}
+notify-pi.sh|PI|{"event":"agent_settled"}
+notify-step.sh|STEP|{"event":"agent_settled"}
+notify-omp.sh|OMP|{"event":"session_stop"}
+CASES
+}
+
+@test "terminal method flags validate and override configuration on both platforms" {
+    printf 'TMUX_NOTIFY_TERMINAL_METHOD=osc777\n' >"$TMUX_NOTIFY_CONFIG"
+    local platform
+    for platform in linux macos; do
+        run "$PROJECT_ROOT/tmux-notify-jump-$platform.sh" --target %9 --dry-run
+        [ "$status" -eq 0 ]
+        [[ "$output" == *'Terminal notification: osc777'* ]]
+        run "$PROJECT_ROOT/tmux-notify-jump-$platform.sh" --target %9 --dry-run --terminal-method none
+        [ "$status" -eq 0 ]
+        [[ "$output" == *'Terminal notification: none'* ]]
+        run "$PROJECT_ROOT/tmux-notify-jump-$platform.sh" --focus-only --terminal-method invalid
+        [ "$status" -ne 0 ]
+        [[ "$output" == *'--terminal-method must be one of: none, osc777'* ]]
+    done
 }
 
 @test "Linux and macOS dry-run report the effective bell configuration" {

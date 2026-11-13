@@ -258,6 +258,11 @@ if [ -n "$bell_arg" ]; then
     args+=("$bell_arg")
 fi
 
+terminal_method="$(tmux_notify_agent_terminal_method STEP)"
+if [ -n "$terminal_method" ]; then
+    args+=(--terminal-method "$terminal_method")
+fi
+
 if [ "${STEP_NOTIFY_DEBUG:-0}" = "1" ]; then
     log_debug "jump_sh=$JUMP_SH"
     log_debug "event=$EVENT_NAME target=${TARGET:-} focus_only=$([ -z "$TARGET" ] && echo "1" || echo "0") timeout=$TIMEOUT_MS max_title=$MAX_TITLE max_body=$MAX_BODY"

@@ -48,6 +48,20 @@ def notify(platform, title, flags=(), expected=b"", extra_env=None):
 
 try:
     for platform in ("linux", "macos"):
+        title = f"{platform} Title; safe"
+        osc = b"\x1b]777;notify;" + platform.encode() + b" Title\xef\xbc\x9b safe;Test\x1b\\"
+        notify(platform, title, ["--terminal-method", "osc777"], osc)
+        notify(platform, title, ["--terminal-method", "osc777"])
+        notify(platform, "OSC dry", ["--terminal-method", "osc777", "--dry-run"])
+        notify(platform, "OSC focus", ["--terminal-method", "osc777", "--focus-only"],
+               extra_env={"BELL_TEST_ALLOW_DESKTOP": "1"})
+        (Path(env["TEST_TEMP_DIR"]) / "desktop").unlink(missing_ok=True)
+        Path(env["TMUX_NOTIFY_CONFIG"]).write_text("TMUX_NOTIFY_TERMINAL_METHOD=none\n")
+        notify(platform, title, ["--terminal-method", "osc777", "--detach"], osc,
+               extra_env={"TMUX_NOTIFY_DEDUPE_MS": "0"})
+        Path(env["TMUX_NOTIFY_CONFIG"]).write_text("TMUX_NOTIFY_TERMINAL_METHOD=osc777\n")
+        notify(platform, "OSC detach off", ["--terminal-method", "none", "--detach"])
+        Path(env["TMUX_NOTIFY_CONFIG"]).unlink()
         notify(platform, f"{platform} default")
         notify(platform, f"{platform} explicit", ["--bell"], b"\x07")
         notify(platform, f"{platform} explicit", ["--bell"])

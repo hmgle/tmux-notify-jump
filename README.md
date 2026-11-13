@@ -213,6 +213,48 @@ Test from inside the target tmux pane:
 tmux-notify-jump --target "$TMUX_PANE" --bell --title "Bell test" --detach
 ```
 
+## Terminal notifications over SSH
+
+To request a desktop notification from a compatible local terminal while the
+agent runs over SSH, enable OSC 777 in the shared env file:
+
+```bash
+TMUX_NOTIFY_TERMINAL_METHOD=osc777  # Default: none
+CODEX_NOTIFY_TERMINAL_METHOD=none  # Optional: use Codex's native OSC instead
+```
+
+All eight agent wrappers support `<AGENT>_NOTIFY_TERMINAL_METHOD` overrides,
+using the same prefixes as the bell settings above. Empty overrides inherit
+the global method. The CLI accepts `--terminal-method none|osc777`; an explicit
+flag wins over configuration, including after `--detach`.
+
+Like BEL, OSC delivery goes directly to each distinct ordinary client TTY of
+the target session, including clients viewing another window. This bypasses
+the current tmux server's pane passthrough setting; no DCS wrapper or
+`allow-passthrough` change is needed for this path. Outer nested multiplexers
+may still filter the sequence. Control clients, other sessions, focus-only
+mode and dry runs receive no sequence. Event filtering and deduplication
+apply before sending; `--quiet` does not silence it.
+
+OSC is an additional delivery channel, independent of `TMUX_NOTIFY_REMOTE_MODE`
+(including `suppress`) and BEL. Inbox and desktop routing continue normally,
+even if a terminal write fails. Use `none` to disable OSC. A detached session
+with no attached client cannot receive terminal notifications; its Inbox can
+still retain events. No desktop daemon is needed on the remote host.
+
+The local terminal must implement and enable OSC 777. Writing the sequence
+successfully does not establish that a toast appeared. Notification clicks are
+handled by the terminal and do not carry a tmux pane jump callback; use Inbox
+or the existing desktop Jump action to select the exact pane. Titles and
+bodies are plain UTF-8, with controls removed, ASCII semicolons replaced, and
+each field limited to 255 bytes. Avoid enabling native agent notifications,
+OSC delivery and desktop delivery for the same events unless multiple
+reminders are intended.
+
+```bash
+tmux-notify-jump --target "$TMUX_PANE" --terminal-method osc777 --detach
+```
+
 ## tmux Inbox
 
 When `TMUX_NOTIFY_REMOTE_MODE=tmux` (the default), a notification whose target
@@ -433,6 +475,9 @@ CLI flags override environment variables where applicable.
   entrypoint again, that invocation uses normal platform dispatch too, preventing
   recursive overrides. Arguments are forwarded unchanged.
 - `TMUX_NOTIFY_BELL`: add a terminal BEL for all ordinary clients attached to the target tmux session (`0` by default). See [Terminal bell over SSH](#terminal-bell-over-ssh) for per-agent overrides and terminal settings.
+- `TMUX_NOTIFY_TERMINAL_METHOD`: additional terminal notifications (`none`, the
+  default, or `osc777`). See [Terminal notifications over SSH](#terminal-notifications-over-ssh)
+  for per-agent overrides and terminal compatibility.
 - `TMUX_NOTIFY_DEBUG`: write diagnostic details, including failures from detached
   notification processes, when set to `1`.
 - `TMUX_NOTIFY_DEBUG_LOG`: debug log path (default:
