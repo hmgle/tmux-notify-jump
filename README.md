@@ -23,7 +23,7 @@ This repo contains:
 - `tmux-notify-jump-linux.sh`: Linux/X11 implementation (notify-send + xdotool)
 - `tmux-notify-jump-macos.sh`: macOS implementation (terminal-notifier + osascript)
 - `tmux-notify-jump-hook.sh`: helper for tmux hooks (uses `#{hook_pane}` pane id)
-- `notify-codex.sh`: Codex CLI wrapper (reads JSON from `$1`)
+- `notify-codex.sh`: Codex CLI wrapper (legacy JSON from `$1`, native hooks from stdin)
 - `notify-claude-code.sh`: Claude Code wrapper (reads JSON from stdin)
 - `notify-kimi-code.sh`: Kimi Code CLI wrapper (reads hook JSON from stdin)
 - `notify-grok.sh`: Grok Build wrapper (reads native hook JSON from stdin)
@@ -75,6 +75,7 @@ Optional: configure hooks (makes backups; won’t overwrite existing `notify=` /
 
 ```bash
 ./install.sh --prefix "$HOME/.local" --symlink --configure-codex
+./install.sh --prefix "$HOME/.local" --symlink --configure-codex-hooks
 ./install.sh --prefix "$HOME/.local" --symlink --configure-claude
 ./install.sh --prefix "$HOME/.local" --symlink --configure-kimi
 ./install.sh --prefix "$HOME/.local" --symlink --configure-grok
@@ -574,7 +575,8 @@ notify = ["/path/to/notify-codex.sh"]
 
 Optional event filtering (comma-separated lists; `*` = all):
 
-- `CODEX_NOTIFY_EVENTS`: whitelist (empty = default: `agent-turn-complete`)
+- `CODEX_NOTIFY_EVENTS`: whitelist (empty = default:
+  `agent-turn-complete,PermissionRequest,Stop`; only registered events arrive)
 - `CODEX_NOTIFY_EXCLUDE_EVENTS`: blacklist (set to `*` to disable all)
 - `CODEX_NOTIFY_SHOW_EVENT_TYPE`: include `[event]` in title (`1`/`0`; default: `1`)
 
@@ -594,6 +596,93 @@ Notes:
   - On macOS, tmux-launched processes sometimes inherit a restricted `PATH`; the wrapper adds common Homebrew paths (`/opt/homebrew/bin:/usr/local/bin`).
 - The wrapper prefers `tmux-notify-jump` on your `PATH`. To override, set `TMUX_NOTIFY_JUMP_SH` to an executable (e.g. `tmux-notify-jump-macos.sh`).
 - If you installed via `./install.sh`, you can auto-configure with `./install.sh --prefix "$HOME/.local" --configure-codex` (it creates a timestamped `config.toml.bak.*` before editing).
+
+### Native Codex lifecycle hooks
+
+Codex v0.168.0 still sends only `agent-turn-complete` through top-level `notify`.
+Its native lifecycle hooks use a different stdin JSON schema. The same wrapper
+also accepts `PermissionRequest` and `Stop` from that schema.
+
+To add approval-related Inbox/desktop/OSC notifications alongside the legacy
+completion integration:
+
+```bash
+./install.sh --prefix "$HOME/.local" --configure-codex --configure-codex-hooks
+```
+
+`--configure-codex-hooks` adds only `PermissionRequest` to `hooks.json` beside
+the selected Codex config. Pass `--codex-hooks-path <file>` (or
+`CODEX_HOOKS_PATH`) for another location; `--codex-config` selects the config
+directory by default. This opt-in operation requires `jq`, backs up changes,
+preserves existing hooks and symlinks, and is idempotent. It does not change
+`[tui]` settings. Open `/hooks` in Codex to review and trust the definition;
+an installed command alone does not establish that Codex will run it.
+
+Equivalent `hooks.json` entry (merge with existing hooks):
+
+```json
+{
+  "hooks": {
+    "PermissionRequest": [{
+      "hooks": [{
+        "type": "command",
+        "command": "/path/to/notify-codex.sh",
+        "timeout": 10
+      }]
+    }]
+  }
+}
+```
+
+`PermissionRequest` is labeled **Approval requested** and uses Inbox attention
+priority. It runs before automatic or user approval, so it does not prove Codex
+is waiting for a human. The wrapper sends no approval decision or hook stdout,
+including in debug mode, and notification failures leave Codex running.
+
+For a native completion setup, register `Stop` with the same handler and remove
+this wrapper's legacy `notify` registration to avoid duplicate completion
+notifications. `Stop` uses `last_assistant_message` and `cwd`; another Stop
+hook may still request continuation, so this event is not proof of a settled
+run. Plan-mode prompts and async questions remain native TUI events; they are
+not emitted by the legacy notify command or these two hook adapters.
+
+### Coexisting with Codex terminal notifications
+
+Codex v0.168.0 adds explicit `tui.notification_method = "osc777"`. Its `auto`
+method still chooses OSC 9 or BEL. These native TUI notifications are separate
+from top-level `notify` and this tool's `TMUX_NOTIFY_TERMINAL_METHOD`.
+
+For local desktop Jump plus native approval/question notifications, keep the
+legacy notify registration and use:
+
+```toml
+notify = ["/path/to/notify-codex.sh"] # Top-level, before [tui]
+
+[tui]
+notification_method = "osc777"
+notifications = ["approval-requested", "plan-mode-prompt", "async-question"]
+notification_condition = "unfocused"
+```
+
+If you also install our `PermissionRequest` hook, remove `approval-requested`
+from the TUI list to avoid duplicate approval reminders. For SSH with native
+completion toasts plus our Inbox, use `notifications = true`, retain
+`TMUX_NOTIFY_REMOTE_MODE=tmux`, and set `CODEX_NOTIFY_TERMINAL_METHOD=none` and
+`CODEX_NOTIFY_BELL=0` in the shared env file to avoid extra OSC/BEL reminders.
+
+Codex emits its OSC through the pane, with a tmux DCS wrapper. On tmux versions
+supporting these values, `allow-passthrough on` permits visible panes only;
+hidden panes require `allow-passthrough all`. Focus tracking also matters for
+the default `unfocused` condition: check `focus-events on` and terminal focus
+support, or temporarily use `notification_condition = "always"` to diagnose.
+The installer does not modify these tmux settings. Every outer terminal or
+multiplexer must permit the sequence. In Windows Terminal, OSC 777 support
+depends on the terminal version and `compatibility.allowOSC777` being enabled.
+Native toasts do not carry our tmux pane jump action.
+
+Sources: [Codex v0.168.0 OSC implementation](https://github.com/openai/codex/blob/rust-v0.168.0/codex-rs/tui/src/notifications/osc.rs),
+[compatibility discussion](https://github.com/openai/codex/issues/58758),
+[OpenAI Hooks documentation](https://learn.chatgpt.com/docs/hooks).
 
 ## Claude Code integration
 

@@ -14,9 +14,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/tmux-notify-jump-lib.sh"
 
 payload_arg="${1:-}"
-[ -n "$payload_arg" ] || exit 0
-
-if [ -f "$payload_arg" ]; then
+if [ -z "$payload_arg" ]; then
+    # Native lifecycle hooks send JSON on stdin; legacy notify uses argv.
+    [ ! -t 0 ] || exit 0
+    payload="$(cat)" || exit 0
+elif [ -f "$payload_arg" ]; then
     payload="$(cat "$payload_arg")"
 else
     payload="$payload_arg"
@@ -60,10 +62,10 @@ TIMEOUT_MS="$(normalize_int "${CODEX_NOTIFY_TIMEOUT_MS:-${TMUX_NOTIFY_TIMEOUT:-0
 # Event filtering configuration
 CODEX_EVENTS="${CODEX_NOTIFY_EVENTS:-}"          # whitelist (empty=default, *=all)
 CODEX_EXCLUDE="${CODEX_NOTIFY_EXCLUDE_EVENTS:-}" # blacklist
-CODEX_DEFAULT_EVENTS="agent-turn-complete"       # default enabled events
+CODEX_DEFAULT_EVENTS="agent-turn-complete,PermissionRequest,Stop"
 CODEX_SHOW_TYPE="${CODEX_NOTIFY_SHOW_EVENT_TYPE:-1}"  # show event type in title
 
-EVENT_TYPE="$(jq -r '.type // empty' <<<"$payload" 2>/dev/null || true)"
+EVENT_TYPE="$(jq -r '(.hook_event_name // .type // empty) | select(type == "string")' <<<"$payload" 2>/dev/null || true)"
 EVENT_TYPE="$(trim_ws "$EVENT_TYPE")"
 
 # Check if event is enabled
@@ -74,6 +76,16 @@ fi
 
 # Extract title and message based on event type
 case "$EVENT_TYPE" in
+    PermissionRequest)
+        # This event precedes automatic/user approval; it does not prove the
+        # agent is blocked waiting for human input. Never return a decision.
+        TITLE_MSG="$(jq -r '"Approval requested: " + ((.tool_name // "tool") | tostring)' <<<"$payload")"
+        MESSAGE="$(jq -r '(.tool_input.command // .tool_input.description // .tool_input // "") | tostring' <<<"$payload" 2>/dev/null || true)"
+        ;;
+    Stop)
+        TITLE_MSG="$(jq -r '.last_assistant_message // "Turn stopped" | tostring' <<<"$payload")"
+        MESSAGE="$(jq -r '.cwd // "" | tostring' <<<"$payload")"
+        ;;
     agent-turn-complete)
         TITLE_MSG="$(jq -r '."last-assistant-message" // "Turn Complete" | tostring' <<<"$payload" 2>/dev/null || printf '%s' 'Turn Complete')"
         MESSAGE="$(jq -r '
@@ -162,7 +174,8 @@ fi
 if [ "${CODEX_NOTIFY_DEBUG:-0}" = "1" ]; then
     log_debug "jump_sh=$JUMP_SH"
     log_debug "target=${TARGET:-} focus_only=$([ -z "$TARGET" ] && echo "1" || echo "0") timeout=$TIMEOUT_MS max_title=$MAX_TITLE max_body=$MAX_BODY"
-    "$JUMP_SH" "${args[@]}" || log_debug "jump script exited non-zero"
+    # Hook stdout is reserved for Codex decisions/context, even in debug mode.
+    "$JUMP_SH" "${args[@]}" >/dev/null || log_debug "jump script exited non-zero"
 else
     "$JUMP_SH" "${args[@]}" >/dev/null 2>&1 || true
 fi

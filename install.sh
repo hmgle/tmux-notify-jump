@@ -6,6 +6,7 @@ PREFIX="${PREFIX:-$HOME/.local}"
 BINDIR="${BINDIR:-}"
 UNINSTALL=0
 CONFIGURE_CODEX=0
+CONFIGURE_CODEX_HOOKS=0
 CONFIGURE_CLAUDE=0
 CONFIGURE_KIMI=0
 CONFIGURE_GROK=0
@@ -15,6 +16,7 @@ CONFIGURE_STEP=0
 CONFIGURE_OMP=0
 CONFIGURE_TMUX=0
 CODEX_CONFIG_PATH="${CODEX_CONFIG_PATH:-}"
+CODEX_HOOKS_PATH="${CODEX_HOOKS_PATH:-}"
 CLAUDE_CONFIG_PATH="${CLAUDE_CONFIG_PATH:-}"
 KIMI_CONFIG_PATH="${KIMI_CONFIG_PATH:-}"
 GROK_HOOKS_PATH="${GROK_HOOKS_PATH:-}"
@@ -36,6 +38,7 @@ Options:
   --symlink         Install via symlinks (default)
   --copy            Install via copies
   --configure-codex Configure Codex notify hook (opt-in)
+  --configure-codex-hooks Configure Codex PermissionRequest hook (opt-in)
   --configure-claude Configure Claude hooks (opt-in)
   --configure-kimi  Configure Kimi Code CLI hooks (opt-in)
   --configure-grok  Configure Grok Build hooks (opt-in)
@@ -45,6 +48,7 @@ Options:
   --configure-omp   Configure omp coding agent extension (opt-in)
   --configure-tmux  Configure tmux status, hooks, and prefix key (opt-in)
   --codex-config <path>  Codex config.toml path (default: ~/.codex/config.toml)
+  --codex-hooks-path <path> Codex hooks.json path (default: beside Codex config)
   --claude-config <path> Claude settings.json path (default: ~/.claude/settings.json)
   --kimi-config <path>   Kimi config.toml path (default: ~/.kimi-code/config.toml)
   --grok-hooks-path <path> Grok hooks dir (default: \$GROK_HOME/hooks or ~/.grok/hooks)
@@ -323,6 +327,46 @@ configure_codex() {
         printf 'notify = ["%s"]\n' "$notify_cmd"
     } >"$cfg"
     echo "Created Codex config with notify hook: $cfg"
+}
+
+configure_codex_hooks() {
+    local notify_cmd="$1" cfg="" cmd="" tmp="" input=/dev/null
+    cfg="${CODEX_HOOKS_PATH:-$(dirname "${CODEX_CONFIG_PATH:-$HOME/.codex/config.toml}")/hooks.json}"
+    command -v jq >/dev/null 2>&1 || die 'jq is required to configure Codex hooks'
+    if [ -L "$cfg" ] && [ ! -e "$cfg" ]; then
+        die "Codex hooks symlink is dangling: $cfg"
+    fi
+    cfg="$(resolve_config_path "$cfg")"
+    if [ -f "$cfg" ]; then
+        input="$cfg"
+        if ! jq -e 'type == "object" and ((.hooks // {}) | type == "object") and
+            ((.hooks.PermissionRequest // []) | type == "array")' "$cfg" >/dev/null 2>&1; then
+            die "Codex hooks has invalid JSON or incompatible schema; not modifying: $cfg"
+        fi
+    fi
+    # Codex invokes this command through a shell. Quote installation paths,
+    # including spaces and apostrophes, without permitting shell expansion.
+    printf -v cmd '%q' "$notify_cmd"
+    if [ "$input" != /dev/null ] && jq -e --arg cmd "$cmd" '
+        any(.hooks.PermissionRequest[]?.hooks[]?;
+            .type == "command" and .command == $cmd)' "$cfg" >/dev/null; then
+        echo "Codex approval hook already configured: $cfg"
+        echo 'Review and trust it with /hooks in Codex; registration is not verified.'
+        return 0
+    fi
+    ensure_parent_dir "$cfg"
+    tmp="$(mktemp "${cfg}.tmp.XXXXXX")"
+    if ! jq -s --arg cmd "$cmd" '
+        (.[0] // {}) | .hooks.PermissionRequest = ((.hooks.PermissionRequest // []) +
+            [{hooks: [{type: "command", command: $cmd, timeout: 10}]}])' "$input" >"$tmp"; then
+        rm -f "$tmp"
+        die "Could not prepare Codex hooks: $cfg"
+    fi
+    backup_file "$cfg"
+    mv -f "$tmp" "$cfg"
+    echo "Configured Codex PermissionRequest hook in: $cfg"
+    echo 'Review and trust the new definition with /hooks in Codex.'
+    echo 'Completion still uses top-level notify; Stop is not registered to avoid duplicates.'
 }
 
 configure_claude() {
@@ -977,6 +1021,9 @@ while [ $# -gt 0 ]; do
         --configure-codex)
             CONFIGURE_CODEX=1
             ;;
+        --configure-codex-hooks)
+            CONFIGURE_CODEX_HOOKS=1
+            ;;
         --configure-claude)
             CONFIGURE_CLAUDE=1
             ;;
@@ -1005,6 +1052,11 @@ while [ $# -gt 0 ]; do
             shift
             [ $# -gt 0 ] || die "--codex-config requires a path"
             CODEX_CONFIG_PATH="$1"
+            ;;
+        --codex-hooks-path)
+            shift
+            [ $# -gt 0 ] || die "--codex-hooks-path requires a path"
+            CODEX_HOOKS_PATH="$1"
             ;;
         --claude-config)
             shift
@@ -1158,6 +1210,10 @@ echo "Ensure it's on your PATH, e.g.: export PATH=\"$BINDIR:\$PATH\""
 
 if [ "$CONFIGURE_CODEX" -eq 1 ]; then
     configure_codex "$BINDIR/notify-codex.sh"
+fi
+
+if [ "$CONFIGURE_CODEX_HOOKS" -eq 1 ]; then
+    configure_codex_hooks "$BINDIR/notify-codex.sh"
 fi
 
 if [ "$CONFIGURE_CLAUDE" -eq 1 ]; then
