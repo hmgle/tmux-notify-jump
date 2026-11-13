@@ -646,8 +646,9 @@ directory by default. These overrides select files for this tool; they do not
 register a config folder with Codex. Codex v0.168.0 discovers files named
 `hooks.json` in active config-layer folders and does not read `CODEX_HOOKS_PATH`.
 For another output location, place or symlink the file as `hooks.json` in a
-folder Codex actually loads. The installer warns about other filenames and
-cannot verify active config layers; check discovery and trust with `/hooks`.
+folder Codex actually loads. The installer reports unverified discovery for
+explicit config or hook paths and warns about other filenames. It cannot verify
+active config layers; check discovery and trust with `/hooks`.
 
 This opt-in operation requires `jq`, backs up changes, preserves existing
 hooks and symlinks, and is idempotent. It does not change `[tui]` settings.

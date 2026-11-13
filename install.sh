@@ -379,7 +379,7 @@ configure_codex_hooks() {
     if [ -L "$cfg" ] && [ ! -e "$cfg" ]; then
         die "Codex hooks symlink is dangling: $cfg"
     fi
-    if [ -n "$CODEX_HOOKS_PATH" ]; then
+    if [ -n "$CODEX_HOOKS_PATH" ] || [ -n "$CODEX_CONFIG_PATH" ]; then
         echo 'Codex discovery unverified: path overrides do not register a config folder; hooks.json must be in an active Codex config folder. Check /hooks in Codex.'
     fi
     # Check the discovery-facing name before following symlinks: a hooks.json

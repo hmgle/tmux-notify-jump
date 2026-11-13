@@ -422,6 +422,32 @@ TOML
     [[ "$output" == *'path overrides do not register a config folder'* ]]
 }
 
+@test "Codex config overrides warn about discovery without a hooks path override" {
+    export CODEX_CONFIG_PATH="$TEST_TEMP_DIR/env-profile/config.toml"
+    run "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" --configure-codex-hooks
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'path overrides do not register a config folder'* ]]
+    [ -f "$TEST_TEMP_DIR/env-profile/hooks.json" ]
+    run "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" --configure-codex-hooks \
+        --codex-config "$TEST_TEMP_DIR/cli-profile/config.toml"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'path overrides do not register a config folder'* ]]
+    [ -f "$TEST_TEMP_DIR/cli-profile/hooks.json" ]
+    run "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" --configure-codex-hooks \
+        --codex-config "$TEST_TEMP_DIR/cli-profile/config.toml"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'already configured'* ]]
+    [[ "$output" == *'path overrides do not register a config folder'* ]]
+}
+
+@test "Codex default home hook path does not produce an override discovery notice" {
+    export CODEX_HOME="$TEST_TEMP_DIR/codex-home"
+    run "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" --configure-codex-hooks
+    [ "$status" -eq 0 ]
+    [[ "$output" != *'path overrides do not register a config folder'* ]]
+    [ -f "$CODEX_HOME/hooks.json" ]
+}
+
 @test "Codex installer warns for nonstandard hook filenames and keeps staging supported" {
     CFG="$TEST_TEMP_DIR/staging/approval.json"
     install_hooks

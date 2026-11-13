@@ -36,8 +36,8 @@ Notable changes to tmux-notify-jump are documented in this file.
   JSON edits when nonempty inline events exist, avoiding duplicate hook sources.
   Trust state and empty event arrays permit idempotent reinstalls and async
   upgrades. Invalid TOML or an unavailable parser leaves hooks untouched.
-- Explicit Codex hook paths now explain that overrides do not register a config
-  folder. Nonstandard filenames prompt users to place or link the file as
+- Explicit Codex config and hook paths explain that overrides do not register
+  a config folder. Nonstandard filenames prompt users to place or link the file as
   `hooks.json` in an active Codex config folder and verify it through `/hooks`.
 - Codex hook installation rejects existing directories and special files,
   including symlink targets, before writing temporary files or reporting success.
