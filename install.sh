@@ -373,6 +373,8 @@ configure_codex_hooks() {
                     only_keys(["type", "server", "tool", "input", "timeout", "statusMessage"]) and
                     (.server | text) and (.tool | text) and
                     optional("input"; type == "object" and toml_value)
+                elif .type == "prompt" or .type == "agent" then
+                    only_keys(["type"])
                 else false end);
             def group:
                 type == "object" and only_keys(["matcher", "hooks"]) and

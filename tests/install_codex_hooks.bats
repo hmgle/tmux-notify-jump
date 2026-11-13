@@ -115,6 +115,26 @@ JSON
     cmp "$TEST_TEMP_DIR/expected-hooks" "$TEST_TEMP_DIR/actual-hooks"
 }
 
+@test "Codex hooks installer preserves empty prompt and agent handlers" {
+    mkdir -p "${CFG%/*}"
+    cat >"$CFG" <<'JSON'
+{"hooks":{"Stop":[{"hooks":[{"type":"prompt"},{"type":"agent"}]}],"PermissionRequest":[{"matcher":"Bash","hooks":[{"type":"agent"},{"type":"prompt"}]}]}}
+JSON
+    cp "$CFG" "$TEST_TEMP_DIR/original.json"
+    install_hooks
+    [ "$status" -eq 0 ]
+    jq -e '.hooks.PermissionRequest | length == 2 and .[1].hooks[0].async == true' "$CFG"
+    jq 'del(.hooks.PermissionRequest[1])' "$CFG" >"$TEST_TEMP_DIR/preserved.json"
+    run jq -e --slurp '.[0] == .[1]' "$TEST_TEMP_DIR/original.json" "$TEST_TEMP_DIR/preserved.json"
+    [ "$status" -eq 0 ]
+    cmp "$TEST_TEMP_DIR/original.json" "$CFG.bak."*
+    before="$(cat "$CFG")"
+    install_hooks
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'already configured'* ]]
+    [ "$(cat "$CFG")" = "$before" ]
+}
+
 @test "Codex installation honors CODEX_HOME for config and hooks" {
     export CODEX_HOME="$TEST_TEMP_DIR/custom codex"
     run "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" \

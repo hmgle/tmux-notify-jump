@@ -21,7 +21,8 @@ Notable changes to tmux-notify-jump are documented in this file.
 ### Fixed
 
 - Codex hook installation validates nested structures across every event before
-  editing; malformed or unfamiliar schemas are left untouched.
+  editing; malformed or unfamiliar schemas are left untouched. Valid empty
+  `prompt` and `agent` handlers are preserved even though Codex skips execution.
 - Codex installation, diagnostics and wrapper debug logs honor `CODEX_HOME`,
   with explicit file paths taking precedence.
 - Codex duplicate-reminder diagnostics apply the wrapper event whitelist and

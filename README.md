@@ -640,7 +640,9 @@ preserves existing hooks and symlinks, and is idempotent. It does not change
 `[tui]` settings. Before editing, it validates all events, matcher groups and
 handler fields against the supported Codex v0.168.0 structure, including
 unrelated events. Invalid or unfamiliar fields/handler variants are refused;
-configure those files manually. This structural check does not establish that
+configure those files manually. Empty `prompt` and `agent` handlers are valid
+and preserved, although Codex v0.168.0 skips their execution with a warning.
+This structural check does not establish that
 matchers, commands or MCP tools work at runtime. Open `/hooks` in Codex to review
 and trust the definition; an installed command alone does not establish that
 Codex will run it.
