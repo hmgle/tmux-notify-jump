@@ -79,3 +79,33 @@ assert_rejected_config() {
         [ ! -e "$TEST_TEMP_DIR/config/hooks.json" ]
     done
 }
+
+@test "Standalone Codex notify installation reports explicit config discovery limits" {
+    export CODEX_CONFIG_PATH="$TEST_TEMP_DIR/env/config.toml"
+    run "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" --configure-codex
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'path overrides do not register a config folder'* ]]
+    [ -f "$CODEX_CONFIG_PATH" ]
+    run "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" --configure-codex \
+        --codex-config "$TEST_TEMP_DIR/cli/config.toml"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'path overrides do not register a config folder'* ]]
+    [ -f "$TEST_TEMP_DIR/cli/config.toml" ]
+    before="$(cat "$TEST_TEMP_DIR/cli/config.toml")"
+    run "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" --configure-codex \
+        --codex-config "$TEST_TEMP_DIR/cli/config.toml"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'Codex already configured'* ]]
+    [[ "$output" == *'path overrides do not register a config folder'* ]]
+    [ "$(cat "$TEST_TEMP_DIR/cli/config.toml")" = "$before" ]
+}
+
+@test "Standalone Codex notify ignores an unused hooks override for discovery notices" {
+    export CODEX_HOME="$TEST_TEMP_DIR/codex-home"
+    export CODEX_HOOKS_PATH="$TEST_TEMP_DIR/unused/hooks.json"
+    run "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" --configure-codex
+    [ "$status" -eq 0 ]
+    [[ "$output" != *'path overrides do not register a config folder'* ]]
+    [ -f "$CODEX_HOME/config.toml" ]
+    [ ! -e "$CODEX_HOOKS_PATH" ]
+}

@@ -625,6 +625,10 @@ Notes:
   - On macOS, tmux-launched processes sometimes inherit a restricted `PATH`; the wrapper adds common Homebrew paths (`/opt/homebrew/bin:/usr/local/bin`).
 - The wrapper prefers `tmux-notify-jump` on your `PATH`. To override, set `TMUX_NOTIFY_JUMP_SH` to an executable (e.g. `tmux-notify-jump-macos.sh`).
 - If you installed via `./install.sh`, you can auto-configure with `./install.sh --prefix "$HOME/.local" --configure-codex` (it creates a timestamped `config.toml.bak.*` before editing).
+- `--codex-config` / `CODEX_CONFIG_PATH` only select the file to edit; they do
+  not register it with Codex. Both Codex configuration commands report this
+  discovery limitation for explicit config paths, including on reinstall.
+  Confirm that Codex actually loads the selected config folder.
 
 ### Native Codex lifecycle hooks
 

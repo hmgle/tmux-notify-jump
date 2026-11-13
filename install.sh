@@ -233,11 +233,22 @@ resolve_codex_file() {
     printf '%s' "$path"
 }
 
+codex_discovery_notice() {
+    local kind="$1"
+    if [ -n "$CODEX_CONFIG_PATH" ] || { [ "$kind" = hooks ] && [ -n "$CODEX_HOOKS_PATH" ]; }; then
+        echo 'Codex discovery unverified: path overrides do not register a config folder; confirm that Codex loads the selected config folder.'
+        if [ "$kind" = hooks ]; then
+            echo 'hooks.json must be in an active Codex config folder. Check /hooks in Codex.'
+        fi
+    fi
+}
+
 configure_codex() {
     local notify_cmd="$1"
     local cfg="${CODEX_CONFIG_PATH:-${CODEX_HOME:-$HOME/.codex}/config.toml}"
 
     cfg="$(resolve_codex_file "$cfg" 'Codex config')" || return 1
+    codex_discovery_notice config
     ensure_parent_dir "$cfg"
 
     toml_root_has_notify_key() {
@@ -386,9 +397,7 @@ configure_codex_hooks() {
     if [ "$(dirname "$cfg")" != "$(dirname "$config")" ]; then
         check_codex_inline_hooks "$(dirname "$cfg")/config.toml"
     fi
-    if [ -n "$CODEX_HOOKS_PATH" ] || [ -n "$CODEX_CONFIG_PATH" ]; then
-        echo 'Codex discovery unverified: path overrides do not register a config folder; hooks.json must be in an active Codex config folder. Check /hooks in Codex.'
-    fi
+    codex_discovery_notice hooks
     # Check the discovery-facing name before following symlinks: a hooks.json
     # link in an active config folder can legitimately point to another name.
     if [ "${cfg##*/}" != hooks.json ]; then

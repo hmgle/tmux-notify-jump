@@ -41,6 +41,7 @@ Notable changes to tmux-notify-jump are documented in this file.
 - Explicit Codex config and hook paths explain that overrides do not register
   a config folder. Nonstandard filenames prompt users to place or link the file
   as `hooks.json` in an active Codex config folder and verify it through `/hooks`.
+  The same discovery notice applies to standalone legacy notify installation.
 - Both Codex installers validate config files and symlink targets before reads
   or writes, including sibling TOML checked for inline hooks. Directories,
   FIFOs, devices and other special files are rejected without blocking or
@@ -49,7 +50,7 @@ Notable changes to tmux-notify-jump are documented in this file.
 ### Tests
 
 - Added protocol, PTY, wrapper, installer and diagnostics coverage. The suite
-  contains 534 tests, including nested hook schemas, Codex home/path precedence,
+  contains 539 tests, including nested hook schemas, Codex home/path precedence,
   special-file targets, empty commands, trust-state reinstalls, discovery paths,
   notification filters, hook feature switches, mixed hook sources and
   asynchronous hook upgrades. Linux/X11 Jump
