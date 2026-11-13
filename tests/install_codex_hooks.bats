@@ -59,6 +59,7 @@ install_hooks() {
 }
 
 @test "Codex hooks default path follows the explicit Codex config directory" {
+    python3 -c 'import tomllib' 2>/dev/null || skip 'Existing TOML inspection needs Python 3.11+'
     run "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" \
         --configure-codex --configure-codex-hooks --codex-config "$TEST_TEMP_DIR/profile/config.toml"
     [ "$status" -eq 0 ]
@@ -136,6 +137,7 @@ JSON
 }
 
 @test "Codex installation honors CODEX_HOME for config and hooks" {
+    python3 -c 'import tomllib' 2>/dev/null || skip 'Existing TOML inspection needs Python 3.11+'
     export CODEX_HOME="$TEST_TEMP_DIR/custom codex"
     run "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" \
         --configure-codex --configure-codex-hooks
@@ -146,6 +148,7 @@ JSON
 }
 
 @test "Codex explicit config and hooks paths override CODEX_HOME" {
+    python3 -c 'import tomllib' 2>/dev/null || skip 'Existing TOML inspection needs Python 3.11+'
     export CODEX_HOME="$TEST_TEMP_DIR/unused-codex"
     export CODEX_CONFIG_PATH="$TEST_TEMP_DIR/env-profile/config.toml"
     export CODEX_HOOKS_PATH="$TEST_TEMP_DIR/env-hooks.json"
@@ -164,6 +167,7 @@ JSON
 }
 
 @test "Codex empty CODEX_HOME falls back to HOME" {
+    python3 -c 'import tomllib' 2>/dev/null || skip 'Existing TOML inspection needs Python 3.11+'
     export CODEX_HOME=''
     run "$PROJECT_ROOT/install.sh" --bindir "$TEST_TEMP_DIR/bin" \
         --configure-codex --configure-codex-hooks
@@ -198,4 +202,93 @@ JSON
     install_hooks
     [ "$status" -eq 0 ]
     jq -e '.hooks.PermissionRequest[0].hooks[0].async == true' "$CFG"
+}
+
+@test "Codex hooks installer refuses inline TOML hooks without touching either source" {
+    python3 -c 'import tomllib' 2>/dev/null || skip 'Existing TOML inspection needs Python 3.11+'
+    export CODEX_CONFIG_PATH="$TEST_TEMP_DIR/profile/config.toml"
+    mkdir -p "${CODEX_CONFIG_PATH%/*}" "${CFG%/*}"
+    printf '{"hooks":{}}\n' >"$CFG"
+    local content
+    while IFS= read -r content; do
+        printf '%s\n' "$content" >"$CODEX_CONFIG_PATH"
+        install_hooks
+        [ "$status" -ne 0 ]
+        [[ "$output" == *'contains inline hooks'*'Merge PermissionRequest manually into one hook source'* ]]
+        [ "$(cat "$CODEX_CONFIG_PATH")" = "$content" ]
+        [ "$(cat "$CFG")" = '{"hooks":{}}' ]
+        [ ! -e "$CFG.bak."* ]
+        [ ! -e "$CFG.tmp."* ]
+        [ ! -e "$CODEX_CONFIG_PATH.bak."* ]
+    done <<'TOML'
+[hooks]
+[[hooks.Stop]]
+hooks = { Stop = [{ hooks = [{ type = "command", command = "notify-codex.sh" }] }] }
+"hooks".Stop = []
+['hooks'.PermissionRequest]
+"\u0068ooks" = {}
+TOML
+    rm "$CFG"
+    install_hooks
+    [ "$status" -ne 0 ]
+    [ ! -e "$CFG" ]
+}
+
+@test "Codex hooks installer checks TOML beside an explicit hooks path" {
+    python3 -c 'import tomllib' 2>/dev/null || skip 'Existing TOML inspection needs Python 3.11+'
+    mkdir -p "${CFG%/*}" "$TEST_TEMP_DIR/target"
+    printf '[[hooks.PermissionRequest]]\nhooks = [{type="command",command="notify-codex.sh"}]\n' >"${CFG%/*}/config.toml"
+    printf '{"hooks":{}}\n' >"$TEST_TEMP_DIR/target/hooks.json"
+    ln -s "$TEST_TEMP_DIR/target/hooks.json" "$CFG"
+    install_hooks
+    [ "$status" -ne 0 ]
+    [[ "$output" == *'contains inline hooks'*"${CFG%/*}/config.toml"* ]]
+    [ -L "$CFG" ]
+    [ "$(cat "$CFG")" = '{"hooks":{}}' ]
+    [ ! -e "$TEST_TEMP_DIR/target/hooks.json.bak."* ]
+}
+
+@test "Codex hooks installer ignores hook text in comments strings and other tables" {
+    python3 -c 'import tomllib' 2>/dev/null || skip 'Existing TOML inspection needs Python 3.11+'
+    mkdir -p "${CFG%/*}"
+    cat >"${CFG%/*}/config.toml" <<'TOML'
+# [hooks]
+model_instructions = '''
+[hooks]
+[[hooks.Stop]]
+'''
+[features]
+hooks = false
+[other.hooks]
+value = "keep"
+TOML
+    cp "${CFG%/*}/config.toml" "$TEST_TEMP_DIR/original.toml"
+    install_hooks
+    [ "$status" -eq 0 ]
+    jq -e '.hooks.PermissionRequest | length == 1' "$CFG"
+    cmp "$TEST_TEMP_DIR/original.toml" "${CFG%/*}/config.toml"
+    [ ! -e "${CFG%/*}/config.toml.bak."* ]
+}
+
+@test "Codex hooks installer refuses unchecked TOML but JSON-only installs need no Python" {
+    mkdir -p "${CFG%/*}"
+    printf '[invalid' >"${CFG%/*}/config.toml"
+    install_hooks
+    [ "$status" -ne 0 ]
+    [[ "$output" == *'Cannot check Codex config for inline hooks'* ]]
+    [ ! -e "$CFG" ]
+    mkdir -p "$TEST_TEMP_DIR/stubs"
+    printf '#!/usr/bin/env bash\nexit 1\n' >"$TEST_TEMP_DIR/stubs/python3"
+    chmod +x "$TEST_TEMP_DIR/stubs/python3"
+    export PATH="$TEST_TEMP_DIR/stubs:$PATH"
+    printf 'model = "keep"\n' >"${CFG%/*}/config.toml"
+    install_hooks
+    [ "$status" -ne 0 ]
+    [[ "$output" == *'need valid TOML and Python 3.11+'* ]]
+    [ ! -e "$CFG" ]
+    [ "$(cat "${CFG%/*}/config.toml")" = 'model = "keep"' ]
+    rm "${CFG%/*}/config.toml"
+    install_hooks
+    [ "$status" -eq 0 ]
+    jq -e '.hooks.PermissionRequest | length == 1' "$CFG"
 }

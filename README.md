@@ -62,6 +62,8 @@ This repo contains:
 ### Wrappers (Codex/Claude/Kimi/Grok/OpenCode/Pi/Step/omp hooks)
 
 - `jq` (required by the Codex, Claude, Kimi, Grok, OpenCode, Pi, Step Code, and omp wrappers; if missing, the wrappers no-op)
+- Python 3.11+ is needed to inspect existing TOML safely when using
+  `--configure-codex-hooks`; Codex wrapper notifications do not require it.
 
 ## Install
 
@@ -641,13 +643,21 @@ the selected Codex config. Pass `--codex-hooks-path <file>` (or
 `CODEX_HOOKS_PATH`) for another location; `--codex-config` selects the config
 directory by default. This opt-in operation requires `jq`, backs up changes,
 preserves existing hooks and symlinks, and is idempotent. It does not change
-`[tui]` settings. Before editing, it validates all events, matcher groups and
+`[tui]` settings. Existing TOML configs also require Python 3.11+ for safe
+inspection. The installer checks the selected config and, when hooks.json is
+elsewhere, its sibling `config.toml`. If either contains inline `hooks`, it
+refuses JSON hook edits and asks you to merge into one source manually. Codex
+merges inline and JSON hooks, which can execute the same handler twice.
+Unreadable/invalid TOML or an unavailable parser also stops automatic hook
+configuration; notification delivery still does not require Python.
+
+Before editing, it validates all events, matcher groups and
 handler fields against the supported Codex v0.168.0 structure, including
 unrelated events. Invalid or unfamiliar fields/handler variants are refused;
 configure those files manually. Empty `prompt` and `agent` handlers are valid
 and preserved, although Codex v0.168.0 skips their execution with a warning.
-This structural check does not establish that
-matchers, commands or MCP tools work at runtime. Open `/hooks` in Codex to review
+This structural check does not establish that matchers, commands or MCP tools
+work at runtime. Open `/hooks` in Codex to review
 and trust the definition; an installed command alone does not establish that
 Codex will run it.
 

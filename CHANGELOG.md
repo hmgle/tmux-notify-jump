@@ -32,12 +32,16 @@ Notable changes to tmux-notify-jump are documented in this file.
   legacy notifications and trust-review reminders.
 - Approval notification hooks run asynchronously. Reinstalling upgrades matching
   synchronous handlers in place and prompts for renewed Codex hook trust.
+- Codex hook installation checks existing TOML with Python 3.11+ and refuses
+  JSON edits when inline hooks exist, avoiding duplicate hook sources. Invalid
+  TOML or an unavailable parser leaves hook configuration untouched.
 
 ### Tests
 
 - Added protocol, PTY, wrapper, installer and diagnostics coverage. The suite
-  contains 514 tests, including nested hook schemas, Codex home/path precedence,
-  notification filters and asynchronous hook upgrades. Linux/X11 Jump and
+  contains 522 tests, including nested hook schemas, Codex home/path precedence,
+  notification filters, hook feature switches, mixed hook sources and
+  asynchronous hook upgrades. Linux/X11 Jump and
   Dismiss were verified on a disposable
   tmux server, along with WezTerm OSC-to-desktop notification requests.
 

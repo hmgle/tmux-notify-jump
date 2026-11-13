@@ -330,10 +330,37 @@ configure_codex() {
     echo "Created Codex config with notify hook: $cfg"
 }
 
+check_codex_inline_hooks() {
+    local config="$1" source=""
+    [ -e "$config" ] || [ -L "$config" ] || return 0
+    # A real TOML parser avoids confusing comments, quoted keys and multiline
+    # strings with inline hooks. Refuse an unchecked source rather than create
+    # a second representation that Codex would merge and potentially run twice.
+    if ! source="$(python3 - "$config" 2>/dev/null <<'PY'
+import sys
+import tomllib
+
+with open(sys.argv[1], 'rb') as handle:
+    config = tomllib.load(handle)
+print('inline' if 'hooks' in config else 'none')
+PY
+    )"; then
+        die "Cannot check Codex config for inline hooks (need valid TOML and Python 3.11+); merge PermissionRequest manually: $config"
+    fi
+    if [ "$source" = inline ]; then
+        die "Codex config contains inline hooks; not modifying hooks.json. Merge PermissionRequest manually into one hook source: $config"
+    fi
+}
+
 configure_codex_hooks() {
-    local notify_cmd="$1" cfg="" cmd="" tmp="" input=/dev/null
-    cfg="${CODEX_HOOKS_PATH:-$(dirname "${CODEX_CONFIG_PATH:-${CODEX_HOME:-$HOME/.codex}/config.toml}")/hooks.json}"
+    local notify_cmd="$1" cfg="" config="" cmd="" tmp="" input=/dev/null
+    config="${CODEX_CONFIG_PATH:-${CODEX_HOME:-$HOME/.codex}/config.toml}"
+    cfg="${CODEX_HOOKS_PATH:-$(dirname "$config")/hooks.json}"
     command -v jq >/dev/null 2>&1 || die 'jq is required to configure Codex hooks'
+    check_codex_inline_hooks "$config"
+    if [ "$(dirname "$cfg")" != "$(dirname "$config")" ]; then
+        check_codex_inline_hooks "$(dirname "$cfg")/config.toml"
+    fi
     if [ -L "$cfg" ] && [ ! -e "$cfg" ]; then
         die "Codex hooks symlink is dangling: $cfg"
     fi
