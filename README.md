@@ -6,1224 +6,346 @@
 [![Quality Gate](https://github.com/hmgle/tmux-notify-jump/actions/workflows/quality-gate.yml/badge.svg)](https://github.com/hmgle/tmux-notify-jump/actions/workflows/quality-gate.yml)
 [![Release](https://img.shields.io/github/v/release/hmgle/tmux-notify-jump)](https://github.com/hmgle/tmux-notify-jump/releases/latest)
 
-Send a tmux-native, desktop or terminal notification on Linux and macOS.
+**English** | [简体中文](README.zh-CN.md)
 
-- If tmux is available, you can jump to a target tmux pane when you click an action button.
-- If tmux is not available, you can still use it as a notification + “focus my terminal” helper (`--focus-only`).
-- Optional OSC 777 delivery requests notifications from supported local terminals,
-  including over SSH; see [terminal notifications](#terminal-notifications-over-ssh).
+Get notified when your coding agent finishes or needs attention, then return to
+the right tmux pane. Works on Linux and macOS with Codex, Claude Code, Kimi Code,
+Grok Build, OpenCode, Pi, Step Code, and omp. You can also send notifications from
+your own commands.
 
-In other words: it’s tmux-aware, but not tmux-only.
+- **Local desktop:** click **Jump** to return to the task's pane.
+- **Over SSH:** see pending tasks in the tmux Inbox and jump back with a key.
+- **Without tmux:** use `--focus-only` to bring your terminal forward.
 
 ## Demo
 
 https://github.com/user-attachments/assets/9717e123-f016-4c22-b112-eff8ce22f804
 
-This repo contains:
+## Contents
 
-- `tmux-notify-jump`: cross-platform entry point (auto-selects Linux/macOS implementation)
-- `tmux-notify-jump-linux.sh`: Linux/X11 implementation (notify-send + xdotool)
-- `tmux-notify-jump-macos.sh`: macOS implementation (terminal-notifier + osascript)
-- `tmux-notify-jump-hook.sh`: helper for tmux hooks (uses `#{hook_pane}` pane id)
-- `notify-codex.sh`: Codex CLI wrapper (legacy JSON from `$1`, native hooks from stdin)
-- `notify-claude-code.sh`: Claude Code wrapper (reads JSON from stdin)
-- `notify-kimi-code.sh`: Kimi Code CLI wrapper (reads hook JSON from stdin)
-- `notify-grok.sh`: Grok Build wrapper (reads native hook JSON from stdin)
-- `notify-opencode.sh`: OpenCode wrapper (reads JSON from stdin)
-- `opencode-plugin/tmux-notify-jump.ts`: OpenCode plugin (bridges events to `notify-opencode.sh`)
-- `pi-extension/tmux-notify-jump.ts`: Pi coding agent extension (bridges events to `notify-pi.sh`)
-- `notify-pi.sh`: Pi wrapper (reads JSON from stdin)
-- `step-extension/tmux-notify-jump.ts`: Step Code (`step`) extension (bridges events to `notify-step.sh`)
-- `notify-step.sh`: Step Code wrapper (reads JSON from stdin)
-- `omp-extension/tmux-notify-jump.ts`: omp coding agent extension (bridges events to `notify-omp.sh`)
-- `notify-omp.sh`: omp wrapper (reads JSON from stdin)
+[Choose your setup](#choose-your-setup) · [Install](#install) ·
+[Connect your agent](#connect-your-agent) · [Test it](#test-it) ·
+[tmux Inbox](#tmux-inbox) · [Configuration](#configuration) ·
+[Troubleshooting](#troubleshooting) · [Update and uninstall](#update-and-uninstall) ·
+[More documentation](#more-documentation)
 
-## Requirements
+## Choose your setup
 
-### Runtime
+Install on the machine **where the agent or task runs**. For SSH, this usually
+means the remote host; the basic Inbox workflow needs no desktop daemon there.
 
-- Linux + X11 (Wayland is not supported by the focusing path)
-  - `tmux` (required for `--target`/`--list`; optional for `--focus-only`)
-  - `notify-send` (libnotify) with action support for desktop routing; it is not
-    needed for the tmux-native SSH path
-  - Optional “dialog” UI mode: `zenity` (GNOME/GTK) or `kdialog` (KDE/Qt) or `yad`
-- macOS
-  - `tmux` (required for `--target`/`--list`; optional for `--focus-only`)
-  - `terminal-notifier` and `osascript` for desktop routing; neither is needed
-    for the tmux-native SSH path
+| Your setup | Default behavior | What to install |
+| --- | --- | --- |
+| Local Linux/X11 + tmux | Desktop notification with a Jump action; pending background panes also enter the Inbox | `tmux`, `notify-send`; `xdotool` for terminal focus |
+| Local macOS + tmux | Desktop notification; clicking returns to the pane | `tmux`, `terminal-notifier`, built-in `osascript` |
+| Agent in tmux over SSH | tmux message and Inbox; no remote desktop popup by default | `tmux`; configure the Inbox UI below |
+| Linux/Wayland | Notifications and tmux pane switching; bringing the terminal window forward is disabled | Same notification tools as Linux; `xdotool` does not enable Wayland focus |
+| No tmux | Desktop notification; clicking focuses the terminal, without selecting a pane | Platform desktop tools; use `--focus-only` |
 
-### Optional
+All agent integrations also need **`jq`**. Without it, wrappers quietly skip
+notifications so they do not interrupt the agent.
 
-- `xdotool` for focusing the terminal window before jumping (the script auto-disables focusing if missing)
-- `python3` for safer Unicode truncation
-- `ps` for resolving wrapper targets through process ancestry when `TMUX_PANE`
-  is missing
-- `fzf` for the searchable Inbox picker; menus need tmux 3.0 and popups need
-  tmux 3.2 (see [tmux Inbox](#tmux-inbox))
+If local and SSH clients share the target session, SSH routing takes precedence.
+Use `TMUX_NOTIFY_REMOTE_MODE=both` to also deliver to the task host's desktop.
 
-### Wrappers (Codex/Claude/Kimi/Grok/OpenCode/Pi/Step/omp hooks)
-
-- `jq` (required by the Codex, Claude, Kimi, Grok, OpenCode, Pi, Step Code, and omp wrappers; if missing, the wrappers no-op)
-- Python 3.11+ is needed to inspect existing TOML safely when using
-  `--configure-codex-hooks`; Codex wrapper notifications do not require it.
+Desktop Jump actions depend on the notification service. On macOS, detached
+notifications may use a single click to jump, with no separate Dismiss button.
+Use `--ui dialog` for explicit Jump/Dismiss buttons. Optional terminal-generated
+popups over SSH require a compatible local terminal; their clicks do **not**
+select a tmux pane. See [SSH terminal notifications](docs/reference.md#terminal-notifications-over-ssh).
 
 ## Install
 
-Recommended (install scripts into your PATH):
+### 1. Install dependencies
+
+Examples for common systems (use your distribution's equivalent packages).
+These commands assume `apt` or Homebrew is already available.
 
 ```bash
-./install.sh --prefix "$HOME/.local" --symlink
+# Debian / Ubuntu: local desktop
+sudo apt install git tmux jq libnotify-bin xdotool
+
+# Debian / Ubuntu: remote host, Inbox only
+sudo apt install git tmux jq
+
+# macOS: local desktop
+brew install git tmux jq terminal-notifier
 ```
 
-Optional: configure hooks (makes backups; won’t overwrite existing `notify=` / incompatible schemas):
+Choose **one** matching your setup. A running desktop notification service is
+also required for local popups. Add `fzf` if you want a searchable Inbox picker.
+Automatic Claude/Grok configuration needs Python 3. Codex approval-hook setup
+needs Python 3.11+ when inspecting existing TOML; it is not required for runtime
+notifications. [Full dependency notes](docs/reference.md#dependencies).
+
+### 2. Get the code and install
 
 ```bash
-./install.sh --prefix "$HOME/.local" --symlink --configure-codex
-./install.sh --prefix "$HOME/.local" --symlink --configure-codex-hooks
-./install.sh --prefix "$HOME/.local" --symlink --configure-claude
-./install.sh --prefix "$HOME/.local" --symlink --configure-kimi
-./install.sh --prefix "$HOME/.local" --symlink --configure-grok
-./install.sh --prefix "$HOME/.local" --symlink --configure-opencode
-./install.sh --prefix "$HOME/.local" --symlink --configure-pi
-./install.sh --prefix "$HOME/.local" --symlink --configure-step
-./install.sh --prefix "$HOME/.local" --symlink --configure-omp
-./install.sh --prefix "$HOME/.local" --symlink --configure-tmux
+git clone https://github.com/hmgle/tmux-notify-jump.git
+cd tmux-notify-jump
+./install.sh --prefix "$HOME/.local" --copy
+export PATH="$HOME/.local/bin:$PATH"
+command -v tmux-notify-jump
+tmux-notify-jump --focus-only --dry-run --title "Install check" --body "Ready"
 ```
 
-Installer-owned rewrites follow symlinked configuration files and preserve the
-symlinks.
+The default install location is `~/.local/bin`. **The installer does not edit your
+PATH.** Add the `export PATH=...` line to your shell startup file (for example,
+`~/.bashrc` or `~/.zshrc`) if that directory is not already on PATH. Start agents
+from a shell with the updated PATH.
 
-Uninstall:
+`--copy` lets the installed scripts work after you move or remove the checkout.
+Keep a checkout available for updates and uninstall. For development, use
+`--symlink` instead (the installer's default): the installed commands point into
+the checkout, so it must stay in place. Run all later `./install.sh` commands
+from that checkout, using the same install mode and prefix.
+
+The dry run prints settings without sending a notification. Next, select your
+agent integration or go straight to [Test it](#test-it) for standalone use.
+
+## Connect your agent
+
+Choose only the integrations you use. Each command also installs the scripts;
+you can combine configuration flags in one invocation. Existing files are backed
+up before supported edits; read the installer output for skipped or refused
+changes. For existing hook configurations, follow the linked integration guide.
+The commands below use `~/.local/bin`; append your original `--prefix` or
+`--bindir` if you installed elsewhere.
+
+| Agent | Configure from the checkout | Notifications enabled by this setup |
+| --- | --- | --- |
+| [Codex](docs/integrations.md#codex-cli-integration) | `./install.sh --copy --configure-codex` | Turn completed |
+| [Codex approvals](docs/integrations.md#native-codex-lifecycle-hooks) | `./install.sh --copy --configure-codex --configure-codex-hooks` | Completion + approval requested; review trust in `/hooks` |
+| [Claude Code](docs/integrations.md#claude-code-integration) | `./install.sh --copy --configure-claude` | Stop + permission/idle prompts |
+| [Kimi Code](docs/integrations.md#kimi-code-cli-integration) | `./install.sh --copy --configure-kimi` | Completion, approval request, failed turn, background task terminal states |
+| [Grok Build](docs/integrations.md#grok-build-integration) | `./install.sh --copy --configure-grok` | Completion, permission/idle prompts, failed tool calls |
+| [OpenCode](docs/integrations.md#opencode-integration) | `./install.sh --copy --configure-opencode` | Session idle + permission asked |
+| [Pi](docs/integrations.md#pi-integration) | `./install.sh --copy --configure-pi` | Agent fully settled |
+| [Step Code](docs/integrations.md#step-code-integration) | `./install.sh --copy --configure-step` | Agent fully settled; prompt notifications are opt-in |
+| [omp](docs/integrations.md#omp-integration) | `./install.sh --copy --configure-omp` | Main session stopped / idle |
+
+Launch a **new agent session inside the intended tmux pane** after setup. Enable
+the [Inbox UI](#tmux-inbox) too if using SSH. Finish a short agent request to
+verify the integration; standalone CLI tests alone do not prove the hook runs.
+
+For Codex, `--configure-codex` keeps an existing top-level `notify` command rather
+than replacing it. Approval hooks need registration and trust review in `/hooks`.
+An approval-request event can precede automatic approval; it does not always mean
+a human is required. Avoid registering both legacy completion and native `Stop`
+notifications for the same task. See the guide for native Codex terminal
+notifications and duplicate-reminder settings.
+
+## Test it
+
+### From inside tmux (local or SSH)
+
+Run this in the pane you want to return to:
+
+```bash
+(sleep 5; tmux-notify-jump --target "$TMUX_PANE" \
+    --title "Test complete" --body "Return to the original pane" --detach) &
+```
+
+Within five seconds, switch to another tmux window, for example with your
+**tmux prefix, then `c`** (default prefix: `Ctrl+b`; `c` creates a window).
+
+- **Local desktop:** a notification should appear. Click Jump (or the notification
+  itself on macOS) and confirm you return to the original pane. Also test Dismiss
+  if the backend offers it: it should leave your current pane unchanged.
+- **SSH:** expect a tmux message and a pending Inbox item, rather than a desktop
+  popup. With the [Inbox configured](#tmux-inbox), press **prefix, then uppercase
+  `N`** to return. Without the UI, `tmux-notify-jump --inbox-list` shows stored items.
+
+An item is not kept pending when its pane is already the current pane of an
+ordinary client. Switch away before the delayed test fires.
+
+### Without tmux
+
+```bash
+tmux-notify-jump --focus-only --sender-pid "$$" \
+    --title "Focus test" --body "Click to focus this terminal" --detach
+```
+
+Bring another app forward, then click the notification. Your terminal should
+come forward where platform focus support is available; no pane jump occurs.
+
+### Check configuration
+
+```bash
+tmux-notify-jump --doctor
+```
+
+Run inside tmux for server checks. `WARN` may concern optional tools or agents
+you do not use. `FAIL` exits with status 1; if the server is unreachable, later
+checks stop. Doctor does not send a notification or confirm real click behavior.
+For focus-only use without a tmux server, use the desktop test above instead.
+
+## tmux Inbox
+
+The Inbox keeps pending completion and attention events for panes you are not
+currently viewing. It works locally and over SSH, and starts recording even
+before you install its status display and shortcut.
+
+From the checkout, configure the UI:
+
+```bash
+./install.sh --copy --configure-tmux
+```
+
+Then, **inside the tmux server you want to configure**, reload its configuration:
+
+```bash
+tmux source-file ~/.tmux.conf
+```
+
+Use your actual config path if customized (`--tmux-config /path/to/tmux.conf`).
+You do not need to restart the server.
+
+- The status bar shows `?N` pending attention items and `!N` completed items,
+  where `N` is the count.
+- Press your tmux prefix, release it, then press **uppercase `N`** (`Shift+n`).
+  With the default prefix, this is `Ctrl+b`, then `Shift+n`. Lowercase `n` normally
+  means “next window”.
+- This jumps to the oldest attention item first, then the oldest completion,
+  skipping your current pane. Visiting a pane acknowledges its notices when
+  acknowledgement hooks are available (tmux 3.0+).
+- Run `tmux-notify-jump --inbox-pick` to choose an item. Install `fzf` for search
+  and pane preview; popups need tmux 3.2+, with menu/list fallbacks on older versions.
+
+Existing key bindings are preserved. If uppercase `N` is taken, rerun the
+installer with `--tmux-key M` (or another free alphanumeric key), reload the
+config, and check `--doctor`. The installer adds an Inbox block, not general
+activity/bell notifications; those are [separate tmux event hooks](docs/reference.md#tmux-hooks-integration).
+[Advanced Inbox behavior](docs/reference.md#tmux-inbox).
+
+## Configuration
+
+Create the shared shell configuration file:
+
+```bash
+mkdir -p ~/.config/tmux-notify-jump
+# Edit ~/.config/tmux-notify-jump/env with your preferred editor.
+```
+
+For example, add only the settings you want:
+
+```bash
+TMUX_NOTIFY_BELL=1                  # Optional terminal bell, including over SSH
+TMUX_NOTIFY_TERMINAL_METHOD=osc777   # Optional popup from a compatible terminal
+CODEX_NOTIFY_TERMINAL_METHOD=none    # Avoid adding OSC if Codex already sends it
+```
+
+Both bell and OSC delivery are **off by default**. OSC requires a local terminal
+that supports and enables OSC 777. Its popup cannot jump to the originating
+pane; use the Inbox for that. Bell/OSC need an attached ordinary tmux client,
+and do not work in focus-only mode. They are additional channels: even
+`TMUX_NOTIFY_REMOTE_MODE=suppress` does not turn them off.
+
+| Want to… | Setting or command |
+| --- | --- |
+| Keep default local desktop + SSH Inbox routing | `TMUX_NOTIFY_REMOTE_MODE=tmux` (default) |
+| Add host desktop delivery alongside Inbox routing | `TMUX_NOTIFY_REMOTE_MODE=both` (does not forward remote desktop notifications to your local machine) |
+| Use host desktop notifications without Inbox storage | `TMUX_NOTIFY_REMOTE_MODE=desktop` |
+| Use explicit Jump/Dismiss dialogs | `TMUX_NOTIFY_UI=dialog` (Linux needs `zenity`, `kdialog` or `yad`) |
+| Switch panes without raising the terminal | Pass `--no-activate` |
+| Disable one agent's notifications | For example, `CLAUDE_NOTIFY_EXCLUDE_EVENTS='*'` |
+
+Configuration has different scopes:
+
+| Where | Used by | When it takes effect |
+| --- | --- | --- |
+| `~/.config/tmux-notify-jump/env` | Shell notification commands and wrappers | Next invocation; reload tmux config after changing Inbox initialization settings |
+| Agent's own config / plugin files | The agent's hook or extension loader | Start a new agent session; complete any required trust review |
+| Agent process environment | TypeScript bridge options such as `PI_NOTIFY_CMD`, `PI_NOTIFY_HEADLESS` and corresponding omp/Step options | Export before launching the agent; these bridges do not load the shared env file |
+| Command-line flags | The invoked notification command | This invocation; explicit flags override corresponding settings |
+
+`TMUX_NOTIFY_CONFIG` selects another shared file; an explicitly empty value skips
+file loading. The shared file is sourced as Bash; assignments there can replace
+inherited environment values. Keep shell syntax valid and quote values with
+spaces. [All variables and precedence details](docs/reference.md#environment-variables).
+
+## Troubleshooting
+
+| Symptom | Start here |
+| --- | --- |
+| `command not found` | Check `command -v tmux-notify-jump` and PATH; restart the agent from that shell. For symlink installs, keep the checkout in place. |
+| No notification over SSH | Default behavior is tmux message/Inbox, not a local desktop popup. Configure the Inbox UI and test from a background pane. |
+| CLI test works, agent does not notify | Check `jq`, selected events, agent restart and hook registration/trust. Enable the wrapper's debug log (for example, `CODEX_NOTIFY_DEBUG=1` in the shared env file). |
+| No local desktop notification | Check the platform notification tool, desktop notification permissions / Do Not Disturb, and `--doctor`; then run the focus-only test. |
+| Notification appears but has no Jump button | Linux needs notification action support (`notify-send -A` / `--wait` and daemon support). Dialog mode provides explicit buttons. macOS may jump on the notification click itself. |
+| Terminal does not come forward | Wayland disables focus. Linux/X11 needs `xdotool` or the supported awesome-client fallback; macOS may need a terminal bundle-ID override. |
+| Inbox shortcut does nothing | Reload the correct tmux config and check `--doctor` for an occupied key. Use uppercase `N`, not lowercase `n`. |
+| Wrong pane or duplicate reminders | Launch the agent in the intended pane. Keep one notification registration per event; review native agent notifications as well. |
+
+Logs for the notification command can be enabled with `TMUX_NOTIFY_DEBUG=1`;
+the default is `~/.cache/tmux-notify-jump/debug.log` (or under `XDG_CACHE_HOME`).
+Wrapper log locations differ; see the [integration guide](docs/integrations.md).
+For multiple tmux servers, specify `TMUX_NOTIFY_TMUX_SOCKET` or the supported
+`--tmux-socket` option rather than inspecting a different server by accident.
+[Detailed diagnostics and focus troubleshooting](docs/reference.md#diagnostics).
+
+## Update and uninstall
+
+### Update
+
+From your checkout:
+
+```bash
+git pull --ff-only
+./install.sh --prefix "$HOME/.local" --copy
+```
+
+Reuse your original prefix, install mode and integration flags (for example,
+`--configure-pi`) to update installed plugin/extension copies too. Symlink installs
+read the updated checkout directly, but rerun configuration when hooks or paths
+change. Reload tmux config if its block changes, start a new agent session, and
+review changed Codex hooks again in `/hooks`.
+
+### Uninstall
+
+First remove this tool's agent registrations while keeping unrelated hooks:
+
+| Integration | What to remove |
+| --- | --- |
+| Codex | This wrapper's top-level `notify` entry and its handlers in `hooks.json` or inline hooks, if configured |
+| Claude / Kimi | Only the hook entries calling this tool's wrapper |
+| Grok | This tool's `tmux-notify-jump.json` in the configured hooks directory |
+| OpenCode / Pi / omp | This tool's `tmux-notify-jump.ts` in the configured plugin/extension directory |
+| Step | Remove its extension manually, or add `--configure-step` to the uninstall command |
+
+See [integration paths](docs/integrations.md) for default and custom locations.
+Automatic removal of Codex/Claude/Kimi/Grok/OpenCode/Pi/omp configuration is **not**
+provided by `--uninstall`.
+
+If you configured the Inbox UI, clean it up from the checkout **before removing
+the installed scripts**. If several servers have been configured, first run
+`tmux-notify-jump --tmux-uninit --tmux-socket /path/to/other.sock` for each
+additional server while the executable is still installed. Then, inside the
+final server, run:
+
+```bash
+./install.sh --prefix "$HOME/.local" --uninstall --configure-tmux
+```
+
+This removes the marked tmux config block, the running server's tool-owned Inbox,
+status, hooks and shortcut, **and the installed scripts**. With multiple servers,
+pass `--tmux-socket /path/to/socket` deliberately; cleanup affects the selected
+server. Supply your original `--tmux-config` / `--bindir` if customized. See
+[cleanup details](docs/reference.md#tmux-inbox).
+
+If you did not configure tmux, remove just the installed scripts:
 
 ```bash
 ./install.sh --prefix "$HOME/.local" --uninstall
 ```
 
-Or run from the repo (no install):
-
-```bash
-chmod +x tmux-notify-jump tmux-notify-jump-linux.sh tmux-notify-jump-macos.sh tmux-notify-jump-hook.sh notify-codex.sh notify-claude-code.sh notify-kimi-code.sh notify-grok.sh notify-opencode.sh notify-pi.sh notify-step.sh notify-omp.sh
-```
-
-## Usage
-
-There are two main modes:
-
-- **Jump mode**: pass `--target` (or a positional target). Requires a running tmux server.
-- **Focus-only mode**: pass `--focus-only`. Does not require tmux; clicking just focuses your terminal window/app.
-
-Jump mode inventories tmux clients and treats only
-`client_control_mode=0` rows as user-visible terminals. On click it selects an
-explicit client (the propagated sender client first, otherwise an ordinary
-client already viewing the target session, otherwise the server's sole
-ordinary client), runs `switch-client -c`, and verifies that exact client
-reached the target pane. A persistent control-mode client is never a jump
-target, even if tmux reports a TTY for it. Set
-`TMUX_NOTIFY_UNATTACHED_FALLBACK=none` to disable the sole-client fallback.
-
-tmux 2.1 or newer exposes `client_control_mode` and provides this exact
-classification. On older tmux releases the format expands empty, so the script
-falls back to accepting only clients with a non-empty TTY. That keeps ordinary
-terminal jumps working and excludes pipe-backed background control clients,
-but an ancient tmux cannot distinguish a control client that itself owns a TTY;
-upgrade tmux when exact isolation is required. Releases without
-`#{client_name}` identify each client by its TTY (which `switch-client -c`
-accepts), and releases that do not expand `#{pane_id}` in client context verify
-the jump by session alone.
-
-```bash
-./tmux-notify-jump <session>:<window>.<pane> [title] [body]
-./tmux-notify-jump --target <session:window.pane> [--title <title>] [--body <body>]
-./tmux-notify-jump --target <%pane_id> [--title <title>] [--body <body>]   # e.g. %1
-./tmux-notify-jump --focus-only [--title <title>] [--body <body>]
-./tmux-notify-jump --list
-
-./tmux-notify-jump-linux.sh <session>:<window>.<pane> [title] [body]
-./tmux-notify-jump-linux.sh --target <session:window.pane> [--title <title>] [--body <body>]
-./tmux-notify-jump-linux.sh --target <%pane_id> [--title <title>] [--body <body>]
-./tmux-notify-jump-linux.sh --focus-only [--title <title>] [--body <body>]
-./tmux-notify-jump-linux.sh --list
-
-./tmux-notify-jump-macos.sh <session>:<window>.<pane> [title] [body]
-./tmux-notify-jump-macos.sh --target <session:window.pane> [--title <title>] [--body <body>]
-./tmux-notify-jump-macos.sh --target <%pane_id> [--title <title>] [--body <body>]
-./tmux-notify-jump-macos.sh --focus-only [--title <title>] [--body <body>]
-./tmux-notify-jump-macos.sh --list
-```
-
-Common options:
-
-- `--list`: list available panes (`*` means active)
-- `--focus-only`: on click, only focus the terminal window/app (no tmux required)
-- `--no-activate`: do not focus terminal window
-- `--sender-pid <PID>`: best-effort focus by walking the sender process tree (useful outside tmux)
-- `--class <CLASS>` / `--classes <A,B>`: fallback terminal window class(es) to focus (default: `org.wezfurlong.wezterm,Alacritty`)
-- `--timeout <ms>`: notification timeout in milliseconds (default: `10000`; `0` may be sticky depending on daemon)
-- `--dedupe-ms <ms>`: suppress duplicate notifications within this window (default: `2000`; `0` disables). Uses a small cache under `XDG_CACHE_HOME`/`~/.cache` and prunes old entries automatically.
-- `--bell` / `--no-bell`: enable/disable a terminal BEL for the target tmux session (default: disabled). Override configuration; the last flag wins.
-- Linux/macOS: `--ui <notification|dialog>`: UI mode (`dialog` always waits for click; can also set `TMUX_NOTIFY_UI`, but `--ui` wins)
-- `--detach`: run in background (recommended for hook/callback use)
-- `--dry-run`: print what would happen and exit
-- `--wrap-cols <n>`: wrap body text to `<n>` columns (default: `80`; `0` disables wrapping)
-- `--notify-kind <attention|complete>`: classify an Inbox item. Attention items
-  are selected first by the tmux Inbox key.
-- `--notify-source <name>`: source label shown in remote tmux messages and the
-  Inbox metadata.
-- `--inbox-pick [options]`: search the tmux Inbox and jump to a selected item.
-- `--doctor [--tmux-socket <path>] [--agent-config <agent=path>]`: print dependency and tmux integration
-  diagnostics without changing configuration, permissions or Inbox contents.
-
-## Terminal bell over SSH
-
-All supported agent wrappers can add a terminal bell to their notifications.
-Enable it in `~/.config/tmux-notify-jump/env` (or `TMUX_NOTIFY_CONFIG`):
-
-```bash
-TMUX_NOTIFY_BELL=1
-OMP_NOTIFY_BELL=0  # Keep omp's built-in sound without adding another bell
-```
-
-Per-agent overrides are `CODEX_NOTIFY_BELL`, `CLAUDE_NOTIFY_BELL`,
-`KIMI_NOTIFY_BELL`, `GROK_NOTIFY_BELL`, `OPENCODE_NOTIFY_BELL`, `PI_NOTIFY_BELL`,
-`STEP_NOTIFY_BELL`, and `OMP_NOTIFY_BELL`. Unset or empty values inherit the
-global setting.
-Use `0` to disable, or `1`, `true`, `yes`, or `on` to enable (uppercase words
-also work); other values disable. Wrappers forward an explicit per-agent
-override as `--bell` or `--no-bell`, taking precedence over the global setting.
-
-For an agent running in Linux tmux over SSH from macOS, the notification writes
-one BEL byte (`0x07`) to each distinct ordinary client TTY attached to the
-target session. SSH carries it back to your macOS terminal, which controls the
-audible or visual effect. The pane may be active or in a background window.
-Other sessions and control-mode clients are excluded; without a valid target
-and attached terminal, including `--focus-only`, the bell is skipped.
-
-BEL needs no desktop notification daemon, audio tool, or additional runtime
-dependency. It works with redirected hook output and `--detach`, after event
-filtering and deduplication. `--quiet` does not silence it; `--dry-run` never
-rings. The bell is independent of `TMUX_NOTIFY_REMOTE_MODE`, including
-`suppress`: use `--no-bell` or `TMUX_NOTIFY_BELL=0` to disable it. Inbox and
-desktop delivery continue normally if writing a terminal fails.
-
-The byte goes directly to the client terminal, bypassing this tmux server's
-`bell-action` and `visual-bell` settings and avoiding a new `alert-bell` hook.
-The `alert-bell` wrapper defaults to `--no-bell` to avoid duplicating an original
-pane bell; explicitly passing `--bell` overrides that default. If you hear no
-sound, check the terminal emulator's audible bell and mute settings. For
-nested terminal multiplexers, their outer bell policies can still apply.
-
-Test from inside the target tmux pane:
-
-```bash
-tmux-notify-jump --target "$TMUX_PANE" --bell --title "Bell test" --detach
-```
-
-## Terminal notifications over SSH
-
-To request a desktop notification from a compatible local terminal while the
-agent runs over SSH, enable OSC 777 in the shared env file:
-
-```bash
-TMUX_NOTIFY_TERMINAL_METHOD=osc777  # Default: none
-CODEX_NOTIFY_TERMINAL_METHOD=none  # Optional: use Codex's native OSC instead
-```
-
-All eight agent wrappers support `<AGENT>_NOTIFY_TERMINAL_METHOD` overrides,
-using the same prefixes as the bell settings above. Empty overrides inherit
-the global method. The CLI accepts `--terminal-method none|osc777`; an explicit
-flag wins over configuration, including after `--detach`.
-
-Like BEL, OSC delivery goes directly to each distinct ordinary client TTY of
-the target session, including clients viewing another window. This bypasses
-the current tmux server's pane passthrough setting; no DCS wrapper or
-`allow-passthrough` change is needed for this path. Outer nested multiplexers
-may still filter the sequence. Control clients, other sessions, focus-only
-mode and dry runs receive no sequence. Event filtering and deduplication
-apply before sending; `--quiet` does not silence it.
-
-OSC is an additional delivery channel, independent of `TMUX_NOTIFY_REMOTE_MODE`
-(including `suppress`) and BEL. Inbox and desktop routing continue normally,
-even if a terminal write fails. Use `none` to disable OSC. A detached session
-with no attached client cannot receive terminal notifications; its Inbox can
-still retain events. No desktop daemon is needed on the remote host.
-
-The local terminal must implement and enable OSC 777. Writing the sequence
-successfully does not establish that a toast appeared. Notification clicks are
-handled by the terminal and do not carry a tmux pane jump callback; use Inbox
-or the existing desktop Jump action to select the exact pane. Titles and
-bodies are plain UTF-8, with controls removed, ASCII semicolons replaced, and
-each field limited to 255 bytes. Avoid enabling native agent notifications,
-OSC delivery and desktop delivery for the same events unless multiple
-reminders are intended.
-
-```bash
-tmux-notify-jump --target "$TMUX_PANE" --terminal-method osc777 --detach
-```
-
-## tmux Inbox
-
-When `TMUX_NOTIFY_REMOTE_MODE=tmux` (the default), a notification whose target
-pane is not currently visible is recorded in a small persistent Inbox. The
-status-right segment shows `?N` for attention items and `!N` for completed work.
-Run `./install.sh --configure-tmux` once to install the status segment, focus
-hooks, and the `prefix+N` binding, then reload the configured file with
-`tmux source-file ~/.tmux.conf` (or restart the server). The binding key must be
-free when initialization runs: tmux binds `prefix+n` to `next-window` by
-default, and a key your configuration or a plugin already took is reported and
-left alone. Pass `--tmux-key <key>` to the installer or to `--tmux-init` (or
-edit the `@tmux-notify-jump-key` line the block installs) to pick another one,
-and confirm with `tmux-notify-jump --doctor`. Pressing the binding
-selects the oldest attention item first, then the oldest completion, and clears
-that exact pane as soon as it is visited. Repeated events for the same pane and
-priority collapse into one item with an updated count.
-The Inbox stores pending attention/completion events. A continuous
-`working / needs-input / done` view needs reliable start, resume and exit
-events across adapters. These are not consistently available, so lifecycle
-state is not inferred from silence between notifications.
-Inbox cache directories and metadata files are restricted to the current user.
-Notification bodies are used for immediate delivery but are not persisted.
-Run `tmux-notify-jump --inbox-pick` for a searchable fzf popup with the selected
-pane's last 80 lines as a preview. It shows priority, agent/source, current
-session/window/pane, age in seconds and count, sorted attention first and then
-oldest first. Session renames and pane moves are read from one live inventory.
-Enter jumps; Escape cancels without acknowledging anything.
-Successful selection verifies the ordinary client's session and pane before
-acknowledging both priorities for that pane, including when focus hooks are not
-installed. A failed or unverified jump retains the notices. Closed panes keep
-the window/session fallback; successful fallback or an entirely stale target
-retires both priorities for the closed pane.
-Stale targets are cleared only after a successful pane inventory confirms
-their absence; failed or incomplete queries retain the notices. Window fallback
-follows a moved window's live session and prefers the recorded session when
-the window remains linked there.
-
-Picker options:
-
-- `--kind attention|complete`, `--source <name>` and `--session <name-or-id>`:
-  exact filters; `--session` accepts the live name or stable `$N` session ID.
-- `--since <seconds>`: include items updated within this time (default `0`, all).
-- `--query <text>`: initial fzf search across the displayed fields.
-- `--menu`: use the numbered tmux menu; `--query` becomes a case-insensitive
-  substring filter. `[` and `]` move between pages of up to 35 items. Page size
-  adapts to the invoking client's height, reserving borders and navigation rows.
-  Labels also fit its width, reserving space for shortcuts and borders. Each
-  non-ASCII codepoint uses a conservative two-column budget because tmux and
-  system Unicode width tables can disagree. This can shorten accented or
-  combining text earlier; menu sizing does not require Python. A client smaller
-  than 5 rows or 9 columns, or unavailable dimensions, prints the list.
-- `--inline`: run fzf in the current terminal instead of a popup.
-- `--sender-tty <tty>` and `--tmux-socket <path>`: identify the invoking client
-  and server explicitly. The selected socket takes precedence over configuration
-  throughout menu, popup and preview callbacks.
-
-fzf is optional. Popups need tmux 3.2 (popup titles need 3.3). tmux 3.0–3.1,
-an unavailable or incompatible fzf, or a failed popup falls back to the menu.
-Older tmux prints the filtered list;
-`--inline` with fzf and `--inbox-next` remain available. A picker invoked outside a client needs
-`--sender-tty` if several ordinary terminals are attached. An explicitly named
-client that has detached is never replaced with another terminal.
-
-Examples and an optional second binding (the installed `prefix+N` stays a quick
-jump to the oldest item outside the invoking client's current pane):
-
-```bash
-tmux-notify-jump --inbox-pick --kind attention --session work --since 3600
-tmux-notify-jump --inbox-pick --query Codex
-tmux bind-key n run-shell -b 'TMUX_NOTIFY_SENDER_TTY="#{client_tty}" tmux-notify-jump --inbox-pick'
-```
-
-Inbox routing is active even before `--configure-tmux` installs its status,
-hooks, and binding. Set `TMUX_NOTIFY_REMOTE_MODE=desktop` to disable tmux Inbox
-storage and use desktop delivery only.
-
-`--inbox-next` skips the invoking client's current pane and leaves its entries
-pending. The picker marks that pane with `[current]` and lets you select it
-explicitly. Inbox list/picker/next operations maintain private permissions,
-expire old items and update counts as applicable; `--doctor` only reads state.
-
-Initialization pins the resolved Inbox directory in the tmux server so agent
-processes and `run-shell` hooks use the same location. To customize
-`XDG_CACHE_HOME`, set it in `~/.config/tmux-notify-jump/env` (or the file named by
-`TMUX_NOTIFY_CONFIG`) and reload the tmux configuration. An override set only in
-an interactive shell rc file may not be visible to the tmux server.
-
-In the default mode, an SSH client attached to the target session takes
-precedence over local clients: feedback stays inside tmux and no desktop
-notification is sent. This also covers an old pane whose processes retained a
-local graphical environment before an SSH client attached. Set
-`TMUX_NOTIFY_REMOTE_MODE=both` to opt into desktop delivery for mixed local and
-SSH attachments. With no remote target client, desktop delivery is retained for
-local clients and local processes. Remote clients viewing the target session
-also receive a transient tmux message. Automatic acknowledgement on manual pane
-visits requires tmux 3.0 or newer; older releases keep the status and `prefix+N`
-workflow but warn during initialization that acknowledgement hooks are
-unavailable.
-
-The configuration block is marked and idempotent. Use
-`./install.sh --configure-tmux --uninstall` to remove only that block while
-leaving the rest of the tmux configuration intact. The same command also clears
-a running server's Inbox, status segment, hooks, and tool-owned key binding
-before removing the executable, and reports the socket it changed together with
-how many Inbox entries it removed. Incomplete Inbox cleanup is reported as an
-error. That server is the one `$TMUX` points at, otherwise the default socket;
-pass `--tmux-socket <path>` to name a different one when you run several
-servers. A server that carries none of this tool's state is reported and left
-untouched. That check only recognizes servers this tool never configured:
-servers sharing a `~/.tmux.conf` all run `--tmux-init` and carry identical
-marks, so naming the wrong socket does clear that server's Inbox. Check the
-reported socket, and pass `--tmux-socket` deliberately when more than one server
-is configured. If `prefix+N` is already bound to something else — tmux itself
-binds `prefix+n` to `next-window` out of the box — initialization warns and
-preserves the existing binding. Choose a key that is free: pass `--tmux-key
-<key>` to `--tmux-init`, or set `@tmux-notify-jump-key` in the configuration
-block, or set `TMUX_NOTIFY_TMUX_KEY` / `TMUX_NOTIFY_KEY` in the environment, in
-that order of precedence. The key must be a single alphanumeric character;
-`--tmux-key` rejects anything else, and a configured value such as `C-n` is
-reported and replaced with `N` rather than being silently ignored. `--tmux-key`
-is accepted only by `--tmux-init`, the one subcommand that binds a key.
-
-`--tmux-init --tmux-key <key>` also records the key in
-`@tmux-notify-jump-key`, so the binding, the option and `--doctor` agree and a
-later `--tmux-init` keeps the key instead of silently migrating the binding
-back. An inherited `TMUX_NOTIFY_TMUX_KEY` is not recorded: it may be a one-shot
-override for a single command. Reloading your tmux configuration re-applies the
-value in the configuration block, which is the durable place to change the key.
-Run `tmux-notify-jump --doctor` to confirm: it resolves the key the same way
-initialization does and reports the binding actually in effect.
-Changing the key or reinstalling under a different `--bindir` migrates the
-binding: initialization finds jump bindings by command rather than by key, so it
-retires the one an earlier install left behind instead of leaving a second key
-bound, or leaving the current key pointing at an install path that no longer
-exists. Uninstall removes them the same way. Set
-`TMUX_NOTIFY_TMUX_STATUS=0` to keep the hooks and binding without appending the
-Inbox counts to `status-right`.
-
-Acknowledgement hooks are installed at array index `900` of `client-attached`,
-`client-session-changed`, `after-select-pane`, `after-select-window`, and
-`client-focus-in`. That index is only conventionally reserved: a plain
-`set-hook -g <hook>` writes index `0` and `set-hook -ga` appends from there, so
-nothing but a deliberate `[900]` collides. Initialization warns and keeps a
-command it did not install, and uninstall removes only its own. Note that a
-plain `set-hook -g` replaces the whole array, including index `900`. If you set
-one of these five hooks yourself, use `set-hook -ga` to append; a plain
-`set-hook -g` evaluated after `--tmux-init` silently disables automatic
-acknowledgement, leaving Inbox entries armed until you visit them via
-`prefix+N`.
-
-macOS note: in `--ui notification` mode, if the script is detached (or `terminal-notifier` doesn’t support `-wait`), it falls back to `terminal-notifier -execute`, where any click triggers the jump (no separate “Dismiss” action). Use `--ui dialog` for explicit buttons.
-
-Agent wrappers first use `TMUX_PANE`. If it is absent, they take one tmux pane
-inventory and one optional `ps` process inventory to find the nearest pane root
-in the reporter's process ancestry. This works for hooks that lose `TMUX_PANE`
-while still running under the originating pane. `TMUX` alone identifies a
-server and does not establish pane ownership. Process ancestry identifies the
-pane that launched a process, which can differ from the session served by a
-persistent/shared daemon such as `codex app-server` or `opencode serve`.
-For those services, set `TMUX_NOTIFY_TARGET_ANCESTRY=0`, remove an inherited
-`TMUX_PANE` unless it belongs to the reporting session, and leave the agent's
-`*_NOTIFY_FALLBACK_TARGET=0`. Disabling ancestry does not override `TMUX_PANE`.
-Reliable daemon targeting needs a per-report session-to-pane binding. Session
-IDs and shared working directories alone do not establish that binding and
-are not used to guess ownership. With no reliable target,
-events use the existing focus-only fallback, or become a no-op when it is
-disabled. Ambient pane/most-recent-client fallback now requires explicitly
-enabling `*_NOTIFY_FALLBACK_TARGET`; upgrading can therefore stop jumps that
-previously went to an unrelated pane. Use an explicit `TMUX_NOTIFY_TMUX_SOCKET`
-when reporting to a non-default server without `TMUX`.
-
-Run `tmux-notify-jump --doctor` to check executable and server versions, optional
-dependencies, the effective configuration and socket paths, the pinned Inbox
-directory and its permissions, acknowledgement hooks, status segment and
-prefix binding. It probes fzf's required options with a noninteractive filter,
-checks all eight wrapper files for executability, and looks for wrapper text
-references in user-level agent configuration/bridge files. A text reference
-can be inactive or commented out; this check does not prove runtime hook
-registration or successful notification delivery. It never sends a
-notification or repairs state. `WARN` covers
-optional tools, older tmux capabilities and integrations that are absent or
-customized. `FAIL` means tmux/server access is unavailable or configuration/
-Inbox paths or permissions are invalid; the exit status is then `1`. Successful
-checks, including warnings, return `0`. Pass `--tmux-socket <path>` to inspect a
-specific server. Notification daemon action support and GUI activation still
-need a manual click test; installed executables alone do not establish those.
-Invalid `--agent-config` specifications fail before any diagnostic output or
-tmux queries. Server reachability is checked before optional dependencies and
-agent configuration, so an unavailable server stops those further checks.
-
-For Codex, optional Python 3.11+ enables structured checks of the selected TOML
-config and adjacent `hooks.json` (override with `CODEX_HOOKS_PATH`, or pass
-`--agent-config codex=/path/to/hooks.json` for a hooks-only check). Diagnostics
-report possible duplicate completion/approval channels after applying the
-current `CODEX_NOTIFY_EVENTS` / `CODEX_NOTIFY_EXCLUDE_EVENTS` filters, and remind
-you to review `/hooks`. A selected config with `[features] hooks = false`
-(or the old `codex_hooks` alias) suppresses hook-based duplicate warnings;
-the canonical `hooks` key takes precedence when both are set. Trust reminders
-note that hooks are disabled, while top-level `notify` remains independent.
-Explicit native OSC settings also trigger read-only
-checks of the current pane's effective `allow-passthrough` and server `focus-events`.
-Other panes, config layers, hook trust and local terminal delivery remain
-unverified. Hook references still trigger trust-review reminders even when
-wrapper filters disable their notifications. Without the optional parser,
-these checks warn and skip; wrappers and terminal notifications do not require
-Python.
-
-Agent checks use the installer's standard user-level locations and honor
-`CODEX_CONFIG_PATH`, `CLAUDE_CONFIG_PATH`, `KIMI_CONFIG_PATH`, `GROK_HOOKS_PATH`,
-`OPENCODE_PLUGIN_PATH`, `PI_EXTENSION_PATH`, `STEP_EXTENSION_PATH`, and
-`OMP_EXTENSION_PATH` when set. Runtime config precedence and profile selection
-are not inferred. Codex defaults to `${CODEX_HOME:-$HOME/.codex}/config.toml`;
-`CODEX_CONFIG_PATH` overrides it, and `--agent-config codex=...` takes precedence
-for diagnostics. For a custom/profile/project file, repeat `--agent-config
-<agent=path>` with `codex`, `claude`, `kimi`, `grok`, `opencode`, `pi`, `step`, or
-`omp`, for example:
-
-```bash
-tmux-notify-jump --doctor --agent-config omp="$HOME/.omp/profiles/work/agent/extensions/tmux-notify-jump.ts"
-```
-
-## Environment variables
-
-CLI flags override environment variables where applicable.
-
-- `CODEX_HOME`: Codex home directory (default: `~/.codex` when unset or empty).
-  Codex installation, diagnostics and the wrapper debug log honor it.
-- `CODEX_CONFIG_PATH`: Codex config file for installation and diagnostics
-  (default: `$CODEX_HOME/config.toml`); `--codex-config` overrides it in the
-  installer. The adjacent `hooks.json` is used unless overridden.
-- `CODEX_HOOKS_PATH`: Codex hooks JSON file for installation and diagnostics;
-  `--codex-hooks-path` overrides it in the installer. This tool-specific override
-  does not register the path with Codex; see the discovery requirements below.
-- `TMUX_NOTIFY_CONFIG`: env file to load before running (unset defaults to
-  `~/.config/tmux-notify-jump/env`; explicitly empty disables file loading).
-  Relative paths resolve against the invocation directory and are fixed as
-  absolute paths before loading and generating callbacks. A caller without
-  `HOME` or an explicit config passes the same absence to popup/menu callbacks.
-- `TMUX_NOTIFY_TARGET_ANCESTRY`: resolve missing `TMUX_PANE` through process
-  ancestry (default: `1`). Set `0` for shared services whose launch pane does
-  not identify the reporting session; explicit `TMUX_PANE` still takes priority.
-- `TMUX_NOTIFY_JUMP_SH`: override the notification executable (a path or command
-  on `PATH`). Pointing it at `tmux-notify-jump` itself, including a symlink or
-  hardlink, uses normal platform dispatch. If a custom executable calls the
-  entrypoint again, that invocation uses normal platform dispatch too, preventing
-  recursive overrides. Arguments are forwarded unchanged.
-- `TMUX_NOTIFY_BELL`: add a terminal BEL for all ordinary clients attached to the target tmux session (`0` by default). See [Terminal bell over SSH](#terminal-bell-over-ssh) for per-agent overrides and terminal settings.
-- `TMUX_NOTIFY_TERMINAL_METHOD`: additional terminal notifications (`none`, the
-  default, or `osc777`). See [Terminal notifications over SSH](#terminal-notifications-over-ssh)
-  for per-agent overrides and terminal compatibility.
-- `TMUX_NOTIFY_DEBUG`: write diagnostic details, including failures from detached
-  notification processes, when set to `1`.
-- `TMUX_NOTIFY_DEBUG_LOG`: debug log path (default:
-  `$XDG_CACHE_HOME/tmux-notify-jump/debug.log` or
-  `~/.cache/tmux-notify-jump/debug.log`).
-- `TMUX_NOTIFY_WINDOW_ID`: explicit X11 window id to focus (overrides auto-detection)
-- `TMUX_NOTIFY_TMUX_SOCKET`: tmux server socket path (passed to `tmux -S`; useful if you run multiple tmux servers)
-- `TMUX_NOTIFY_FALLBACK_TARGET`: allow using tmux's current pane or the most
-  recently active ordinary client pane when the originating pane cannot be
-  identified (`0` disables; default: `0`). This may target unrelated work.
-- `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK`: when hooks run without tmux (missing or no server/target), fall back to `--focus-only` instead of no-op (`0` disables; default: `1`)
-- `TMUX_NOTIFY_UNATTACHED_FALLBACK`: policy when the target session has no identifiable ordinary client. The default `single` switches the server's sole ordinary client; it still refuses when there are zero or multiple ordinary clients. Set `none` for strict mode, which reports that the target is not visible instead of moving a terminal. Unknown values warn and fall back to `single`. On macOS the selected policy is forwarded to the notification click callback.
-- `TMUX_NOTIFY_REMOTE_MODE`: `tmux` (Inbox/status/remote `display-message`,
-  with remote target clients taking precedence over desktop delivery; default),
-  `desktop` (desktop only), `both` (tmux and desktop routing), or `suppress`.
-  The legacy `TMUX_NOTIFY_REMOTE=1` value maps to `desktop` for compatibility.
-- `TMUX_NOTIFY_INBOX_TTL_MS`: remove Inbox items older than this value (default:
-  `604800000`, seven days).
-- `TMUX_NOTIFY_INBOX_MAX`: maximum number of Inbox entries (default: `100`).
-- `TMUX_NOTIFY_INBOX_LOCK_RETRIES`: number of 10 ms retries when concurrent
-  events update the same Inbox entry (default: `20`).
-- `TMUX_NOTIFY_TMUX_STATUS`: append Inbox counts to tmux `status-right`
-  (`0` disables; default: `1`).
-- `TMUX_NOTIFY_CLASS` / `TMUX_NOTIFY_CLASSES`: terminal window class(es) used by `xdotool search --class`
-- `TMUX_NOTIFY_WEZTERM_TAB`: on Linux, after focusing the terminal window, also switch to the wezterm tab/pane that hosts the tmux client (matched via `wezterm cli list` by tty; `0` disables; default: `1`). Requires `python3` or `jq` for JSON parsing; silently skipped when neither is available, when `--no-activate` is set, or when the terminal is not wezterm. The GUI IPC socket path embeds the GUI pid; when `WEZTERM_UNIX_SOCKET` is unset or stale, the socket is rediscovered from `XDG_RUNTIME_DIR/wezterm` (the `x11-$DISPLAY-org.wezfurlong.wezterm` symlink, then the newest `gui-sock-*`), so restarting WezTerm does not break tab switching.
-- `TMUX_NOTIFY_BUNDLE_ID` / `TMUX_NOTIFY_BUNDLE_IDS`: macOS terminal bundle id(s) for `osascript` activation (overrides auto-detection; e.g. kitty is `net.kovidgoyal.kitty`)
-- `TMUX_NOTIFY_UI`: default for `--ui` (`notification` or `dialog`)
-- `TMUX_NOTIFY_TIMEOUT`: default notification timeout in ms
-- `TMUX_NOTIFY_DEDUPE_MS`: suppress duplicate notifications within this window (default: `2000`; `0` disables; cached under `$XDG_CACHE_HOME` or `~/.cache`)
-- `TMUX_NOTIFY_MAX_TITLE` / `TMUX_NOTIFY_MAX_BODY`: truncate limits (`0` = no truncation)
-- `TMUX_NOTIFY_WRAP_COLS`: wrap body text to this many columns (`0` = no wrapping)
-- `TMUX_NOTIFY_ACTION_GOTO_LABEL`: label for the "goto" action (default: `Jump`)
-- `TMUX_NOTIFY_ACTION_DISMISS_LABEL`: label for the "dismiss" action (default: `Dismiss`)
-
-To switch modes without changing your Codex/Claude/Kimi/OpenCode hook config, create `~/.config/tmux-notify-jump/env`:
-
-```bash
-TMUX_NOTIFY_UI=dialog
-```
-
-## Examples
-
-```bash
-./tmux-notify-jump "2:1.0" "Build finished" "Click to jump to the pane"
-./tmux-notify-jump "%1" "Build finished" "Click to jump to this pane"
-./tmux-notify-jump --target "work:0.1" --no-activate
-./tmux-notify-jump --target "work:0.1" --classes "org.wezfurlong.wezterm,Alacritty"
-
-# Works without tmux: focuses terminal on click
-./tmux-notify-jump --focus-only --title "Build finished" --body "Click to focus your terminal"
-
-# Linux dialog mode (requires zenity/kdialog/yad)
-TMUX_NOTIFY_UI=dialog ./tmux-notify-jump --target "%1" --detach
-
-./tmux-notify-jump-macos.sh "2:1.0" "Build finished" "Click to jump to the pane"
-./tmux-notify-jump-macos.sh --target "work:0.1" --no-activate
-./tmux-notify-jump-macos.sh --target "work:0.1" --bundle-ids "com.github.wez.wezterm,com.googlecode.iterm2"
-TMUX_NOTIFY_UI=dialog ./tmux-notify-jump-macos.sh --target "work:0.1" --detach
-```
-
-## tmux hooks integration
-
-tmux exposes an event/hook system (implemented in tmux’s `notify.c`). You can attach `tmux-notify-jump` to those events so tmux itself triggers desktop notifications.
-
-Recommended: use pane ids (`#{hook_pane}` like `%1`). This is more stable than `session:window.pane` because the pane id uniquely identifies the pane; the script resolves session/window/pane at jump time.
-
-Example `~/.tmux.conf`:
-
-```tmux
-# Notify when a bell/activity happens in any window
-set-hook -g alert-bell     "run-shell -b 'tmux-notify-jump-hook.sh --event alert-bell --pane-id #{hook_pane} --tmux-socket \"#{socket_path}\" --timeout 0'"
-set-hook -g alert-activity "run-shell -b 'tmux-notify-jump-hook.sh --event alert-activity --pane-id #{hook_pane} --tmux-socket \"#{socket_path}\" --timeout 0'"
-
-# Notify when a pane's command exits (useful for long-running commands).
-# Note: jumping only makes sense if the pane still exists (e.g. `set -g remain-on-exit on`).
-set-hook -g pane-exited "run-shell -b 'tmux-notify-jump-hook.sh --event pane-exited --pane-id #{hook_pane} --tmux-socket \"#{socket_path}\"'"
-```
-
-Notes:
-
-- Prefer `run-shell -b` (or pass `--detach`) so tmux isn’t blocked waiting for clicks.
-- If you run multiple tmux servers, pass `--tmux-socket <path>` (or set `TMUX_NOTIFY_TMUX_SOCKET`) to pin the correct server.
-- If you attach multiple clients to the same tmux server, passing `--sender-tty`/`--sender-pid` helps the script switch/focus the same client that triggered the hook (the helper attempts to auto-detect and pass these when possible).
-
-## Codex CLI integration
-
-Use `notify-codex.sh` as your Codex `notify` hook; it triggers on `agent-turn-complete` and calls `tmux-notify-jump` (or `TMUX_NOTIFY_JUMP_SH` if set).
-
-`$CODEX_HOME/config.toml` (default: `~/.codex/config.toml`):
-
-```toml
-notify = ["/path/to/notify-codex.sh"]
-```
-
-Optional event filtering (comma-separated lists; `*` = all):
-
-- `CODEX_NOTIFY_EVENTS`: whitelist (empty = default:
-  `agent-turn-complete,PermissionRequest,Stop`; only registered events arrive)
-- `CODEX_NOTIFY_EXCLUDE_EVENTS`: blacklist (set to `*` to disable all)
-- `CODEX_NOTIFY_SHOW_EVENT_TYPE`: include `[event]` in title (`1`/`0`; default: `1`)
-
-Notes:
-
-- `notify` must be top-level (i.e. placed before any `[table]` / `[[array-of-tables]]` sections), otherwise TOML will scope it under the last table.
-- Run Codex inside tmux so `TMUX_PANE` is available.
-- If you can’t run Codex inside tmux, set `CODEX_NOTIFY_FALLBACK_TARGET=1` (or `TMUX_NOTIFY_FALLBACK_TARGET=1`) to target the most recently active tmux pane.
-- SSH-attached clients use the tmux Inbox by default, so no desktop notification
-  daemon is required on the remote host. Use `TMUX_NOTIFY_REMOTE_MODE` to change
-  the routing policy.
-- If tmux isn’t available/running, the wrapper falls back to `--focus-only` by default (set `CODEX_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0` to restore no-op).
-- Set `--detach` (already enabled by the wrapper) to avoid blocking on `notify-send --wait`.
-- The wrapper sets `--timeout 0` by default (via `CODEX_NOTIFY_TIMEOUT_MS`) so the notification stays until you click an action (daemon-dependent).
-- On macOS (and on Linux if you have `zenity`/`kdialog`/`yad`), set `TMUX_NOTIFY_UI=dialog` to use a modal "Jump/Dismiss" dialog that stays until clicked.
-- Requires `jq` (otherwise the wrapper no-ops; set `CODEX_NOTIFY_DEBUG=1` to see why in logs).
-  - On macOS, tmux-launched processes sometimes inherit a restricted `PATH`; the wrapper adds common Homebrew paths (`/opt/homebrew/bin:/usr/local/bin`).
-- The wrapper prefers `tmux-notify-jump` on your `PATH`. To override, set `TMUX_NOTIFY_JUMP_SH` to an executable (e.g. `tmux-notify-jump-macos.sh`).
-- If you installed via `./install.sh`, you can auto-configure with `./install.sh --prefix "$HOME/.local" --configure-codex` (it creates a timestamped `config.toml.bak.*` before editing).
-- `--codex-config` / `CODEX_CONFIG_PATH` only select the file to edit; they do
-  not register it with Codex. Both Codex configuration commands report this
-  discovery limitation for explicit config paths, including on reinstall.
-  A combined installation prints the general notice once, followed by the
-  hooks-specific guidance.
-  Confirm that Codex actually loads the selected config folder.
-
-### Native Codex lifecycle hooks
-
-Codex v0.168.0 still sends only `agent-turn-complete` through top-level `notify`.
-Its native lifecycle hooks use a different stdin JSON schema. The same wrapper
-also accepts `PermissionRequest` and `Stop` from that schema.
-
-To add approval-related Inbox/desktop/OSC notifications alongside the legacy
-completion integration:
-
-```bash
-./install.sh --prefix "$HOME/.local" --configure-codex --configure-codex-hooks
-```
-
-`--configure-codex-hooks` adds only `PermissionRequest` to `hooks.json` beside
-the selected Codex config. Pass `--codex-hooks-path <file>` (or
-`CODEX_HOOKS_PATH`) for another location; `--codex-config` selects the config
-directory by default. These overrides select files for this tool; they do not
-register a config folder with Codex. Codex v0.168.0 discovers files named
-`hooks.json` in active config-layer folders and does not read `CODEX_HOOKS_PATH`.
-For another output location, place or symlink the file as `hooks.json` in a
-folder Codex actually loads. The installer reports unverified discovery for
-explicit config or hook paths and warns about other filenames. It cannot verify
-active config layers; check discovery and trust with `/hooks`.
-
-This opt-in operation requires `jq`, backs up changes, preserves existing
-hooks and symlinks, and is idempotent. It does not change `[tui]` settings.
-Both Codex installers require config paths to be absent or resolve to regular
-files. This includes hooks.json and sibling TOML inspected for inline hooks;
-directories, FIFOs, sockets, devices and dangling symlinks are rejected before
-reading or writing them.
-Existing TOML configs also require Python 3.11+ for safe
-inspection. The installer checks the selected config and, when hooks.json is
-elsewhere, its sibling `config.toml`. If either contains nonempty inline event
-arrays, it refuses JSON hook edits and asks you to merge into one source
-manually. Trust metadata under `[hooks.state]`, an empty `[hooks]` table and
-empty event arrays do not establish a second source, so they permit reinstall
-and asynchronous upgrades while keeping the TOML unchanged. Codex
-merges inline and JSON hooks, which can execute the same handler twice.
-Unreadable/invalid TOML or an unavailable parser also stops automatic hook
-configuration; notification delivery still does not require Python.
-
-Before editing, it validates all events, matcher groups and
-handler fields against the supported Codex v0.168.0 structure, including
-unrelated events. Invalid or unfamiliar fields/handler variants are refused;
-configure those files manually. Empty `prompt` and `agent` handlers are valid
-and preserved, although Codex v0.168.0 skips their execution with a warning.
-Empty or whitespace command strings (including Windows overrides) and MCP
-server/tool strings are also preserved. Codex checks the selected platform's
-command and MCP names at runtime, skipping empty values with warnings.
-This structural check does not establish that matchers, commands or MCP tools
-work at runtime. Open `/hooks` in Codex to review
-and trust the definition; an installed command alone does not establish that
-Codex will run it.
-
-Notification handlers run with `"async": true` so Codex does not wait for
-side-channel notification work. Rerunning the installer upgrades this tool's
-matching synchronous approval handlers in place, preserving their matchers,
-timeouts and other handlers. Changed definitions need review again in `/hooks`.
-
-The selected config defaults to `${CODEX_HOME:-$HOME/.codex}/config.toml`.
-Explicit config/hooks paths take precedence over `CODEX_HOME`. The wrapper's
-debug log defaults to `$CODEX_HOME/log/notify-codex.log`; set
-`CODEX_NOTIFY_DEBUG_LOG` to override it.
-
-Equivalent `hooks.json` entry (merge with existing hooks):
-
-```json
-{
-  "hooks": {
-    "PermissionRequest": [{
-      "hooks": [{
-        "type": "command",
-        "command": "/path/to/notify-codex.sh",
-        "async": true,
-        "timeout": 10
-      }]
-    }]
-  }
-}
-```
-
-`PermissionRequest` is labeled **Approval requested** and uses Inbox attention
-priority. It runs before automatic or user approval, so it does not prove Codex
-is waiting for a human. The wrapper sends no approval decision or hook stdout,
-including in debug mode, and notification failures leave Codex running.
-
-For a native completion setup, register `Stop` with the same asynchronous
-handler and remove this wrapper's legacy `notify` registration to avoid
-duplicate completion notifications. `Stop` uses `last_assistant_message` and
-`cwd`; another Stop
-hook may still request continuation, so this event is not proof of a settled
-run. Plan-mode prompts and async questions remain native TUI events; they are
-not emitted by the legacy notify command or these two hook adapters.
-
-### Coexisting with Codex terminal notifications
-
-Codex v0.168.0 adds explicit `tui.notification_method = "osc777"`. Its `auto`
-method still chooses OSC 9 or BEL. These native TUI notifications are separate
-from top-level `notify` and this tool's `TMUX_NOTIFY_TERMINAL_METHOD`.
-
-For local desktop Jump plus native approval/question notifications, keep the
-legacy notify registration and use:
-
-```toml
-notify = ["/path/to/notify-codex.sh"] # Top-level, before [tui]
-
-[tui]
-notification_method = "osc777"
-notifications = ["approval-requested", "plan-mode-prompt", "async-question"]
-notification_condition = "unfocused"
-```
-
-If you also install our `PermissionRequest` hook, remove `approval-requested`
-from the TUI list to avoid duplicate approval reminders. For SSH with native
-completion toasts plus our Inbox, use `notifications = true`, retain
-`TMUX_NOTIFY_REMOTE_MODE=tmux`, and set `CODEX_NOTIFY_TERMINAL_METHOD=none` and
-`CODEX_NOTIFY_BELL=0` in the shared env file to avoid extra OSC/BEL reminders.
-
-Codex emits its OSC through the pane, with a tmux DCS wrapper. On tmux versions
-supporting these values, `allow-passthrough on` permits visible panes only;
-hidden panes require `allow-passthrough all`. Focus tracking also matters for
-the default `unfocused` condition: check `focus-events on` and terminal focus
-support, or temporarily use `notification_condition = "always"` to diagnose.
-The installer does not modify these tmux settings. Every outer terminal or
-multiplexer must permit the sequence. In Windows Terminal, OSC 777 support
-depends on the terminal version and `compatibility.allowOSC777` being enabled.
-Native toasts do not carry our tmux pane jump action.
-
-Sources: [Codex v0.168.0 OSC implementation](https://github.com/openai/codex/blob/rust-v0.168.0/codex-rs/tui/src/notifications/osc.rs),
-[compatibility discussion](https://github.com/openai/codex/issues/58758),
-[OpenAI Hooks documentation](https://learn.chatgpt.com/docs/hooks).
-
-## Claude Code integration
-
-Use `notify-claude-code.sh` as a hook command; it reads JSON from stdin and calls `tmux-notify-jump` (or `TMUX_NOTIFY_JUMP_SH` if set).
-
-Example `~/.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          { "type": "command", "command": "/path/to/notify-claude-code.sh" }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "matcher": "permission_prompt|idle_prompt",
-        "hooks": [
-          { "type": "command", "command": "/path/to/notify-claude-code.sh" }
-        ]
-      }
-    ]
-  }
-}
-```
-
-Optional event filtering (comma-separated lists; `*` = all):
-
-- `CLAUDE_NOTIFY_EVENTS`: hook event whitelist (empty = default: `Stop,Notification,PostToolUseFailure`)
-- `CLAUDE_NOTIFY_EXCLUDE_EVENTS`: hook event blacklist (set to `*` to disable all)
-- `CLAUDE_NOTIFY_TYPES`: `Notification.notification_type` whitelist (empty = default: `permission_prompt,idle_prompt`)
-- `CLAUDE_NOTIFY_EXCLUDE_TYPES`: `Notification.notification_type` blacklist (set to `*` to disable all)
-- `CLAUDE_NOTIFY_SHOW_EVENT_TYPE`: include `[event]` in title (`1`/`0`; default: `1`)
-
-Optional UI routing (values: `notification` or `dialog`):
-
-- `CLAUDE_NOTIFY_UI_BY_TYPE`: per-`Notification.notification_type` UI override (e.g. `idle_prompt:notification,permission_prompt:dialog`)
-- `CLAUDE_NOTIFY_UI_BY_EVENT`: per-`hook_event_name` UI override (e.g. `Stop:dialog,PostToolUseFailure:notification`)
-- `CLAUDE_NOTIFY_UI`: wrapper default UI override (falls back to `TMUX_NOTIFY_UI` if unset)
-
-UI override precedence: `CLAUDE_NOTIFY_UI_BY_TYPE` → `CLAUDE_NOTIFY_UI_BY_EVENT` → `CLAUDE_NOTIFY_UI` → `TMUX_NOTIFY_UI`/default.
-
-Optional timeout routing (values: non-negative integer milliseconds):
-
-- `CLAUDE_NOTIFY_TIMEOUT_MS_BY_TYPE`: per-`Notification.notification_type` timeout override (e.g. `idle_prompt:10000,permission_prompt:0`)
-- `CLAUDE_NOTIFY_TIMEOUT_MS_BY_EVENT`: per-`hook_event_name` timeout override (e.g. `Stop:10000,PostToolUseFailure:0`)
-
-Notes:
-
-- The wrapper sets `--timeout 0` by default (via `CLAUDE_NOTIFY_TIMEOUT_MS`) so the notification stays until you click an action (daemon-dependent).
-- On macOS (and on Linux if you have `zenity`/`kdialog`/`yad`), set `TMUX_NOTIFY_UI=dialog` to use a modal "Jump/Dismiss" dialog that stays until clicked.
-- Requires `jq` (otherwise the wrapper no-ops; set `CLAUDE_NOTIFY_DEBUG=1` to see why in logs).
-  - On macOS, tmux-launched processes sometimes inherit a restricted `PATH`; the wrapper adds common Homebrew paths (`/opt/homebrew/bin:/usr/local/bin`).
-- If Claude hooks run without tmux env but a tmux server is running, set `CLAUDE_NOTIFY_FALLBACK_TARGET=1` (or `TMUX_NOTIFY_FALLBACK_TARGET=1`) to target the most recently active tmux client pane.
-- If tmux isn’t available/running, the wrapper falls back to `--focus-only` by default (set `CLAUDE_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0` to restore no-op).
-- The wrapper prefers `tmux-notify-jump` on your `PATH`. To override, set `TMUX_NOTIFY_JUMP_SH` to an executable (e.g. `tmux-notify-jump-macos.sh`).
-- If you installed via `./install.sh`, you can auto-configure with `./install.sh --prefix "$HOME/.local" --configure-claude` (it creates a timestamped `settings.json.bak.*` before editing; requires `python3`).
-
-## Kimi Code CLI integration
-
-Kimi Code CLI sends hook payloads as JSON on stdin. Use `notify-kimi-code.sh` to translate those payloads into notification titles and bodies while preserving tmux targeting, SSH suppression, and focus-only fallback behavior.
-
-Recommended installation and configuration:
-
-```bash
-./install.sh --prefix "$HOME/.local" --symlink --configure-kimi
-```
-
-The installer backs up an existing config before appending hooks to `~/.kimi-code/config.toml`. To configure them manually, add:
-
-```toml
-[[hooks]]
-event = "Stop"
-command = "/path/to/notify-kimi-code.sh"
-
-[[hooks]]
-event = "PermissionRequest"
-command = "/path/to/notify-kimi-code.sh"
-
-[[hooks]]
-event = "StopFailure"
-command = "/path/to/notify-kimi-code.sh"
-
-[[hooks]]
-event = "Notification"
-command = "/path/to/notify-kimi-code.sh"
-```
-
-The default events cover a completed agent turn, an approval request, a failed turn, and background task terminal states. A direct hook command to `tmux-notify-jump` is only suitable for a static notification; the wrapper is needed to read Kimi's JSON fields and select the correct pane or fallback behavior.
-
-Optional filtering (comma-separated lists; `*` = all):
-
-- `KIMI_NOTIFY_EVENTS`: event whitelist (empty = default: `Stop,PermissionRequest,StopFailure,Notification`)
-- `KIMI_NOTIFY_EXCLUDE_EVENTS`: event blacklist (set to `*` to disable all)
-- `KIMI_NOTIFY_TYPES`: `Notification.notification_type` whitelist (empty = all)
-- `KIMI_NOTIFY_EXCLUDE_TYPES`: notification type blacklist
-- `KIMI_NOTIFY_SHOW_EVENT_TYPE`: include `[event]` in the title (`1`/`0`; default: `1`)
-
-Optional UI and timeout routing:
-
-- `KIMI_NOTIFY_UI_BY_TYPE`: per-notification type UI (e.g. `task.completed:notification,task.failed:dialog`)
-- `KIMI_NOTIFY_UI_BY_EVENT`: per-event UI (e.g. `Stop:notification,PermissionRequest:dialog`)
-- `KIMI_NOTIFY_UI`: wrapper default UI (falls back to `TMUX_NOTIFY_UI`)
-- `KIMI_NOTIFY_TIMEOUT_MS_BY_TYPE`: per-notification type timeout in milliseconds
-- `KIMI_NOTIFY_TIMEOUT_MS_BY_EVENT`: per-event timeout in milliseconds
-- `KIMI_NOTIFY_TIMEOUT_MS`: default timeout (default: `0`, daemon-dependent sticky notification)
-
-Notes:
-
-- Run Kimi inside tmux so `TMUX_PANE` identifies the originating pane.
-- If the hook lacks tmux environment variables, set `KIMI_NOTIFY_FALLBACK_TARGET=1` (or `TMUX_NOTIFY_FALLBACK_TARGET=1`) to use the most recently active tmux pane.
-- If tmux is unavailable, focus-only fallback is enabled by default. Disable it with `KIMI_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0`.
-- Set `KIMI_NOTIFY_DEBUG=1` to log wrapper diagnostics under `$KIMI_CODE_HOME/logs/notify-kimi-code.log` (default root: `~/.kimi-code`).
-- The wrapper requires `jq` and otherwise exits successfully without affecting Kimi's workflow.
-- See the [official Kimi Hooks documentation](https://www.kimi.com/code/docs/kimi-code-cli/customization/hooks.html) for the event contract and payload format.
-
-## Grok Build integration
-
-Grok Build sends native hook payloads as camelCase JSON on stdin. Use `notify-grok.sh` to translate those payloads into notifications while preserving the shared tmux targeting, SSH suppression, and focus-only fallback behavior.
-
-Recommended installation and configuration:
-
-```bash
-./install.sh --prefix "$HOME/.local" --symlink --configure-grok
-```
-
-The installer creates `tmux-notify-jump.json` under `$GROK_HOME/hooks` or `~/.grok/hooks`. Override the directory with `--grok-hooks-path`. To configure the hooks manually, create `~/.grok/hooks/tmux-notify-jump.json`:
-
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          { "type": "command", "command": "/path/to/notify-grok.sh" }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "matcher": "permission_prompt|idle_prompt",
-        "hooks": [
-          { "type": "command", "command": "/path/to/notify-grok.sh" }
-        ]
-      }
-    ],
-    "PostToolUseFailure": [
-      {
-        "hooks": [
-          { "type": "command", "command": "/path/to/notify-grok.sh" }
-        ]
-      }
-    ]
-  }
-}
-```
-
-The wrapper defaults to completed turns, permission and idle prompts, and failed tool calls. Grok also emits `Stop` while closing a session; the wrapper only notifies when `reason` is `end_turn`, avoiding duplicate notifications for `channel_closed` and `shutdown`.
-
-Optional filtering (comma-separated lists; `*` = all):
-
-- `GROK_NOTIFY_EVENTS`: event whitelist (empty = default: `stop,notification,post_tool_use_failure`)
-- `GROK_NOTIFY_EXCLUDE_EVENTS`: event blacklist (set to `*` to disable all)
-- `GROK_NOTIFY_TYPES`: `notificationType` whitelist (empty = default: `permission_prompt,idle_prompt`)
-- `GROK_NOTIFY_EXCLUDE_TYPES`: notification type blacklist
-- `GROK_NOTIFY_SHOW_EVENT_TYPE`: include the event in the title (`1`/`0`; default: `1`)
-
-Optional behavior:
-
-- `GROK_NOTIFY_UI`: `notification` or `dialog` (falls back to `TMUX_NOTIFY_UI`)
-- `GROK_NOTIFY_TIMEOUT_MS`: timeout in milliseconds (default: `0`, daemon-dependent sticky notification)
-- `GROK_NOTIFY_FALLBACK_TARGET`: allow resolving the most recently active tmux pane when hook environment lacks `TMUX_PANE`
-- `GROK_NOTIFY_FOCUS_ONLY_FALLBACK`: focus the terminal when no tmux target is available (`1` by default)
-- `GROK_NOTIFY_DEBUG`: log diagnostics under `$GROK_HOME/logs/notify-grok.log`; override with `GROK_NOTIFY_DEBUG_LOG`
-
-Notes:
-
-- Grok's native payload uses fields such as `hookEventName`, `notificationType`, `toolName`, and `errorDetails`; the Claude wrapper expects snake_case and should not be used as the native Grok parser.
-- Global hooks under `~/.grok/hooks` are trusted automatically. Project hooks under `.grok/hooks` require `/hooks-trust` or launching Grok with `--trust`.
-- Grok can also discover Claude settings through its compatibility layer. Keep only one Grok notification registration active to avoid duplicate notifications.
-- The wrapper requires `jq` and otherwise exits successfully without affecting Grok.
-- Verify discovery with `grok inspect --json` or open the Hooks tab with `/hooks`.
-- See the [official Grok Build Hooks documentation](https://docs.x.ai/build/features/hooks) for the complete event contract.
-
-## OpenCode integration
-
-Use the `opencode-plugin/tmux-notify-jump.ts` plugin to bridge OpenCode events to `notify-opencode.sh`, which calls `tmux-notify-jump` (or `TMUX_NOTIFY_JUMP_SH` if set).
-
-Install the plugin:
-
-```bash
-./install.sh --prefix "$HOME/.local" --symlink --configure-opencode
-```
-
-Or manually:
-
-```bash
-cp opencode-plugin/tmux-notify-jump.ts ~/.config/opencode/plugins/
-```
-
-Default events: `session.idle`, `permission.asked`. Additional events (`session.error`, `session.created`, `session.deleted`, `permission.replied`, `tool.execute.after`) can be enabled via filtering.
-
-Optional event filtering (comma-separated lists; `*` = all):
-
-- `OPENCODE_NOTIFY_EVENTS`: whitelist (empty = default: `session.idle,permission.asked`)
-- `OPENCODE_NOTIFY_EXCLUDE_EVENTS`: blacklist (set to `*` to disable all)
-- `OPENCODE_NOTIFY_SHOW_EVENT_TYPE`: include `[event]` in title (`1`/`0`; default: `1`)
-
-Optional UI/timeout routing (per-event type):
-
-- `OPENCODE_NOTIFY_UI_BY_EVENT`: per-event UI override (e.g. `session.idle:notification,permission.asked:dialog`)
-- `OPENCODE_NOTIFY_TIMEOUT_MS_BY_EVENT`: per-event timeout override (e.g. `session.idle:10000,permission.asked:0`)
-- `OPENCODE_NOTIFY_UI`: wrapper default UI override (falls back to `TMUX_NOTIFY_UI` if unset)
-
-UI override precedence: `OPENCODE_NOTIFY_UI_BY_EVENT` → `OPENCODE_NOTIFY_UI` → `TMUX_NOTIFY_UI`/default.
-
-Notes:
-
-- The TypeScript plugin pipes JSON via stdin to `notify-opencode.sh` (same pattern as Claude Code).
-- The wrapper sets `--timeout 0` by default (via `OPENCODE_NOTIFY_TIMEOUT_MS`) so the notification stays until you click an action (daemon-dependent).
-- On macOS (and on Linux if you have `zenity`/`kdialog`/`yad`), set `TMUX_NOTIFY_UI=dialog` to use a modal "Jump/Dismiss" dialog that stays until clicked.
-- Requires `jq` (otherwise the wrapper no-ops; set `OPENCODE_NOTIFY_DEBUG=1` to see why in logs).
-  - On macOS, tmux-launched processes sometimes inherit a restricted `PATH`; the wrapper adds common Homebrew paths (`/opt/homebrew/bin:/usr/local/bin`).
-- Run OpenCode inside tmux so `TMUX_PANE` is available.
-- If OpenCode runs without tmux env but a tmux server is running, set `OPENCODE_NOTIFY_FALLBACK_TARGET=1` (or `TMUX_NOTIFY_FALLBACK_TARGET=1`) to target the most recently active tmux client pane.
-- If tmux isn't available/running, the wrapper falls back to `--focus-only` by default (set `OPENCODE_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0` to restore no-op).
-- The wrapper prefers `tmux-notify-jump` on your `PATH`. To override, set `TMUX_NOTIFY_JUMP_SH` to an executable.
-- Override the shell wrapper path in the plugin with `OPENCODE_NOTIFY_CMD` (default: `notify-opencode.sh` on PATH).
-
-## Pi integration
-
-[Pi](https://pi.dev/docs/latest) has no shell-command hook system; its integration point is TypeScript extensions. Use `pi-extension/tmux-notify-jump.ts`, a thin bridge that forwards Pi lifecycle events as JSON on stdin to `notify-pi.sh`, which calls `tmux-notify-jump` (or `TMUX_NOTIFY_JUMP_SH` if set) — same pattern as the OpenCode integration, with the same tmux targeting, SSH suppression, and focus-only fallback behavior as the other wrappers.
-
-Install the scripts and the extension:
-
-```bash
-./install.sh --prefix "$HOME/.local" --symlink --configure-pi
-```
-
-Or manually:
-
-```bash
-cp pi-extension/tmux-notify-jump.ts ~/.pi/agent/extensions/
-# and ensure notify-pi.sh is on your PATH
-```
-
-Default events: `agent_settled` (Pi is fully idle — no auto-retry, compaction, or queued follow-up left). Additional events (`agent_end`, `turn_end`) can be enabled via filtering.
-
-Optional event filtering (comma-separated lists; `*` = all):
-
-- `PI_NOTIFY_EVENTS`: whitelist (empty = default: `agent_settled`)
-- `PI_NOTIFY_EXCLUDE_EVENTS`: blacklist (set to `*` to disable all)
-- `PI_NOTIFY_SHOW_EVENT_TYPE`: include `[event]` in title (`1`/`0`; default: `1`)
-
-Optional UI/timeout routing (per-event):
-
-- `PI_NOTIFY_UI_BY_EVENT`: per-event UI override (e.g. `agent_settled:notification,agent_end:dialog`)
-- `PI_NOTIFY_TIMEOUT_MS_BY_EVENT`: per-event timeout override (e.g. `agent_settled:10000,agent_end:0`)
-- `PI_NOTIFY_UI`: wrapper default UI override (falls back to `TMUX_NOTIFY_UI` if unset)
-- `PI_NOTIFY_TIMEOUT_MS`: default notification timeout (default: `0`, sticky; daemon-dependent)
-
-UI override precedence: `PI_NOTIFY_UI_BY_EVENT` → `PI_NOTIFY_UI` → `TMUX_NOTIFY_UI`/default.
-
-Extension-level options:
-
-- `PI_NOTIFY_CMD`: bridge command (default: `notify-pi.sh` on PATH)
-- `PI_NOTIFY_HEADLESS`: also notify when Pi runs without UI, i.e. print (`-p`) and JSON event-stream modes (`1` enables; default: `0`). TUI and RPC (editor-driven) modes always notify — Pi reports `ctx.hasUI` as true there.
-
-Notes:
-
-- Run Pi inside tmux so `TMUX_PANE` identifies the originating pane.
-- SSH-attached clients use the tmux Inbox by default, so no desktop notification
-  daemon is required on the remote host. Use `TMUX_NOTIFY_REMOTE_MODE` to change
-  the routing policy.
-- If the extension runs without tmux env but a tmux server is running, set `PI_NOTIFY_FALLBACK_TARGET=1` (or `TMUX_NOTIFY_FALLBACK_TARGET=1`) to target the most recently active tmux client pane.
-- If tmux isn't available/running, the wrapper falls back to `--focus-only` by default (set `PI_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0` to restore no-op).
-- On macOS (and on Linux if you have `zenity`/`kdialog`/`yad`), set `PI_NOTIFY_UI=dialog` (or `TMUX_NOTIFY_UI=dialog`) to use a modal "Jump/Dismiss" dialog that stays until clicked.
-- Requires `jq` (otherwise the wrapper no-ops; set `PI_NOTIFY_DEBUG=1` to see why in logs).
-- Set `PI_NOTIFY_DEBUG=1` to log diagnostics to `~/.pi/agent/logs/notify-pi.log` (override with `PI_NOTIFY_DEBUG_LOG`).
-- If you enable multiple events (e.g. `agent_end,agent_settled`), a settled run may emit two notifications back-to-back; their titles differ, so the built-in dedupe does not merge them.
-- See the [official Pi extensions documentation](https://pi.dev/docs/latest/extensions) for the event contract.
-
-## omp integration
-
-[omp](https://omp.sh) (oh-my-pi) has no shell-command hook system; its integration point is TypeScript extensions. Use `omp-extension/tmux-notify-jump.ts`, a thin bridge that forwards omp lifecycle events as JSON on stdin to `notify-omp.sh`, which calls `tmux-notify-jump` (or `TMUX_NOTIFY_JUMP_SH` if set) — same pattern as the Pi integration, with the same tmux targeting, SSH suppression, and focus-only fallback behavior as the other wrappers.
-
-Install the scripts and the extension:
-
-```bash
-./install.sh --prefix "$HOME/.local" --symlink --configure-omp
-```
-
-Or manually:
-
-```bash
-cp omp-extension/tmux-notify-jump.ts ~/.omp/agent/extensions/
-# and ensure notify-omp.sh is on your PATH
-```
-
-Extensions are auto-discovered from `~/.omp/agent/extensions/` (user-level), `<project>/.omp/extensions/` (project-level), or the `extensions:` list in `~/.omp/agent/config.yml`.
-
-Default events: `session_stop` (the main session finished responding and is idle — omp's equivalent of Pi's `agent_settled`; it never fires for task/subagent sessions). Additional events (`agent_end`, `turn_end`) can be enabled via filtering; they may also fire for subagent runs, so keep them opt-in.
-
-Optional event filtering (comma-separated lists; `*` = all):
-
-- `OMP_NOTIFY_EVENTS`: whitelist (empty = default: `session_stop`)
-- `OMP_NOTIFY_EXCLUDE_EVENTS`: blacklist (set to `*` to disable all)
-- `OMP_NOTIFY_SHOW_EVENT_TYPE`: include `[event]` in title (`1`/`0`; default: `1`)
-
-Optional UI/timeout routing (per-event):
-
-- `OMP_NOTIFY_UI_BY_EVENT`: per-event UI override (e.g. `session_stop:notification,agent_end:dialog`)
-- `OMP_NOTIFY_TIMEOUT_MS_BY_EVENT`: per-event timeout override (e.g. `session_stop:10000,agent_end:0`)
-- `OMP_NOTIFY_UI`: wrapper default UI override (falls back to `TMUX_NOTIFY_UI` if unset)
-- `OMP_NOTIFY_TIMEOUT_MS`: default notification timeout (default: `0`, sticky; daemon-dependent)
-
-UI override precedence: `OMP_NOTIFY_UI_BY_EVENT` → `OMP_NOTIFY_UI` → `TMUX_NOTIFY_UI`/default.
-
-Extension-level options:
-
-- `OMP_NOTIFY_CMD`: bridge command (default: `notify-omp.sh` on PATH)
-- `OMP_NOTIFY_HEADLESS`: also notify when omp runs without UI, i.e. print (`-p`) and JSON event-stream modes (`1` enables; default: `0`). TUI and RPC (editor-driven) modes always notify — omp reports `ctx.hasUI` as true there.
-
-Notes:
-
-- Run omp inside tmux so `TMUX_PANE` identifies the originating pane.
-- SSH-attached clients use the tmux Inbox by default, so no desktop notification
-  daemon is required on the remote host. Use `TMUX_NOTIFY_REMOTE_MODE` to change
-  the routing policy.
-- If the extension runs without tmux env but a tmux server is running, set `OMP_NOTIFY_FALLBACK_TARGET=1` (or `TMUX_NOTIFY_FALLBACK_TARGET=1`) to target the most recently active tmux client pane.
-- If tmux isn't available/running, the wrapper falls back to `--focus-only` by default (set `OMP_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0` to restore no-op).
-- On macOS (and on Linux if you have `zenity`/`kdialog`/`yad`), set `OMP_NOTIFY_UI=dialog` (or `TMUX_NOTIFY_UI=dialog`) to use a modal "Jump/Dismiss" dialog that stays until clicked.
-- Requires `jq` (otherwise the wrapper no-ops; set `OMP_NOTIFY_DEBUG=1` to see why in logs).
-- Set `OMP_NOTIFY_DEBUG=1` to log diagnostics to `~/.omp/agent/logs/notify-omp.log` (override with `OMP_NOTIFY_DEBUG_LOG`; the default path does not follow profiles or `PI_CODING_AGENT_DIR`).
-- The installer derives the extension directory the same way omp does: `--omp-extension-path` wins outright; otherwise a named profile (`OMP_PROFILE`, falling back to `PI_PROFILE`; edge-trimmed, an explicitly empty value or `default` selects the default profile; names must satisfy omp's rules, e.g. lowercase start and no Windows-reserved aliases) targets `~/.omp/profiles/<name>/agent/extensions` and ignores `PI_CODING_AGENT_DIR`, while the default profile honors `PI_CODING_AGENT_DIR` (absolute path required — omp resolves relative values against each session's working directory); `PI_CONFIG_DIR` replaces `.omp` throughout.
-- If you enable multiple events (e.g. `agent_end,session_stop`), a settled run may emit two notifications back-to-back; their titles differ, so the built-in dedupe does not merge them.
-- See the [official omp extension documentation](https://github.com/can1357/oh-my-pi/blob/main/docs/extensions.md) for the event contract.
-
-## Step Code integration
-
-[Step Code](https://github.com/stepfun-ai/Step-Code) (the `step` CLI) is built on the Pi coding agent and keeps its extension API, so it has no shell-command hook system either; its integration point is TypeScript extensions. Use `step-extension/tmux-notify-jump.ts`, a thin bridge that forwards Step lifecycle events as JSON on stdin to `notify-step.sh`, which calls `tmux-notify-jump` (or `TMUX_NOTIFY_JUMP_SH` if set) — same pattern as the Pi integration, with the same tmux targeting, SSH suppression, and focus-only fallback behavior as the other wrappers.
-
-The bridge subscribes to `agent_settled`, `agent_end`, `turn_end`, and Step's
-additional `ui_prompt_start` event. For the first three lifecycle events, Step
-reuses Pi's event contract, so their payloads and wrapper behavior match the Pi
-integration. Step-specific behavior includes `ui_prompt_start`, the notify
-source label, the directory layout, and the `STEP_NOTIFY_*` variable names.
-
-Install the scripts and the extension:
-
-```bash
-./install.sh --prefix "$HOME/.local" --symlink --configure-step
-```
-
-Or manually:
-
-```bash
-cp step-extension/tmux-notify-jump.ts ~/.stepcode/agent/extensions/
-# and ensure notify-step.sh is on your PATH
-```
-
-Extensions are auto-discovered from `~/.stepcode/agent/extensions/` (user-level) or `<project>/.stepcode/extensions/` (project-level, loaded once the project is trusted). You can also list the file explicitly in the `extensions` array of `~/.stepcode/config.toml` or `<project>/.stepcode/config.toml`.
-
-Default events: `agent_settled` (Step is fully idle — no auto-retry, compaction, or queued follow-up left). Additional events (`agent_end`, `turn_end`) can be enabled via filtering.
-
-Optional event filtering (comma-separated lists; `*` = all):
-
-- `STEP_NOTIFY_EVENTS`: whitelist (empty = default: `agent_settled`)
-- `STEP_NOTIFY_EXCLUDE_EVENTS`: blacklist (set to `*` to disable all)
-- `STEP_NOTIFY_SHOW_EVENT_TYPE`: include `[event]` in title (`1`/`0`; default: `1`)
-
-Optional UI/timeout routing (per-event):
-
-- `STEP_NOTIFY_UI_BY_EVENT`: per-event UI override (e.g. `agent_settled:notification,agent_end:dialog`)
-- `STEP_NOTIFY_TIMEOUT_MS_BY_EVENT`: per-event timeout override (e.g. `agent_settled:10000,agent_end:0`)
-- `STEP_NOTIFY_UI`: wrapper default UI override (falls back to `TMUX_NOTIFY_UI` if unset)
-- `STEP_NOTIFY_TIMEOUT_MS`: default notification timeout (default: `0`, sticky; daemon-dependent)
-
-UI override precedence: `STEP_NOTIFY_UI_BY_EVENT` → `STEP_NOTIFY_UI` → `TMUX_NOTIFY_UI`/default.
-
-Extension-level options:
-
-- `STEP_NOTIFY_CMD`: bridge command (default: `notify-step.sh` on PATH)
-- `STEP_NOTIFY_HEADLESS`: also notify when step runs without UI, i.e. print (`-p`) and JSON event-stream modes (`1` enables; default: `0`). TUI and RPC (editor-driven) modes always notify — step reports `ctx.hasUI` as true there.
-
-Notifying when step waits for approval:
-
-Step's own tool-approval prompt (`Approve run_command [id]`) is implemented as a
-built-in extension dialog, so the extension runner broadcasts `ui_prompt_start`
-to every extension, including this bridge. Add it to the event list to hear about
-it:
-
-```bash
-export STEP_NOTIFY_EVENTS="agent_settled,ui_prompt_start"
-```
-
-The prompt title is forwarded with the event and becomes the notification body,
-so the notification reads `Step [ui_prompt_start]: Waiting For You` /
-`Approve run_command [abcd1234]`, and is routed with `--notify-kind attention`.
-
-Notes on this event:
-
-- It only fires when a UI is available (TUI and `--mode rpc`). In print (`-p`)
-  and JSON modes step fails closed instead of prompting, so there is nothing to
-  report — `STEP_NOTIFY_HEADLESS` cannot enable it there.
-- It is a generic "step is waiting for you" signal: any blocking extension
-  dialog (`confirm`, `input`, `select`, `editor`, `custom`) emits it, not only
-  permission prompts. Disable it again by dropping it from
-  `STEP_NOTIFY_EVENTS` if other dialogs are too chatty.
-- Step's default approval policy is bypass — tools run without prompts — so in
-  practice this only fires for dangerous commands, or after `--approval-mode
-  confirm` (or `STEP_APPROVAL_MODE=confirm`) and `/permissions ask`.
-
-Notes:
-
-- Run step inside tmux so `TMUX_PANE` identifies the originating pane.
-- SSH-attached clients use the tmux Inbox by default, so no desktop notification
-  daemon is required on the remote host. Use `TMUX_NOTIFY_REMOTE_MODE` to change
-  the routing policy.
-- If the extension runs without tmux env but a tmux server is running, set `STEP_NOTIFY_FALLBACK_TARGET=1` (or `TMUX_NOTIFY_FALLBACK_TARGET=1`) to target the most recently active tmux client pane.
-- If tmux isn't available/running, the wrapper falls back to `--focus-only` by default (set `STEP_NOTIFY_FOCUS_ONLY_FALLBACK=0` or `TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=0` to restore no-op).
-- On macOS (and on Linux if you have `zenity`/`kdialog`/`yad`), set `STEP_NOTIFY_UI=dialog` (or `TMUX_NOTIFY_UI=dialog`) to use a modal "Jump/Dismiss" dialog that stays until clicked.
-- Requires `jq` (otherwise the wrapper no-ops; set `STEP_NOTIFY_DEBUG=1` to see why in logs).
-- Set `STEP_NOTIFY_DEBUG=1` to log diagnostics to `~/.stepcode/agent/logs/notify-step.log` (override with `STEP_NOTIFY_DEBUG_LOG`; the default path does not follow `STEP_CODING_AGENT_DIR` or `STEPCODE_CONFIG_DIR`).
-- If you already use Pi, note that the two integrations are independent: `--configure-pi` writes to `~/.pi/agent/extensions/`, which `step` never reads, so a Pi-style install is invisible to `step` and vice versa.
-- The installer derives the extension directory the same way step does: `--step-extension-path` wins outright; otherwise `STEP_CODING_AGENT_DIR` (a leading `~` is expanded) overrides the agent directory, and the project directory is `~/.stepcode` unless `STEPCODE_CONFIG_DIR` replaces it — unlike Pi and omp, step has no profiles.
-- If you enable multiple events (e.g. `agent_end,agent_settled`), a settled run may emit two notifications back-to-back; their titles differ, so the built-in dedupe does not merge them.
-- See the [official Step Code extensions documentation](https://github.com/stepfun-ai/Step-Code/blob/main/packages/coding-agent/docs/extensions.md) for the event contract.
-
-## Tests
-
-- Install `bats-core` and `ripgrep`; install `tmux` to include the live hook
-  integration tests (macOS: `brew install bats-core ripgrep tmux`).
-- Run: `./tests/run_all.sh` (or `make -C tests test`).
-- The suite includes shared-lib unit tests plus entry-script smoke tests (`tests/entry_smoke.bats`) for Linux/macOS dry-run and common validation paths.
-- The isolated BEL byte test uses `uv` and an installed Python 3 interpreter; it is skipped when either is unavailable. It uses temporary pseudo-terminals and does not ring your terminal.
-
-## Quality checks
-
-- Install `shellcheck` (macOS: `brew install shellcheck`; Linux: `apt install shellcheck`).
-- Run `make syntax` for shell syntax checks.
-- Run `make lint` for shellcheck.
-- Run `make test` for the bats suite.
-- Run `make check` to execute syntax + lint + tests in one command.
-
-## Troubleshooting
-
-- Actions not available: your `notify-send`/notification daemon may not support `-A` or `--wait`; the script falls back to a plain notification (no jump).
-- macOS click does nothing: `terminal-notifier -execute` runs the callback without inheriting your shell environment; ensure `tmux-notify-jump-macos.sh` is up to date (it passes callback args explicitly and adds common Homebrew paths to `PATH`).
-- Target session is reported as not visible: inspect `tmux list-clients -F 'name=#{client_name} tty=#{client_tty} control=#{client_control_mode} session=#{session_name}'`. A session with only `control=1` clients has no terminal to activate. By default, a click switches the server's sole ordinary client; the error remains when there are zero or multiple ordinary clients, or when `TMUX_NOTIFY_UNATTACHED_FALLBACK=none` enables strict mode. Attach a real terminal or propagate `--sender-tty` from the originating client to make the destination explicit.
-- Jump stays in the wrong session: make sure the notification was sent from inside tmux (`TMUX_PANE` set) and that its sender TTY still names an ordinary client. Successful jumps now verify the explicit client's session and pane; enable `TMUX_NOTIFY_DEBUG=1` to inspect selection details.
-- Focus goes to the wrong terminal:
-  - macOS: the script tries to detect the terminal hosting the tmux client that triggered the notification; override with `TMUX_NOTIFY_BUNDLE_ID(S)` / `--bundle-id(s)` (or use `--no-activate`).
-  - Linux/X11: set `TMUX_NOTIFY_WINDOW_ID`, pass `--class/--classes`, or use `--no-activate`.
-- No terminal window found: set `TMUX_NOTIFY_WINDOW_ID`, pass `--class/--classes`, or use `--no-activate`.
-- Find the right terminal class: run `xprop | rg WM_CLASS` and click your terminal window; use the second string as the class (e.g. `org.wezfurlong.wezterm`).
-- WezTerm tab switch stopped working after restarting WezTerm: a tmux server started inside the previous GUI keeps exporting the old (dead) `WEZTERM_UNIX_SOCKET`, which used to make `wezterm cli list` unreachable. tmux-notify-jump now falls back to socket discovery automatically; if clicks still do not switch tabs, check `TMUX_NOTIFY_WEZTERM_TAB` is not `0` and that `wezterm cli list` prints panes from a shell with the same environment.
-- Wayland session: terminal focusing is auto-disabled; use X11 if you need focus behavior.
-- tmux server not running: start tmux or run the script from within an existing tmux session (or use `--focus-only` to just focus the terminal).
+The shared env file, backup files and caches are not removed by this basic
+uninstall. Keep them if reinstalling, or remove only this tool's files after
+checking the locations you customized.
+
+## More documentation
+
+- [Agent integrations](docs/integrations.md): manual setup, event filters, approval prompts, profiles and per-agent logs.
+- [Technical reference](docs/reference.md): full CLI/environment options, Inbox, BEL/OSC, tmux compatibility and targeting.
+- [Tests and development](docs/reference.md#tests): `make check`, test dependencies and repository layout.
+- Run `tmux-notify-jump --help` or `./install.sh --help` for command-line help.
