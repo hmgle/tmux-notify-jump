@@ -349,3 +349,25 @@ checking the locations you customized.
 - [Technical reference](docs/reference.md): full CLI/environment options, Inbox, BEL/OSC, tmux compatibility and targeting.
 - [Tests and development](docs/reference.md#tests): `make check`, test dependencies and repository layout.
 - Run `tmux-notify-jump --help` or `./install.sh --help` for command-line help.
+
+Earlier README sections now live at these links:
+
+| Previous section | Current documentation |
+| --- | --- |
+| <a id="requirements"></a><a id="runtime"></a><a id="optional"></a><a id="wrappers-codexclaudekimigrokopencodepistepomp-hooks"></a>Requirements | [Dependencies](docs/reference.md#dependencies) |
+| <a id="usage"></a><a id="examples"></a>Usage and examples | [CLI usage](docs/reference.md#usage), [test commands](#test-it) |
+| <a id="environment-variables"></a>Environment variables | [Environment reference](docs/reference.md#environment-variables) |
+| <a id="terminal-bell-over-ssh"></a>Terminal bell | [BEL settings](docs/reference.md#terminal-bell-over-ssh) |
+| <a id="terminal-notifications-over-ssh"></a>Terminal notifications | [OSC 777 settings](docs/reference.md#terminal-notifications-over-ssh) |
+| <a id="tmux-hooks-integration"></a>tmux event hooks | [Hook setup](docs/reference.md#tmux-hooks-integration) |
+| <a id="codex-cli-integration"></a>Codex CLI | [Codex setup](docs/integrations.md#codex-cli-integration) |
+| <a id="native-codex-lifecycle-hooks"></a>Codex lifecycle hooks | [Native hook setup](docs/integrations.md#native-codex-lifecycle-hooks) |
+| <a id="coexisting-with-codex-terminal-notifications"></a>Codex terminal notifications | [Coexistence settings](docs/integrations.md#coexisting-with-codex-terminal-notifications) |
+| <a id="claude-code-integration"></a>Claude Code | [Claude setup](docs/integrations.md#claude-code-integration) |
+| <a id="kimi-code-cli-integration"></a>Kimi Code | [Kimi setup](docs/integrations.md#kimi-code-cli-integration) |
+| <a id="grok-build-integration"></a>Grok Build | [Grok setup](docs/integrations.md#grok-build-integration) |
+| <a id="opencode-integration"></a>OpenCode | [OpenCode setup](docs/integrations.md#opencode-integration) |
+| <a id="pi-integration"></a>Pi | [Pi setup](docs/integrations.md#pi-integration) |
+| <a id="step-code-integration"></a>Step Code | [Step setup](docs/integrations.md#step-code-integration) |
+| <a id="omp-integration"></a>omp | [omp setup](docs/integrations.md#omp-integration) |
+| <a id="tests"></a><a id="quality-checks"></a>Tests and quality checks | [Tests](docs/reference.md#tests), [quality checks](docs/reference.md#quality-checks) |
