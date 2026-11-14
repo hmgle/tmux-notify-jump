@@ -5,6 +5,9 @@
 This reference contains advanced options and compatibility details. For a first
 installation, follow the user guide instead. Commands below use the installed
 `tmux-notify-jump` entry point; installer commands run from the checkout.
+Installer examples use `--copy`, matching the user guide. For a symlink install,
+use `--symlink` instead; reuse your original `--prefix` or `--bindir` too.
+Configuration commands also reinstall the scripts, so always specify the mode.
 
 - [CLI usage](#usage)
 - [Dependencies](#dependencies)
@@ -205,8 +208,8 @@ tmux-notify-jump --target "$TMUX_PANE" --terminal-method osc777 --detach
 When `TMUX_NOTIFY_REMOTE_MODE=tmux` (the default), a notification whose target
 pane is not currently visible is recorded in a small persistent Inbox. The
 status-right segment shows `?N` for attention items and `!N` for completed work.
-Run `./install.sh --configure-tmux` once to install the status segment, focus
-hooks, and the `prefix+N` binding, then reload the configured file with
+Run `./install.sh --copy --configure-tmux` once to install the status segment,
+focus hooks, and the `prefix+N` binding, then reload the configured file with
 `tmux source-file ~/.tmux.conf`. Use the actual config path if customized;
 restarting the server is not required. The binding key must be
 free when initialization runs: tmux binds `prefix+n` to `next-window` by
@@ -362,15 +365,13 @@ Inbox counts to `status-right`.
 
 Acknowledgement hooks are installed at array index `900` of `client-attached`,
 `client-session-changed`, `after-select-pane`, `after-select-window`, and
-`client-focus-in`. That index is only conventionally reserved: a plain
-`set-hook -g <hook>` writes index `0` and `set-hook -ga` appends from there, so
-nothing but a deliberate `[900]` collides. Initialization warns and keeps a
-command it did not install, and uninstall removes only its own. Note that a
-plain `set-hook -g` replaces the whole array, including index `900`. If you set
-one of these five hooks yourself, use `set-hook -ga` to append; a plain
-`set-hook -g` evaluated after `--tmux-init` silently disables automatic
-acknowledgement, leaving Inbox entries armed until you visit them via
-`prefix+N`.
+`client-focus-in`. That index is only conventionally reserved. Initialization
+warns and keeps a command it did not install, and uninstall removes only its
+own. If you add handlers to these hooks, choose a different free array index
+and use `set-hook -g 'HOOK[INDEX]' ...` so config reloads replace only your
+handler. A plain `set-hook -g HOOK ...` replaces the whole array, including
+index `900`; evaluated after `--tmux-init`, it silently disables automatic
+acknowledgement, leaving Inbox entries armed until you visit them via `prefix+N`.
 
 ## Desktop clicks and target selection
 
@@ -458,7 +459,8 @@ CLI flags override environment variables where applicable.
   installer. The adjacent `hooks.json` is used unless overridden.
 - `CODEX_HOOKS_PATH`: Codex hooks JSON file for installation and diagnostics;
   `--codex-hooks-path` overrides it in the installer. This tool-specific override
-  does not register the path with Codex; see the discovery requirements below.
+  does not register the path with Codex; see
+  [Codex hook discovery](integrations.md#native-codex-lifecycle-hooks).
 - `TMUX_NOTIFY_CONFIG`: env file to load before running (unset defaults to
   `~/.config/tmux-notify-jump/env`; explicitly empty disables file loading).
   Relative paths resolve against the invocation directory and are fixed as
@@ -525,20 +527,28 @@ Recommended: use pane ids (`#{hook_pane}` like `%1`). This is more stable than `
 
 This is separate from `--configure-tmux`, which installs Inbox UI and
 acknowledgement hooks, not these event notifications. Bell/activity alerts
-also depend on tmux alert settings (for example, `monitor-activity`). Merge
-with existing hooks rather than replacing them; the examples use `-ga` to append.
+also depend on tmux alert settings (for example, `monitor-activity`). The examples
+use array index `901` so reloading the configuration replaces only these handlers.
+Check `tmux show-hooks -g <hook>` first; if `901` is already used by another
+command, choose a different free index for that hook.
 
 Example `~/.tmux.conf`:
 
 ```tmux
 # Notify when a bell/activity happens in any window
-set-hook -ga alert-bell     "run-shell -b 'tmux-notify-jump-hook.sh --event alert-bell --pane-id #{hook_pane} --tmux-socket \"#{socket_path}\" --timeout 0'"
-set-hook -ga alert-activity "run-shell -b 'tmux-notify-jump-hook.sh --event alert-activity --pane-id #{hook_pane} --tmux-socket \"#{socket_path}\" --timeout 0'"
+set-hook -g 'alert-bell[901]'     "run-shell -b 'tmux-notify-jump-hook.sh --event alert-bell --pane-id #{hook_pane} --tmux-socket \"#{socket_path}\" --timeout 0'"
+set-hook -g 'alert-activity[901]' "run-shell -b 'tmux-notify-jump-hook.sh --event alert-activity --pane-id #{hook_pane} --tmux-socket \"#{socket_path}\" --timeout 0'"
 
 # Notify when a pane's command exits (useful for long-running commands).
 # Note: jumping only makes sense if the pane still exists (e.g. `set -g remain-on-exit on`).
-set-hook -ga pane-exited "run-shell -b 'tmux-notify-jump-hook.sh --event pane-exited --pane-id #{hook_pane} --tmux-socket \"#{socket_path}\"'"
+set-hook -g 'pane-exited[901]' "run-shell -b 'tmux-notify-jump-hook.sh --event pane-exited --pane-id #{hook_pane} --tmux-socket \"#{socket_path}\"'"
 ```
+
+Earlier `set-hook -ga` examples append another handler on every config reload.
+When replacing them, inspect each hook and remove only this tool's old entries
+once with `tmux set-hook -gu 'HOOK[INDEX]'`, substituting the actual hook and
+index. A plain `set-hook -g HOOK ...` replaces the entire array, including other
+tools' handlers.
 
 Notes:
 
