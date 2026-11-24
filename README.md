@@ -302,6 +302,12 @@ read the updated checkout directly, but rerun configuration when hooks or paths
 change. Reload tmux config if its block changes, start a new agent session, and
 review changed Codex hooks again in `/hooks`.
 
+When moving a Copilot CLI installation, move the generated
+`tmux-notify-jump.json` out of the configured hooks directory and rerun the
+installer with the new install path and `--configure-copilot`. For a customized
+file, update the `notify-copilot.sh` path in its `bash` commands. Restart
+Copilot CLI after updating the hook file.
+
 ### Uninstall
 
 First remove this tool's agent registrations while keeping unrelated hooks:

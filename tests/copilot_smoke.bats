@@ -238,5 +238,8 @@ FAKE
 
     [ "$status" -eq 1 ]
     [[ "$output" == *"already exists and differs"* ]]
+    [[ "$output" == *"$config"* ]]
+    [[ "$output" == *"out of the hooks directory and rerun"* ]]
+    [[ "$output" == *"$install_dir/notify-copilot.sh"* ]]
     [ "$(cat "$config")" = '{"version":1,"hooks":{"agentStop":[]}}' ]
 }

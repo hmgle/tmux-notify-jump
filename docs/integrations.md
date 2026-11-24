@@ -418,8 +418,10 @@ Copilot CLI loads. Restart Copilot CLI after installing.
 
 The generated hook file is separate from existing hooks. If that exact file
 already exists with different contents, the installer leaves it untouched and
-prints an error. For manual setup, use this JSON with the absolute path to
-your installed wrapper. Register each entry once across your active hook files.
+prints an error. See the [update instructions](../README.md#update).
+
+For manual setup, use this JSON with the absolute path to your installed
+wrapper. Register each entry once across your active hook files.
 
 ```json
 {

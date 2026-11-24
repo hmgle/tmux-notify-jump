@@ -790,7 +790,10 @@ configure_copilot() {
             echo "GitHub Copilot CLI already configured: $cfg"
             return 0
         fi
-        die "Copilot CLI hook file already exists and differs from the generated configuration: $cfg"
+        die "Copilot CLI hook file already exists and differs from the generated configuration: $cfg
+Move a previously generated file out of the hooks directory and rerun the same installer command.
+For a customized file, update the wrapper path in its bash commands to $notify_cmd.
+Restart Copilot CLI to load the updated hooks."
     fi
 
     mkdir -p "$hooks_dir"
