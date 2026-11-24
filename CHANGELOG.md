@@ -4,10 +4,29 @@ Notable changes to tmux-notify-jump are documented in this file.
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-24
+
 ### Added
 
 - GitHub Copilot CLI notifications at `agentStop` and for permission and input
-  prompts, with an opt-in installer flag and user-level hook configuration.
+  prompts. Install user hooks with `--configure-copilot`. Hook
+  setup requires `jq`, and Copilot CLI introduced the `notification` event in
+  version 1.0.18. The generated hooks were tested with Copilot CLI 1.0.114.
+- Copilot wrapper and hook file checks in `--doctor`.
+
+### Changed
+
+- Added a Simplified Chinese README and moved detailed options and integration
+  setup into dedicated guides. Existing English README anchors remain available.
+- The Copilot installer reports the new wrapper path when a hook file already
+  exists with different contents. The update guide covers moving a generated
+  file and updating a customized one.
+
+### Fixed
+
+- The installer resolves relative checkout and Copilot wrapper paths without
+  consulting `CDPATH`. It follows checkout symlinks before applying `..` so
+  both install modes use the source of the invoked script.
 
 ## [1.6.0] - 2026-11-13
 
