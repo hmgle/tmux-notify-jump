@@ -926,6 +926,20 @@ FAKE
     [[ "$(cat "$target")" != *"tmux-notify-jump"* ]]
 }
 
+@test "install.sh: a relative checkout path resolves despite CDPATH" {
+    work_dir="$TEST_TEMP_DIR/work"
+    search_dir="$TEST_TEMP_DIR/search"
+    install_dir="$TEST_TEMP_DIR/install"
+    mkdir -p "$work_dir" "$search_dir/checkout"
+    ln -s "$PROJECT_ROOT" "$work_dir/checkout"
+    cd "$work_dir"
+
+    run env CDPATH="$search_dir" checkout/install.sh --bindir "$install_dir" --copy
+
+    [ "$status" -eq 0 ]
+    [ -x "$install_dir/tmux-notify-jump" ]
+}
+
 @test "install.sh: configure-codex follows and preserves a symlinked config" {
     bindir="$TEST_TEMP_DIR/bin"
     config_dir="$TEST_TEMP_DIR/home"

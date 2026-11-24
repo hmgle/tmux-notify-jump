@@ -205,6 +205,26 @@ FAKE
     [ ! -e "$hooks_dir" ]
 }
 
+@test "install.sh: configure-copilot resolves a relative bindir despite CDPATH" {
+    require_jq
+    work_dir="$TEST_TEMP_DIR/work dir"
+    search_dir="$TEST_TEMP_DIR/search"
+    hooks_dir="$TEST_TEMP_DIR/hooks"
+    mkdir -p "$work_dir" "$search_dir/bin"
+    cd "$work_dir"
+
+    run env CDPATH="$search_dir" "$PROJECT_ROOT/install.sh" --bindir bin --copy \
+        --configure-copilot --copilot-hooks-path "$hooks_dir"
+
+    [ "$status" -eq 0 ]
+    [ -x "$work_dir/bin/notify-copilot.sh" ]
+    generated_cmd="$(jq -r '.hooks.agentStop[0].bash' "$hooks_dir/tmux-notify-jump.json")"
+    cd "$TEST_TEMP_DIR"
+    run bash -c "$generated_cmd" <<<'{"stopReason":"end_turn"}'
+    [ "$status" -eq 0 ]
+    [[ "$(captured_args)" == *"Copilot [agentStop]: Agent Turn Stopping"* ]]
+}
+
 @test "install.sh: configure-copilot preserves an existing hook file" {
     require_jq
     install_dir="$TEST_TEMP_DIR/install/bin"

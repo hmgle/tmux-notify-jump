@@ -775,7 +775,7 @@ configure_copilot() {
     local notify_cmd config tmp_dir tmp
 
     # Hooks can run from any working directory and with a restricted PATH.
-    notify_cmd="$(cd "$BINDIR" && pwd -P)/notify-copilot.sh"
+    notify_cmd="$(CDPATH='' cd -P -- "$BINDIR/." >/dev/null && pwd -P)/notify-copilot.sh"
     config="$(jq -n --arg cmd "$notify_cmd" '
         def hook($event): {type: "command", bash: ("exec " + ([$cmd, $event] | @sh)), timeoutSec: 5};
         {version: 1, hooks: {
@@ -1297,7 +1297,7 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)"
 
 # Validate against the rule the shipped library enforces, so widening the
 # accepted key syntax stays a one-line change there instead of drifting across
