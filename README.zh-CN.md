@@ -277,6 +277,10 @@ git pull --ff-only
 路径改变时仍应重新运行配置。tmux 配置变更后重新加载，启动新的 agent session；
 Codex hook 变更后在 `/hooks` 中重新检查。
 
+迁移 Copilot CLI 安装时，请将生成的 `tmux-notify-jump.json` 移出配置的
+hooks 目录，再用新的安装路径和 `--configure-copilot` 重跑安装器。如果自定义过
+该文件，请更新其 `bash` 命令中的 `notify-copilot.sh` 路径。更新后重启 Copilot CLI。
+
 ### 卸载
 
 先删除 agent 中本工具的注册，同时保留其他 hook：
