@@ -940,6 +940,24 @@ FAKE
     [ -x "$install_dir/tmux-notify-jump" ]
 }
 
+@test "install.sh: resolves parent directories after checkout symlinks" {
+    work_dir="$TEST_TEMP_DIR/work"
+    checkout="$TEST_TEMP_DIR/physical/repo"
+    install_dir="$TEST_TEMP_DIR/install"
+    mkdir -p "$work_dir" "$checkout" "$TEST_TEMP_DIR/physical/child"
+    cp "$PROJECT_ROOT"/install.sh "$PROJECT_ROOT"/tmux-notify-jump* \
+        "$PROJECT_ROOT"/notify-*.sh "$checkout"
+    cp -R "$checkout" "$work_dir/repo"
+    printf '\n# Physical checkout\n' >>"$checkout/notify-copilot.sh"
+    ln -s ../physical/child "$work_dir/link"
+    cd "$work_dir"
+
+    run link/../repo/install.sh --bindir "$install_dir" --copy
+
+    [ "$status" -eq 0 ]
+    cmp "$checkout/notify-copilot.sh" "$install_dir/notify-copilot.sh"
+}
+
 @test "install.sh: configure-codex follows and preserves a symlinked config" {
     bindir="$TEST_TEMP_DIR/bin"
     config_dir="$TEST_TEMP_DIR/home"

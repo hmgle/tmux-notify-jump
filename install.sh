@@ -1300,7 +1300,8 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-REPO_DIR="$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)"
+# Resolve symlinked directories before .., as when Bash opens this script.
+REPO_DIR="$(CDPATH='' cd -P -- "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd -P)"
 
 # Validate against the rule the shipped library enforces, so widening the
 # accepted key syntax stays a one-line change there instead of drifting across
