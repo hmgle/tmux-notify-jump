@@ -164,7 +164,8 @@ FAKE
     [ "$status" -eq 0 ]
     [ -x "$install_dir/notify-copilot.sh" ]
     [ -f "$config" ]
-    run jq -e --arg cmd "$install_dir/notify-copilot.sh" '
+    wrapper_path="$(cd -P -- "$install_dir" && pwd -P)/notify-copilot.sh"
+    run jq -e --arg cmd "$wrapper_path" '
         .version == 1 and
         (.hooks.agentStop | length) == 1 and
         .hooks.agentStop[0].bash == ("exec " + ([$cmd, "agentStop"] | @sh)) and
@@ -240,6 +241,7 @@ FAKE
     [[ "$output" == *"already exists and differs"* ]]
     [[ "$output" == *"$config"* ]]
     [[ "$output" == *"out of the hooks directory and rerun"* ]]
-    [[ "$output" == *"$install_dir/notify-copilot.sh"* ]]
+    wrapper_path="$(cd -P -- "$install_dir" && pwd -P)/notify-copilot.sh"
+    [[ "$output" == *"$wrapper_path"* ]]
     [ "$(cat "$config")" = '{"version":1,"hooks":{"agentStop":[]}}' ]
 }
