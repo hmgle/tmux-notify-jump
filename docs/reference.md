@@ -127,9 +127,9 @@ OMP_NOTIFY_BELL=0  # Keep omp's built-in sound without adding another bell
 ```
 
 Per-agent overrides are `CODEX_NOTIFY_BELL`, `CLAUDE_NOTIFY_BELL`,
-`KIMI_NOTIFY_BELL`, `GROK_NOTIFY_BELL`, `OPENCODE_NOTIFY_BELL`, `PI_NOTIFY_BELL`,
-`STEP_NOTIFY_BELL`, and `OMP_NOTIFY_BELL`. Unset or empty values inherit the
-global setting.
+`KIMI_NOTIFY_BELL`, `GROK_NOTIFY_BELL`, `COPILOT_NOTIFY_BELL`, `OPENCODE_NOTIFY_BELL`,
+`PI_NOTIFY_BELL`, `STEP_NOTIFY_BELL`, and `OMP_NOTIFY_BELL`. Unset or empty values
+inherit the global setting.
 Use `0` to disable, or `1`, `true`, `yes`, or `on` to enable (uppercase words
 also work); other values disable. Wrappers forward an explicit per-agent
 override as `--bell` or `--no-bell`, taking precedence over the global setting.
@@ -171,7 +171,7 @@ TMUX_NOTIFY_TERMINAL_METHOD=osc777  # Default: none
 CODEX_NOTIFY_TERMINAL_METHOD=none  # Optional: use Codex's native OSC instead
 ```
 
-All eight agent wrappers support `<AGENT>_NOTIFY_TERMINAL_METHOD` overrides,
+All nine agent wrappers support `<AGENT>_NOTIFY_TERMINAL_METHOD` overrides,
 using the same prefixes as the bell settings above. Empty overrides inherit
 the global method. The CLI accepts `--terminal-method none|osc777`; an explicit
 flag wins over configuration, including after `--detach`.
@@ -402,7 +402,7 @@ Run `tmux-notify-jump --doctor` to check executable and server versions, optiona
 dependencies, the effective configuration and socket paths, the pinned Inbox
 directory and its permissions, acknowledgement hooks, status segment and
 prefix binding. It probes fzf's required options with a noninteractive filter,
-checks all eight wrapper files for executability, and looks for wrapper text
+checks all nine wrapper files for executability, and looks for wrapper text
 references in user-level agent configuration/bridge files. A text reference
 can be inactive or commented out; this check does not prove runtime hook
 registration or successful notification delivery. It never sends a
@@ -436,13 +436,14 @@ Python.
 
 Agent checks use the installer's standard user-level locations and honor
 `CODEX_CONFIG_PATH`, `CLAUDE_CONFIG_PATH`, `KIMI_CONFIG_PATH`, `GROK_HOOKS_PATH`,
-`OPENCODE_PLUGIN_PATH`, `PI_EXTENSION_PATH`, `STEP_EXTENSION_PATH`, and
-`OMP_EXTENSION_PATH` when set. Runtime config precedence and profile selection
-are not inferred. Codex defaults to `${CODEX_HOME:-$HOME/.codex}/config.toml`;
+`COPILOT_HOOKS_PATH`, `OPENCODE_PLUGIN_PATH`, `PI_EXTENSION_PATH`,
+`STEP_EXTENSION_PATH`, and `OMP_EXTENSION_PATH` when set. Runtime config
+precedence and profile selection are not inferred. Codex defaults to
+`${CODEX_HOME:-$HOME/.codex}/config.toml`;
 `CODEX_CONFIG_PATH` overrides it, and `--agent-config codex=...` takes precedence
 for diagnostics. For a custom/profile/project file, repeat `--agent-config
-<agent=path>` with `codex`, `claude`, `kimi`, `grok`, `opencode`, `pi`, `step`, or
-`omp`, for example:
+<agent=path>` with `codex`, `claude`, `kimi`, `grok`, `copilot`, `opencode`,
+`pi`, `step`, or `omp`, for example:
 
 ```bash
 tmux-notify-jump --doctor --agent-config omp="$HOME/.omp/profiles/work/agent/extensions/tmux-notify-jump.ts"
@@ -461,6 +462,10 @@ CLI flags override environment variables where applicable.
   `--codex-hooks-path` overrides it in the installer. This tool-specific override
   does not register the path with Codex; see
   [Codex hook discovery](integrations.md#native-codex-lifecycle-hooks).
+- `COPILOT_HOME`: Copilot CLI user directory (default `~/.copilot`). The
+  installer and diagnostics use its `hooks/` directory by default.
+- `COPILOT_HOOKS_PATH`: Copilot hook output directory for installation and
+  diagnostics. The installer's `--copilot-hooks-path` flag takes precedence.
 - `TMUX_NOTIFY_CONFIG`: env file to load before running (unset defaults to
   `~/.config/tmux-notify-jump/env`; explicitly empty disables file loading).
   Relative paths resolve against the invocation directory and are fixed as
@@ -582,6 +587,7 @@ Notes:
 - `notify-claude-code.sh`: Claude Code wrapper (reads JSON from stdin)
 - `notify-kimi-code.sh`: Kimi Code CLI wrapper (reads hook JSON from stdin)
 - `notify-grok.sh`: Grok Build wrapper (reads native hook JSON from stdin)
+- `notify-copilot.sh`: GitHub Copilot CLI wrapper (reads hook JSON from stdin)
 - `notify-opencode.sh`: OpenCode wrapper (reads JSON from stdin)
 - `opencode-plugin/tmux-notify-jump.ts`: OpenCode plugin (bridges events to `notify-opencode.sh`)
 - `pi-extension/tmux-notify-jump.ts`: Pi coding agent extension (bridges events to `notify-pi.sh`)

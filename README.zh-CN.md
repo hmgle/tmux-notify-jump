@@ -8,7 +8,7 @@
 
 [English](README.md) | **简体中文**
 
-当编码代理完成任务或需要你处理时发出通知，并在点击后返回正确的 tmux pane。支持 Linux、macOS，以及 Codex、Claude Code、Kimi Code、Grok Build、OpenCode、Pi、Step Code 和 omp。你也可以从自己的脚本发送通知。
+当编码代理完成任务或需要你处理时发出通知，并在点击后返回正确的 tmux pane。支持 Linux、macOS，以及 Codex、Claude Code、Kimi Code、Grok Build、GitHub Copilot CLI、OpenCode、Pi、Step Code 和 omp。你也可以从自己的脚本发送通知。
 
 - **本地桌面：** 点击 **Jump** 返回任务所在的 pane。
 - **SSH：** 在 tmux Inbox 中查看待处理任务，再用快捷键跳转。
@@ -107,6 +107,7 @@ dry-run 只打印设置，不发送通知。接下来选择一个代理集成，
 | [Claude Code](docs/integrations.md#claude-code-integration) | `./install.sh --copy --configure-claude` | Stop + 权限/空闲提示 |
 | [Kimi Code](docs/integrations.md#kimi-code-cli-integration) | `./install.sh --copy --configure-kimi` | 完成、审批、失败回合、后台任务终止 |
 | [Grok Build](docs/integrations.md#grok-build-integration) | `./install.sh --copy --configure-grok` | 完成、权限/空闲提示、工具失败 |
+| [GitHub Copilot CLI](docs/integrations.md#github-copilot-cli-integration) | `./install.sh --copy --configure-copilot` | 回合完成、权限与输入提示 |
 | [OpenCode](docs/integrations.md#opencode-integration) | `./install.sh --copy --configure-opencode` | session idle + permission asked |
 | [Pi](docs/integrations.md#pi-integration) | `./install.sh --copy --configure-pi` | agent 完全空闲 |
 | [Step Code](docs/integrations.md#step-code-integration) | `./install.sh --copy --configure-step` | agent 完全空闲；提示通知需单独开启 |
@@ -284,12 +285,12 @@ Codex hook 变更后在 `/hooks` 中重新检查。
 | --- | --- |
 | Codex | 本工具的顶层 `notify` 和 `hooks.json`/inline hooks 中的对应处理器 |
 | Claude / Kimi | 只删除调用本工具包装脚本的 hook 项 |
-| Grok | 配置 hooks 目录中的 `tmux-notify-jump.json` |
+| Grok / Copilot CLI | 配置 hooks 目录中的 `tmux-notify-jump.json` |
 | OpenCode / Pi / omp | 对应 plugin/extension 目录中的 `tmux-notify-jump.ts` |
 | Step | 手动删除 extension，或在卸载命令中加入 `--configure-step` |
 
-默认路径和自定义路径见[集成指南](docs/integrations.md)。`--uninstall` **不会**
-自动删除 Codex、Claude、Kimi、Grok、OpenCode、Pi 或 omp 的配置。
+默认路径和自定义路径见[集成指南](docs/integrations.md)。使用 Copilot CLI 时，
+请先移除 hook 文件，再卸载脚本并重启 Copilot CLI。
 
 如果配置了 Inbox 界面，请在删除安装脚本**之前**从代码目录清理。如果配置了
 多个 server，先对其他 server 分别运行

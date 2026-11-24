@@ -10,6 +10,7 @@ CONFIGURE_CODEX_HOOKS=0
 CONFIGURE_CLAUDE=0
 CONFIGURE_KIMI=0
 CONFIGURE_GROK=0
+CONFIGURE_COPILOT=0
 CONFIGURE_OPENCODE=0
 CONFIGURE_PI=0
 CONFIGURE_STEP=0
@@ -20,6 +21,7 @@ CODEX_HOOKS_PATH="${CODEX_HOOKS_PATH:-}"
 CLAUDE_CONFIG_PATH="${CLAUDE_CONFIG_PATH:-}"
 KIMI_CONFIG_PATH="${KIMI_CONFIG_PATH:-}"
 GROK_HOOKS_PATH="${GROK_HOOKS_PATH:-}"
+COPILOT_HOOKS_PATH="${COPILOT_HOOKS_PATH:-}"
 OPENCODE_PLUGIN_PATH="${OPENCODE_PLUGIN_PATH:-}"
 PI_EXTENSION_PATH="${PI_EXTENSION_PATH:-}"
 STEP_EXTENSION_PATH="${STEP_EXTENSION_PATH:-}"
@@ -42,6 +44,7 @@ Options:
   --configure-claude Configure Claude hooks (opt-in)
   --configure-kimi  Configure Kimi Code CLI hooks (opt-in)
   --configure-grok  Configure Grok Build hooks (opt-in)
+  --configure-copilot Configure GitHub Copilot CLI hooks (opt-in)
   --configure-opencode Configure OpenCode plugin (opt-in)
   --configure-pi    Configure Pi coding agent extension (opt-in)
   --configure-step  Configure Step Code (step) extension (opt-in)
@@ -55,6 +58,7 @@ Options:
   --claude-config <path> Claude settings.json path (default: ~/.claude/settings.json)
   --kimi-config <path>   Kimi config.toml path (default: ~/.kimi-code/config.toml)
   --grok-hooks-path <path> Grok hooks dir (default: \$GROK_HOME/hooks or ~/.grok/hooks)
+  --copilot-hooks-path <path> Copilot hooks dir (default: \$COPILOT_HOME/hooks or ~/.copilot/hooks)
   --opencode-plugin-path <path> OpenCode plugins dir (default: ~/.config/opencode/plugins)
   --pi-extension-path <path> Pi extensions dir (default: ~/.pi/agent/extensions)
   --step-extension-path <path> Step Code extensions dir (default: derived from
@@ -77,6 +81,7 @@ Examples:
   $0 --prefix "\$HOME/.local" --symlink --configure-claude
   $0 --prefix "\$HOME/.local" --symlink --configure-kimi
   $0 --prefix "\$HOME/.local" --symlink --configure-grok
+  $0 --prefix "\$HOME/.local" --symlink --configure-copilot
   $0 --prefix "\$HOME/.local" --symlink --configure-opencode
   $0 --prefix "\$HOME/.local" --symlink --configure-pi
   $0 --prefix "\$HOME/.local" --symlink --configure-step
@@ -764,6 +769,50 @@ print(f"Configured Grok Build hooks in: {path}")
 PY
 }
 
+configure_copilot() {
+    local hooks_dir="${COPILOT_HOOKS_PATH:-${COPILOT_HOME:-$HOME/.copilot}/hooks}"
+    local cfg="$hooks_dir/tmux-notify-jump.json"
+    local notify_cmd config tmp_dir tmp
+
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "jq not found; see docs/integrations.md for manual Copilot CLI setup: $cfg"
+        return 0
+    fi
+
+    # Hooks can run from any working directory and with a restricted PATH.
+    notify_cmd="$(cd "$BINDIR" && pwd -P)/notify-copilot.sh"
+    config="$(jq -n --arg cmd "$notify_cmd" '
+        def hook($event): {type: "command", bash: ("exec " + ([$cmd, $event] | @sh)), timeoutSec: 5};
+        {version: 1, hooks: {
+            agentStop: [hook("agentStop")],
+            notification: [hook("notification") + {matcher: "permission_prompt|elicitation_dialog"}]
+        }}
+    ')"
+
+    if [ -e "$cfg" ] || [ -L "$cfg" ]; then
+        if [ -f "$cfg" ] && [ ! -L "$cfg" ] \
+            && jq -es --argjson expected "$config" '. == [$expected]' "$cfg" >/dev/null 2>&1; then
+            echo "GitHub Copilot CLI already configured: $cfg"
+            return 0
+        fi
+        die "Copilot CLI hook file already exists and differs from the generated configuration: $cfg"
+    fi
+
+    mkdir -p "$hooks_dir"
+    tmp_dir="$(mktemp -d "$hooks_dir/.tmux-notify-jump.XXXXXX")"
+    tmp="$tmp_dir/tmux-notify-jump.json"
+    # Link into the hooks directory so any existing destination is preserved.
+    if ! printf '%s\n' "$config" >"$tmp" || ! ln "$tmp" "$hooks_dir"; then
+        rm -f "$tmp"
+        rmdir "$tmp_dir"
+        die "Could not create Copilot CLI hooks: $cfg"
+    fi
+    rm -f "$tmp"
+    rmdir "$tmp_dir"
+    echo "Configured GitHub Copilot CLI hooks in: $cfg"
+    echo 'Restart Copilot CLI to load the hooks.'
+}
+
 configure_opencode() {
     local plugin_dir="${OPENCODE_PLUGIN_PATH:-$HOME/.config/opencode/plugins}"
     local plugin_src="$REPO_DIR/opencode-plugin/tmux-notify-jump.ts"
@@ -1156,6 +1205,9 @@ while [ $# -gt 0 ]; do
         --configure-grok)
             CONFIGURE_GROK=1
             ;;
+        --configure-copilot)
+            CONFIGURE_COPILOT=1
+            ;;
         --configure-opencode)
             CONFIGURE_OPENCODE=1
             ;;
@@ -1195,6 +1247,11 @@ while [ $# -gt 0 ]; do
             shift
             [ $# -gt 0 ] || die "--grok-hooks-path requires a path"
             GROK_HOOKS_PATH="$1"
+            ;;
+        --copilot-hooks-path)
+            shift
+            [ $# -gt 0 ] || die "--copilot-hooks-path requires a path"
+            COPILOT_HOOKS_PATH="$1"
             ;;
         --opencode-plugin-path)
             shift
@@ -1273,6 +1330,7 @@ FILES=(
     notify-claude-code.sh
     notify-kimi-code.sh
     notify-grok.sh
+    notify-copilot.sh
     notify-opencode.sh
     notify-pi.sh
     notify-step.sh
@@ -1353,6 +1411,10 @@ fi
 
 if [ "$CONFIGURE_GROK" -eq 1 ]; then
     configure_grok "$BINDIR/notify-grok.sh"
+fi
+
+if [ "$CONFIGURE_COPILOT" -eq 1 ]; then
+    configure_copilot
 fi
 
 if [ "$CONFIGURE_OPENCODE" -eq 1 ]; then

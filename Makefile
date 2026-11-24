@@ -10,6 +10,7 @@ SCRIPTS := \
 	notify-claude-code.sh \
 	notify-kimi-code.sh \
 	notify-grok.sh \
+	notify-copilot.sh \
 	notify-opencode.sh \
 	notify-pi.sh \
 	notify-step.sh \

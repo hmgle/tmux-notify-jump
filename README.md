@@ -10,8 +10,8 @@
 
 Get notified when your coding agent finishes or needs attention, then return to
 the right tmux pane. Works on Linux and macOS with Codex, Claude Code, Kimi Code,
-Grok Build, OpenCode, Pi, Step Code, and omp. You can also send notifications from
-your own commands.
+Grok Build, Copilot CLI, OpenCode, Pi, Step Code, and omp. You can also send
+notifications from your own commands.
 
 - **Local desktop:** click **Jump** to return to the task's pane.
 - **Over SSH:** see pending tasks in the tmux Inbox and jump back with a key.
@@ -119,6 +119,7 @@ The commands below use `~/.local/bin`; append your original `--prefix` or
 | [Claude Code](docs/integrations.md#claude-code-integration) | `./install.sh --copy --configure-claude` | Stop + permission/idle prompts |
 | [Kimi Code](docs/integrations.md#kimi-code-cli-integration) | `./install.sh --copy --configure-kimi` | Completion, approval request, failed turn, background task terminal states |
 | [Grok Build](docs/integrations.md#grok-build-integration) | `./install.sh --copy --configure-grok` | Completion, permission/idle prompts, failed tool calls |
+| [GitHub Copilot CLI](docs/integrations.md#github-copilot-cli-integration) | `./install.sh --copy --configure-copilot` | Turn completed, permission and input prompts |
 | [OpenCode](docs/integrations.md#opencode-integration) | `./install.sh --copy --configure-opencode` | Session idle + permission asked |
 | [Pi](docs/integrations.md#pi-integration) | `./install.sh --copy --configure-pi` | Agent fully settled |
 | [Step Code](docs/integrations.md#step-code-integration) | `./install.sh --copy --configure-step` | Agent fully settled; prompt notifications are opt-in |
@@ -309,13 +310,13 @@ First remove this tool's agent registrations while keeping unrelated hooks:
 | --- | --- |
 | Codex | This wrapper's top-level `notify` entry and its handlers in `hooks.json` or inline hooks, if configured |
 | Claude / Kimi | Only the hook entries calling this tool's wrapper |
-| Grok | This tool's `tmux-notify-jump.json` in the configured hooks directory |
+| Grok / Copilot CLI | This tool's `tmux-notify-jump.json` in the configured hooks directory |
 | OpenCode / Pi / omp | This tool's `tmux-notify-jump.ts` in the configured plugin/extension directory |
 | Step | Remove its extension manually, or add `--configure-step` to the uninstall command |
 
 See [integration paths](docs/integrations.md) for default and custom locations.
-Automatic removal of Codex/Claude/Kimi/Grok/OpenCode/Pi/omp configuration is **not**
-provided by `--uninstall`.
+For Copilot CLI, remove the hook file before uninstalling the wrapper and
+restart Copilot CLI to reload its configuration.
 
 If you configured the Inbox UI, clean it up from the checkout **before removing
 the installed scripts**. If several servers have been configured, first run

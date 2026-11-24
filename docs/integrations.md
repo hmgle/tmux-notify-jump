@@ -26,6 +26,7 @@ before launch; that bridge does not load the shared env file. See
 - [Claude Code](#claude-code-integration)
 - [Kimi Code](#kimi-code-cli-integration)
 - [Grok Build](#grok-build-integration)
+- [GitHub Copilot CLI](#github-copilot-cli-integration)
 - [OpenCode](#opencode-integration)
 - [Pi](#pi-integration)
 - [omp](#omp-integration)
@@ -33,9 +34,9 @@ before launch; that bridge does not load the shared env file. See
 
 ## Shared wrapper behavior
 
-All eight integrations use shell wrappers with the behavior below. Replace
-`<AGENT>` in variable names with `CODEX`, `CLAUDE`, `KIMI`, `GROK`, `OPENCODE`,
-`PI`, `STEP`, or `OMP`; each section lists its event and UI overrides.
+All nine integrations use shell wrappers with the behavior below. Replace
+`<AGENT>` in variable names with `CODEX`, `CLAUDE`, `KIMI`, `GROK`, `COPILOT`,
+`OPENCODE`, `PI`, `STEP`, or `OMP`; each section lists its event and UI overrides.
 
 - Start the agent inside the intended tmux pane so `TMUX_PANE` identifies the
   task. If it is missing, wrappers try process ancestry. Shared daemons need
@@ -395,6 +396,72 @@ Notes:
 - Grok can also discover Claude settings through its compatibility layer. Keep only one Grok notification registration active to avoid duplicate notifications.
 - Verify discovery with `grok inspect --json` or open the Hooks tab with `/hooks`.
 - See the [official Grok Build Hooks documentation](https://docs.x.ai/build/features/hooks) for the complete event contract.
+
+## GitHub Copilot CLI integration
+
+Copilot CLI supports user-level command hooks on Linux and macOS. This
+integration uses the `agentStop` event for completed turns and the CLI-only
+`notification` event for permission and input prompts. Copilot in the cloud
+does not emit notification events.
+
+Install and create a user hook file:
+
+```bash
+./install.sh --prefix "$HOME/.local" --copy --configure-copilot
+```
+
+By default the installer creates
+`~/.copilot/hooks/tmux-notify-jump.json`. If `COPILOT_HOME` is set, it uses
+`$COPILOT_HOME/hooks/`. `--copilot-hooks-path <dir>` or `COPILOT_HOOKS_PATH`
+overrides the installer's output directory. Put the file in a directory that
+Copilot CLI loads. Restart Copilot CLI after installing.
+
+The generated hook file is separate from existing hooks. If that exact file
+already exists with different contents, the installer leaves it untouched and
+prints an error. For manual setup, use this JSON with the absolute path to
+your installed wrapper. Register each entry once across your active hook files.
+
+```json
+{
+  "version": 1,
+  "hooks": {
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "exec /path/to/notify-copilot.sh agentStop",
+        "timeoutSec": 5
+      }
+    ],
+    "notification": [
+      {
+        "type": "command",
+        "bash": "exec /path/to/notify-copilot.sh notification",
+        "matcher": "permission_prompt|elicitation_dialog",
+        "timeoutSec": 5
+      }
+    ]
+  }
+}
+```
+
+`agentStop` reports a completed main-agent turn. The asynchronous
+`notification` hook reports permission prompts and requests for user input,
+including their message. Both use the existing detached notification path for
+delivery and pane selection. Use a Copilot CLI release that supports user hook
+files and both events. When Copilot's session sandbox is enabled, the hook also
+needs access to the installed scripts, tmux socket, and selected notification
+backend.
+
+Optional settings can be placed in the shared environment file:
+
+- `COPILOT_NOTIFY_EVENTS`: event whitelist (default: `agentStop,notification`)
+- `COPILOT_NOTIFY_EXCLUDE_EVENTS`: event blacklist (set to `*` to disable all)
+- `COPILOT_NOTIFY_SHOW_EVENT_TYPE`: include the event in the title (`1`/`0`; default: `1`)
+- `COPILOT_NOTIFY_UI`: `notification` or `dialog`
+- `COPILOT_NOTIFY_TIMEOUT_MS`: notification timeout in milliseconds
+- `COPILOT_NOTIFY_DEBUG`: log to `$COPILOT_HOME/logs/notify-copilot.log`, or `~/.copilot/logs/notify-copilot.log`; override with `COPILOT_NOTIFY_DEBUG_LOG`
+
+See the [official Copilot CLI hook setup](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/use-hooks) and [hook reference](https://docs.github.com/en/copilot/reference/hooks-reference) for event details and hook restrictions.
 
 ## OpenCode integration
 

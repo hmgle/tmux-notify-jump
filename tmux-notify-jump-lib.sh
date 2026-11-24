@@ -1769,6 +1769,7 @@ tmux_notify_event_kind() {
         claude:PostToolUseFailure:*|claude:Notification:permission_prompt|claude:Notification:idle_prompt|claude:Notification:elicitation_dialog|\
         kimi:PermissionRequest:*|kimi:StopFailure:*|kimi:Notification:permission_prompt|kimi:Notification:idle_prompt|\
         grok:post_tool_use_failure:*|grok:notification:permission_prompt|grok:notification:idle_prompt|\
+        copilot:notification:permission_prompt|copilot:notification:elicitation_dialog|\
         opencode:permission.asked:*|opencode:session.error:*|step:ui_prompt_start:*)
             kind=attention
             ;;
@@ -2381,7 +2382,7 @@ tmux_notify_tmux_version_at_least() {
 
 # Diagnostics never create/chmod state or install hooks. Optional capabilities
 # are warnings; broken server access or unsafe/unreadable state fails the check.
-TMUX_NOTIFY_DOCTOR_AGENTS=(codex claude kimi grok opencode pi step omp)
+TMUX_NOTIFY_DOCTOR_AGENTS=(codex claude kimi grok copilot opencode pi step omp)
 
 tmux_notify_doctor_agent_config_index() {
     local spec="$1" agent="${1%%=*}" path="${1#*=}" i
@@ -2561,12 +2562,16 @@ PY
 tmux_notify_doctor_agents() {
     local base="" home="${HOME:-}" i=0 spec="" agent="" path=""
     base="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    local -a wrappers=(notify-codex.sh notify-claude-code.sh notify-kimi-code.sh notify-grok.sh notify-opencode.sh notify-pi.sh notify-step.sh notify-omp.sh)
+    local -a wrappers=(
+        notify-codex.sh notify-claude-code.sh notify-kimi-code.sh notify-grok.sh
+        notify-copilot.sh notify-opencode.sh notify-pi.sh notify-step.sh notify-omp.sh
+    )
     local -a configs=(
         "${CODEX_CONFIG_PATH:-${CODEX_HOME:-$home/.codex}/config.toml}"
         "${CLAUDE_CONFIG_PATH:-$home/.claude/settings.json}"
         "${KIMI_CONFIG_PATH:-$home/.kimi-code/config.toml}"
         "${GROK_HOOKS_PATH:-${GROK_HOME:-$home/.grok}/hooks}/tmux-notify-jump.json"
+        "${COPILOT_HOOKS_PATH:-${COPILOT_HOME:-$home/.copilot}/hooks}/tmux-notify-jump.json"
         "${OPENCODE_PLUGIN_PATH:-$home/.config/opencode/plugins}/tmux-notify-jump.ts"
         "${PI_EXTENSION_PATH:-$home/.pi/agent/extensions}/tmux-notify-jump.ts"
         "${STEP_EXTENSION_PATH:-$home/.stepcode/agent/extensions}/tmux-notify-jump.ts"

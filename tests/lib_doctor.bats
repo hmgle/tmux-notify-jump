@@ -21,7 +21,8 @@ setup() {
     FAKE_OS=Linux
     FAKE_PASSTHROUGH=off
     FAKE_FOCUS_EVENTS=off
-    unset CODEX_HOME CODEX_CONFIG_PATH CODEX_HOOKS_PATH TMUX_NOTIFY_TERMINAL_METHOD
+    unset CODEX_HOME CODEX_CONFIG_PATH CODEX_HOOKS_PATH COPILOT_HOME COPILOT_HOOKS_PATH
+    unset TMUX_NOTIFY_TERMINAL_METHOD
     unset CODEX_NOTIFY_EVENTS CODEX_NOTIFY_EXCLUDE_EVENTS
     for tool in tmux fzf jq ps notify-send xdotool; do
         printf '#!/usr/bin/env bash\nexit 0\n' >"$TEST_TEMP_DIR/bin/$tool"
@@ -85,6 +86,17 @@ tmux_cmd() {
     [ "$(cat "$TMUX_NOTIFY_CONFIG")" = '# user configuration' ]
     run rg '^(set-|refresh-|bind-|mkdir|chmod)' "$TEST_TEMP_DIR/tmux.calls"
     [ "$status" -eq 1 ]
+}
+
+@test "doctor reports the Copilot wrapper and user hooks path" {
+    COPILOT_HOME="$TEST_TEMP_DIR/copilot home"
+    export COPILOT_HOME
+
+    run tmux_notify_doctor
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Wrapper copilot"* ]]
+    [[ "$output" == *"copilot home/hooks/tmux-notify-jump.json"* ]]
 }
 
 @test "doctor warns about missing opt-in integration and old tmux" {
@@ -215,7 +227,7 @@ tmux_cmd() {
     printf 'model = "custom"\n' >"$HOME/.codex/config.toml"
     run tmux_notify_doctor
     [ "$status" -eq 0 ]
-    [ "$(printf '%s\n' "$output" | rg -c 'Wrapper .*executable')" -eq 8 ]
+    [ "$(printf '%s\n' "$output" | rg -c 'Wrapper .*executable')" -eq 9 ]
     [[ "$output" == *'Config claude'*'wrapper text reference found; registration unverified'* ]]
     [[ "$output" == *'Config codex'*'no wrapper text reference'* ]]
     [[ "$output" == *'Config kimi'*'absent or unreadable'* ]]
@@ -229,7 +241,7 @@ tmux_cmd() {
     source "$TEST_TEMP_DIR/installed/tmux-notify-jump-lib.sh"
     run tmux_notify_doctor_agents
     [ "$status" -eq 0 ]
-    [ "$(printf '%s\n' "$output" | rg -c 'missing or not executable')" -eq 8 ]
+    [ "$(printf '%s\n' "$output" | rg -c 'missing or not executable')" -eq 9 ]
     [ ! -x "$TEST_TEMP_DIR/installed/notify-codex.sh" ]
 }
 
@@ -460,6 +472,17 @@ SH
     [[ "$output" == 'Error: Unknown doctor agent: unknown' ]]
     run tmux_notify_doctor_cli --agent-config
     [ "$status" -eq 1 ]
+}
+
+@test "doctor accepts an explicit Copilot hooks path" {
+    cfg="$TEST_TEMP_DIR/custom Copilot hooks.json"
+    printf '{"version":1,"hooks":{"agentStop":[{"bash":"notify-copilot.sh"}]}}\n' >"$cfg"
+
+    run tmux_notify_doctor_cli --agent-config "copilot=$cfg"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Config copilot"* ]]
+    [[ "$output" == *"$cfg (wrapper text reference found; registration unverified)"* ]]
 }
 
 @test "doctor reports a jump key the option names and its live binding" {
