@@ -601,8 +601,9 @@ Notes:
 
 ## Tests
 
-- Install `bats-core` and `ripgrep`; install `tmux` to include the live hook
-  integration tests (macOS: `brew install bats-core ripgrep tmux`).
+- Install `bats-core`, `ripgrep`, and `jq` for the test suite. Install `tmux`
+  to include the live hook integration tests. On macOS, run
+  `brew install bats-core ripgrep jq tmux`.
 - Run: `./tests/run_all.sh` (or `make -C tests test`).
 - The suite includes shared-lib unit tests plus entry-script smoke tests (`tests/entry_smoke.bats`) for Linux/macOS dry-run and common validation paths.
 - The isolated BEL byte test uses `uv` and an installed Python 3 interpreter; it is skipped when either is unavailable. It uses temporary pseudo-terminals and does not ring your terminal.

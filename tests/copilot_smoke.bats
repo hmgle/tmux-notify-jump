@@ -35,6 +35,10 @@ teardown() {
     teardown_temp_dir
 }
 
+require_jq() {
+    command -v jq >/dev/null || skip 'jq is not installed'
+}
+
 run_copilot_hook() {
     local event="$1" payload="$2"
     run "$PROJECT_ROOT/notify-copilot.sh" "$event" <<<"$payload"
@@ -46,6 +50,7 @@ captured_args() {
 }
 
 @test "notify-copilot.sh: agentStop notifies only the root end-of-turn event" {
+    require_jq
     run_copilot_hook agentStop \
         '{"sessionId":"session_abc","stopReason":"end_turn","agentId":null}'
 
@@ -66,6 +71,7 @@ captured_args() {
 }
 
 @test "notify-copilot.sh: permission and elicitation notifications need attention" {
+    require_jq
     run_copilot_hook notification \
         '{"hook_event_name":"Notification","notification_type":"permission_prompt","message":"Allow bash"}'
     [ "$status" -eq 0 ]
@@ -84,6 +90,7 @@ captured_args() {
 }
 
 @test "notify-copilot.sh: forwards Copilot bell and terminal options" {
+    require_jq
     export COPILOT_NOTIFY_BELL=1 COPILOT_NOTIFY_TERMINAL_METHOD=osc777
     run_copilot_hook agentStop '{"stopReason":"end_turn"}'
 
@@ -93,6 +100,7 @@ captured_args() {
 }
 
 @test "notify-copilot.sh: irrelevant, malformed, and excluded events fail open" {
+    require_jq
     run_copilot_hook notification \
         '{"hook_event_name":"Notification","notification_type":"agent_idle","message":"Ready"}'
     [ "$status" -eq 0 ]
@@ -126,6 +134,7 @@ captured_args() {
 }
 
 @test "notify-copilot.sh: routes to the originating pane and socket" {
+    require_jq
     export TMUX="$TEST_TEMP_DIR/tmux.sock,1234,0" TMUX_PANE='%12'
     cat >"$fake_bin/tmux" <<'FAKE'
 #!/usr/bin/env bash
@@ -144,6 +153,7 @@ FAKE
 }
 
 @test "install.sh: configure-copilot honors COPILOT_HOME and is idempotent" {
+    require_jq
     install_dir="$TEST_TEMP_DIR/install dir/bin"
     hooks_dir="$TEST_TEMP_DIR/copilot home/hooks"
     config="$hooks_dir/tmux-notify-jump.json"
@@ -196,6 +206,7 @@ FAKE
 }
 
 @test "install.sh: configure-copilot preserves an existing hook file" {
+    require_jq
     install_dir="$TEST_TEMP_DIR/install/bin"
     hooks_dir="$TEST_TEMP_DIR/copilot/hooks"
     config="$hooks_dir/tmux-notify-jump.json"
