@@ -109,6 +109,22 @@ captured_args() {
     [ ! -f "$CAPTURE_FILE" ]
 }
 
+@test "notify-copilot.sh: missing jq fails open without output" {
+    # Hide jq even when the wrapper adds Homebrew directories to PATH.
+    command() {
+        if [ "$1" = -v ] && [ "$2" = jq ]; then
+            return 1
+        fi
+        builtin command "$@"
+    }
+    export -f command
+    run_copilot_hook agentStop '{"stopReason":"end_turn"}'
+
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+    [ ! -f "$CAPTURE_FILE" ]
+}
+
 @test "notify-copilot.sh: routes to the originating pane and socket" {
     export TMUX="$TEST_TEMP_DIR/tmux.sock,1234,0" TMUX_PANE='%12'
     cat >"$fake_bin/tmux" <<'FAKE'
@@ -159,6 +175,24 @@ FAKE
         "$PROJECT_ROOT/install.sh" --bindir "$install_dir" --copy --configure-copilot
     [ "$status" -eq 0 ]
     [[ "$output" == *"already configured"* ]]
+}
+
+@test "install.sh: configure-copilot fails clearly when jq is missing" {
+    minimal_bin="$TEST_TEMP_DIR/minimal-bin"
+    install_dir="$TEST_TEMP_DIR/install/bin"
+    hooks_dir="$TEST_TEMP_DIR/copilot/hooks"
+    mkdir -p "$minimal_bin"
+    ln -s "$(command -v bash)" "$minimal_bin/bash"
+    ln -s "$(command -v dirname)" "$minimal_bin/dirname"
+
+    run env PATH="$minimal_bin" COPILOT_HOME="$TEST_TEMP_DIR/copilot" \
+        "$PROJECT_ROOT/install.sh" --bindir "$install_dir" \
+        --copy --configure-copilot
+
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Install jq before using --configure-copilot"* ]]
+    [ ! -e "$install_dir" ]
+    [ ! -e "$hooks_dir" ]
 }
 
 @test "install.sh: configure-copilot preserves an existing hook file" {

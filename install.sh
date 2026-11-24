@@ -774,11 +774,6 @@ configure_copilot() {
     local cfg="$hooks_dir/tmux-notify-jump.json"
     local notify_cmd config tmp_dir tmp
 
-    if ! command -v jq >/dev/null 2>&1; then
-        echo "jq not found; see docs/integrations.md for manual Copilot CLI setup: $cfg"
-        return 0
-    fi
-
     # Hooks can run from any working directory and with a restricted PATH.
     notify_cmd="$(cd "$BINDIR" && pwd -P)/notify-copilot.sh"
     config="$(jq -n --arg cmd "$notify_cmd" '
@@ -1357,6 +1352,10 @@ if [ "$UNINSTALL" -eq 1 ]; then
     fi
     echo "Uninstalled from: $BINDIR"
     exit 0
+fi
+
+if [ "$CONFIGURE_COPILOT" -eq 1 ] && ! command -v jq >/dev/null 2>&1; then
+    die "Install jq before using --configure-copilot. Copilot notifications also require jq."
 fi
 
 mkdir -p "$BINDIR"
