@@ -45,6 +45,7 @@ MESSAGE=""
 case "$EVENT_NAME" in
     agentStop)
         # The camelCase payload has no event name. The hook command supplies it.
+        # Other stop hooks can still block and continue the turn after this runs.
         if ! jq -es 'select(length == 1) | .[0] | objects |
             .stopReason == "end_turn" and .agentId == null' >/dev/null <<<"$payload"; then
             log_debug 'ignoring invalid or non-root end-of-turn payload'
@@ -68,10 +69,6 @@ case "$EVENT_NAME" in
         case "$NOTIF_TYPE" in
             permission_prompt) TITLE_MSG='Permission Needed' ;;
             elicitation_dialog) TITLE_MSG='Input Needed' ;;
-            *)
-                TITLE_MSG="$(jq -r '.title // empty' <<<"$payload")"
-                TITLE_MSG="${TITLE_MSG:-Notification}"
-                ;;
         esac
         EVENT_LABEL="$NOTIF_TYPE"
         ;;
