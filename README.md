@@ -119,7 +119,7 @@ The commands below use `~/.local/bin`; append your original `--prefix` or
 | [Claude Code](docs/integrations.md#claude-code-integration) | `./install.sh --copy --configure-claude` | Stop + permission/idle prompts |
 | [Kimi Code](docs/integrations.md#kimi-code-cli-integration) | `./install.sh --copy --configure-kimi` | Completion, approval request, failed turn, background task terminal states |
 | [Grok Build](docs/integrations.md#grok-build-integration) | `./install.sh --copy --configure-grok` | Completion, permission/idle prompts, failed tool calls |
-| [GitHub Copilot CLI](docs/integrations.md#github-copilot-cli-integration) | `./install.sh --copy --configure-copilot` | Turn completed, permission and input prompts |
+| [GitHub Copilot CLI](docs/integrations.md#github-copilot-cli-integration) | `./install.sh --copy --configure-copilot` | `agentStop`, permission and input prompts |
 | [OpenCode](docs/integrations.md#opencode-integration) | `./install.sh --copy --configure-opencode` | Session idle + permission asked |
 | [Pi](docs/integrations.md#pi-integration) | `./install.sh --copy --configure-pi` | Agent fully settled |
 | [Step Code](docs/integrations.md#step-code-integration) | `./install.sh --copy --configure-step` | Agent fully settled; prompt notifications are opt-in |

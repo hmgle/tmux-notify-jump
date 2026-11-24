@@ -49,7 +49,7 @@ captured_args() {
     [[ "$captured" == *"--focus-only"* ]]
     [[ "$captured" == *"--detach"* ]]
     [[ "$captured" == *$'--notify-kind\ncomplete'* ]]
-    [[ "$captured" == *"Copilot [agentStop]: Response Complete"* ]]
+    [[ "$captured" == *"Copilot [agentStop]: Agent Turn Stopping"* ]]
     [[ "$captured" == *"Click to focus terminal"* ]]
 
     rm -f "$CAPTURE_FILE"
@@ -150,7 +150,7 @@ FAKE
         bash -c 'printf "%s" "$1" | bash -c "$2"' _ \
         '{"sessionId":"session_abc","stopReason":"end_turn"}' "$generated_cmd"
     [ "$status" -eq 0 ]
-    [[ "$(captured_args)" == *"Copilot [agentStop]: Response Complete"* ]]
+    [[ "$(captured_args)" == *"Copilot [agentStop]: Agent Turn Stopping"* ]]
 
     run env COPILOT_HOME="$TEST_TEMP_DIR/copilot home" \
         "$PROJECT_ROOT/install.sh" --bindir "$install_dir" --copy --configure-copilot

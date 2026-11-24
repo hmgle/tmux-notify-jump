@@ -400,11 +400,11 @@ Notes:
 ## GitHub Copilot CLI integration
 
 Copilot CLI supports user-level command hooks on Linux and macOS. This
-integration uses the `agentStop` event for completed turns and the CLI-only
+integration uses `agentStop` at the end of main-agent turns and the CLI-only
 `notification` event for permission and input prompts. Copilot in the cloud
 does not emit notification events.
 
-Install and create a user hook file:
+Install `jq`, then run the installer to create a user hook file.
 
 ```bash
 ./install.sh --prefix "$HOME/.local" --copy --configure-copilot
@@ -444,13 +444,19 @@ your installed wrapper. Register each entry once across your active hook files.
 }
 ```
 
-`agentStop` reports a completed main-agent turn. The asynchronous
-`notification` hook reports permission prompts and requests for user input,
-including their message. Both use the existing detached notification path for
-delivery and pane selection. Use a Copilot CLI release that supports user hook
-files and both events. When Copilot's session sandbox is enabled, the hook also
-needs access to the installed scripts, tmux socket, and selected notification
-backend.
+The `Agent Turn Stopping` notification fires during `agentStop`. Another stop
+hook can return `decision: "block"` and make Copilot continue, so a single
+prompt can produce more than one stop notification. `stop_hook_active`
+indicates whether an earlier stop decision already forced a continuation.
+[Copilot stop decisions](https://docs.github.com/en/copilot/reference/hooks-reference#agentstop--subagentstop-decision-control)
+
+The asynchronous `notification` hook reports permission prompts and requests
+for user input, including their message. Both use the existing detached
+notification path for delivery and pane selection. The `notification` event
+requires Copilot CLI `1.0.18` or later. The generated user hooks were tested
+with `1.0.114`. When Copilot's session sandbox is enabled, the hook also needs
+access to the installed scripts, tmux socket, and selected notification backend.
+[Copilot CLI 1.0.18 release notes](https://github.com/github/copilot-cli/releases/tag/v1.0.18)
 
 Optional settings can be placed in the shared environment file:
 

@@ -50,7 +50,7 @@ case "$EVENT_NAME" in
             log_debug 'ignoring invalid or non-root end-of-turn payload'
             exit 0
         fi
-        TITLE_MSG='Response Complete'
+        TITLE_MSG='Agent Turn Stopping'
         ;;
     notification)
         if ! fields="$(jq -ers 'select(length == 1) | .[0] | objects |

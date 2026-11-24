@@ -6,8 +6,8 @@ Notable changes to tmux-notify-jump are documented in this file.
 
 ### Added
 
-- GitHub Copilot CLI hooks for completed turns, permission prompts and input
-  requests, with an opt-in installer flag and user-level hook configuration.
+- GitHub Copilot CLI notifications at `agentStop` and for permission and input
+  prompts, with an opt-in installer flag and user-level hook configuration.
 
 ## [1.6.0] - 2026-11-13
 

@@ -107,7 +107,7 @@ dry-run 只打印设置，不发送通知。接下来选择一个代理集成，
 | [Claude Code](docs/integrations.md#claude-code-integration) | `./install.sh --copy --configure-claude` | Stop + 权限/空闲提示 |
 | [Kimi Code](docs/integrations.md#kimi-code-cli-integration) | `./install.sh --copy --configure-kimi` | 完成、审批、失败回合、后台任务终止 |
 | [Grok Build](docs/integrations.md#grok-build-integration) | `./install.sh --copy --configure-grok` | 完成、权限/空闲提示、工具失败 |
-| [GitHub Copilot CLI](docs/integrations.md#github-copilot-cli-integration) | `./install.sh --copy --configure-copilot` | 回合完成、权限与输入提示 |
+| [GitHub Copilot CLI](docs/integrations.md#github-copilot-cli-integration) | `./install.sh --copy --configure-copilot` | `agentStop` 阶段、权限与输入提示 |
 | [OpenCode](docs/integrations.md#opencode-integration) | `./install.sh --copy --configure-opencode` | session idle + permission asked |
 | [Pi](docs/integrations.md#pi-integration) | `./install.sh --copy --configure-pi` | agent 完全空闲 |
 | [Step Code](docs/integrations.md#step-code-integration) | `./install.sh --copy --configure-step` | agent 完全空闲；提示通知需单独开启 |
