@@ -5,10 +5,17 @@ load 'test_helper'
 
 setup() {
     setup_temp_dir
-    unset TMUX TMUX_PANE COPILOT_HOOKS_PATH COPILOT_NOTIFY_EVENTS COPILOT_NOTIFY_EXCLUDE_EVENTS
+    unset TMUX TMUX_PANE TMUX_NOTIFY_TMUX_SOCKET
+    unset COPILOT_HOOKS_PATH COPILOT_NOTIFY_EVENTS COPILOT_NOTIFY_EXCLUDE_EVENTS
+    unset COPILOT_NOTIFY_FOCUS_ONLY_FALLBACK COPILOT_NOTIFY_FALLBACK_TARGET
+    unset COPILOT_NOTIFY_DEBUG
     export HOME="$TEST_TEMP_DIR/home" TMUX_NOTIFY_CONFIG="$TEST_TEMP_DIR/absent-env"
+    export TMUX_NOTIFY_FOCUS_ONLY_FALLBACK=1
+    export TMUX_NOTIFY_FALLBACK_TARGET=0
+    export COPILOT_NOTIFY_SHOW_EVENT_TYPE=1
     fake_bin="$TEST_TEMP_DIR/bin"
     mkdir -p "$fake_bin"
+    export PATH="$fake_bin:$PATH"
 
     cat >"$fake_bin/tmux-notify-jump" <<'FAKE'
 #!/usr/bin/env bash
@@ -30,8 +37,7 @@ teardown() {
 
 run_copilot_hook() {
     local event="$1" payload="$2"
-    run env PATH="$fake_bin:$PATH" "$PROJECT_ROOT/notify-copilot.sh" "$event" \
-        <<<"$payload"
+    run "$PROJECT_ROOT/notify-copilot.sh" "$event" <<<"$payload"
 }
 
 captured_args() {
@@ -78,9 +84,8 @@ captured_args() {
 }
 
 @test "notify-copilot.sh: forwards Copilot bell and terminal options" {
-    run env COPILOT_NOTIFY_BELL=1 COPILOT_NOTIFY_TERMINAL_METHOD=osc777 \
-        "$PROJECT_ROOT/notify-copilot.sh" agentStop \
-        <<< '{"stopReason":"end_turn"}'
+    export COPILOT_NOTIFY_BELL=1 COPILOT_NOTIFY_TERMINAL_METHOD=osc777
+    run_copilot_hook agentStop '{"stopReason":"end_turn"}'
 
     [ "$status" -eq 0 ]
     rg -qx -- '--bell' "$CAPTURE_FILE"
@@ -106,7 +111,6 @@ captured_args() {
 
 @test "notify-copilot.sh: routes to the originating pane and socket" {
     export TMUX="$TEST_TEMP_DIR/tmux.sock,1234,0" TMUX_PANE='%12'
-    unset TMUX_NOTIFY_TMUX_SOCKET
     cat >"$fake_bin/tmux" <<'FAKE'
 #!/usr/bin/env bash
 printf '%s|%s\n' "${TMUX_NOTIFY_TMUX_SOCKET:-}" "$*" >"$TMUX_CAPTURE_FILE"
@@ -146,8 +150,7 @@ FAKE
     [ "$status" -eq 0 ]
 
     generated_cmd="$(jq -r '.hooks.agentStop[0].bash' "$config")"
-    run env PATH="$fake_bin:$PATH" TMUX_NOTIFY_JUMP_SH="$fake_bin/tmux-notify-jump" \
-        bash -c 'printf "%s" "$1" | bash -c "$2"' _ \
+    run bash -c 'printf "%s" "$1" | bash -c "$2"' _ \
         '{"sessionId":"session_abc","stopReason":"end_turn"}' "$generated_cmd"
     [ "$status" -eq 0 ]
     [[ "$(captured_args)" == *"Copilot [agentStop]: Agent Turn Stopping"* ]]
