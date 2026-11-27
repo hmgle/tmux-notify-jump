@@ -475,6 +475,10 @@ See the [official Copilot CLI hook setup](https://docs.github.com/en/copilot/how
 
 Use the `opencode-plugin/tmux-notify-jump.ts` plugin to bridge OpenCode events to `notify-opencode.sh`, which calls `tmux-notify-jump` (or `TMUX_NOTIFY_JUMP_SH` if set).
 
+The plugin supports OpenCode 2.x (tested with 2.4.2) and OpenCode 1.18.29
+or newer in the 1.x series. For earlier 1.x releases, use the plugin from
+tmux-notify-jump 1.7.0.
+
 Install the plugin:
 
 ```bash
@@ -488,7 +492,15 @@ mkdir -p ~/.config/opencode/plugins/
 cp opencode-plugin/tmux-notify-jump.ts ~/.config/opencode/plugins/
 ```
 
+After upgrading tmux-notify-jump, repeat the install for a copied plugin.
+A symlink to this checkout picks up the updated source. In OpenCode 2.x,
+run `opencode reload` to reload the configuration. In OpenCode 1.x, restart
+OpenCode.
+
 Default events: `session.idle`, `permission.asked`. Additional events (`session.error`, `session.created`, `session.deleted`, `permission.replied`, `tool.execute.after`) can be enabled via filtering.
+
+On OpenCode 2.x, a failed turn can emit both `session.error` and
+`session.idle`. Enable `session.error` for a separate error notification.
 
 Optional event filtering (comma-separated lists; `*` = all):
 
