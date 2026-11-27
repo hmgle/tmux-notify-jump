@@ -7,10 +7,14 @@ function forward(eventType: string, properties: object, message?: string) {
   try {
     const cmd = process.env.OPENCODE_NOTIFY_CMD || "notify-opencode.sh"
     const payload = JSON.stringify({ event_type: eventType, properties, message })
-    const child = spawn(cmd, [], { stdio: ["pipe", "ignore", "ignore"] })
+    const child = spawn(cmd, [], {
+      detached: true,
+      stdio: ["pipe", "ignore", "ignore"],
+    })
     child.on("error", () => {})
     child.stdin.on("error", () => {})
     child.stdin.end(payload)
+    child.unref()
   } catch {
     // Notification failures must not interrupt OpenCode.
   }

@@ -11,16 +11,39 @@ setup() {
     export OPENCODE_PLUGIN="$PROJECT_ROOT/opencode-plugin/tmux-notify-jump.ts"
     export OPENCODE_NOTIFY_CMD="$TEST_TEMP_DIR/capture notify"
     export CAPTURE_FILE="$TEST_TEMP_DIR/events"
+    export RELEASE_FILE="$TEST_TEMP_DIR/release"
     cat >"$OPENCODE_NOTIFY_CMD" <<'WRAPPER'
 #!/usr/bin/env bash
 event=$(cat)
-printf '%s\n' "$event" >>"$CAPTURE_FILE"
+# The harness must exit while the wrapper is still running.
+for _ in {1..100}; do
+    if [ -f "$RELEASE_FILE" ]; then
+        printf '%s\n' "$event" >>"$CAPTURE_FILE"
+        exit 0
+    fi
+    sleep 0.05
+done
+exit 1
 WRAPPER
     chmod +x "$OPENCODE_NOTIFY_CMD"
 }
 
 teardown() {
     teardown_temp_dir
+}
+
+release_and_wait_for_captures() {
+    local expected="$1"
+    : >"$RELEASE_FILE"
+    for _ in {1..50}; do
+        if [ -f "$CAPTURE_FILE" ] &&
+            jq -es --argjson expected "$expected" 'length >= $expected' "$CAPTURE_FILE" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 0.1
+    done
+    printf 'Timed out waiting for %s wrapper payloads\n' "$expected" >&2
+    return 1
 }
 
 @test "OpenCode 2 bridge forwards server events using the shell event names" {
@@ -96,6 +119,7 @@ TS
     run node --experimental-strip-types --no-warnings "$TEST_TEMP_DIR/harness.mts"
     [ "$status" -eq 0 ]
 
+    release_and_wait_for_captures 14
     jq -es '
         . as $events |
         length == 14
@@ -139,6 +163,7 @@ TS
     run node --experimental-strip-types --no-warnings "$TEST_TEMP_DIR/harness.mts"
     [ "$status" -eq 0 ]
 
+    release_and_wait_for_captures 4
     jq -es '
         length == 4
         and all(.[]; .properties.sessionID == "legacy")
