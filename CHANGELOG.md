@@ -4,6 +4,25 @@ Notable changes to tmux-notify-jump are documented in this file.
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-11-27
+
+### Fixed
+
+- Restore OpenCode notifications with the 2.x server plugin API, tested with
+  OpenCode 2.4.2. The plugin also supports OpenCode 1.18.29 and later 1.x
+  releases. Existing event names and filters continue to work.
+- Show readable OpenCode 1.x error messages, keep the event subscription
+  running when a failure event has no usable message, and allow standalone
+  OpenCode commands to exit while notifications finish in the background.
+
+### OpenCode upgrades
+
+- Reinstall a copied plugin with `./install.sh --copy --configure-opencode`.
+  A symlink already points to the updated source. If the OpenCode 2.x
+  background service loaded the old plugin, restart it with
+  `opencode service restart` after active sessions finish. Check that
+  `opencode plugin list` shows `tmux-notify-jump` in the ID column.
+
 ## [1.7.0] - 2026-11-24
 
 ### Added
