@@ -845,23 +845,14 @@ configure_opencode() {
     echo "Installed OpenCode TUI plugin: $client_dst"
 
     if [ -f "$plugin_dst" ] || [ -L "$plugin_dst" ]; then
-        local existing_target=""
-        if [ -L "$plugin_dst" ]; then
-            # readlink -f is GNU-only; fall back to portable resolution
-            existing_target="$(readlink -f "$plugin_dst" 2>/dev/null \
-                || python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$plugin_dst" 2>/dev/null \
-                || true)"
+        if [ -L "$plugin_dst" ] && [ "$plugin_dst" -ef "$plugin_src" ]; then
+            if [ "$MODE" = symlink ]; then
+                echo "OpenCode plugin already installed: $plugin_dst"
+                return 0
+            fi
+        else
+            backup_file "$plugin_dst"
         fi
-        local canonical_src=""
-        canonical_src="$(readlink -f "$plugin_src" 2>/dev/null \
-            || python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$plugin_src" 2>/dev/null \
-            || true)"
-        if [ -n "$existing_target" ] && [ -n "$canonical_src" ] \
-            && [ "$existing_target" = "$canonical_src" ]; then
-            echo "OpenCode plugin already installed: $plugin_dst"
-            return 0
-        fi
-        backup_file "$plugin_dst"
     fi
 
     case "$MODE" in
@@ -1397,6 +1388,10 @@ for f in "${FILES[@]}"; do
             ln -sf "$src" "$dst"
             ;;
         copy)
+            # Replace a link from a previous install without following it.
+            if [ -L "$dst" ]; then
+                rm -f "$dst"
+            fi
             if command -v install >/dev/null 2>&1; then
                 install -m 755 "$src" "$dst"
             else

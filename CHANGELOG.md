@@ -11,6 +11,8 @@ Notable changes to tmux-notify-jump are documented in this file.
 - Jump from OpenCode 2.x shared server notifications to the tmux pane
   displaying the session in the full TUI. When a session has no unique
   live pane, the notification focuses the terminal.
+- Switch an existing symlink installation to `--copy` on Ubuntu 26.04
+  and copy both OpenCode plugins when switching modes.
 
 ### OpenCode upgrades
 
