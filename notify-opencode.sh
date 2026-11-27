@@ -78,29 +78,8 @@ lookup_kv_map() {
     return 1
 }
 
-opencode_mini_session() {
-    local record="$1" pid="$2" directory="$3" started="" trace="" candidate=""
-    started="$(LC_ALL=C TZ=UTC0 ps -p "$pid" -o lstart= 2>/dev/null)" || return 1
-    jq -e --arg started "$started" '.processStarted == $started' "$record" >/dev/null 2>&1 || return 1
-    for candidate in "$directory/"*-"$pid".jsonl; do
-        [[ -f "$candidate" && -O "$candidate" && ! -L "$candidate" && "$candidate" -nt "$record" ]] || continue
-        if [ -z "$trace" ] || [ "$candidate" -nt "$trace" ]; then
-            trace="$candidate"
-        fi
-    done
-    [ -n "$trace" ] || return 1
-    # Releases differ in which lifecycle records they emit. Take the latest
-    # session opened or used by this client, ignoring server events it observed.
-    jq -nRer --argjson pid "$pid" '
-        last(inputs | fromjson? | select(.pid == $pid)
-            | select(.type | IN("session.open", "session.new", "send.prompt", "send.command", "send.shell"))
-            | .data.sessionID | strings)
-    ' "$trace" 2>/dev/null
-}
-
 find_shared_server_pane() {
     local session_id="$1" cache_dir="" record="" pid="" binding="" pane="" server_pid="" socket="" actual=""
-    local trace_dir="" mini_session=""
     [ -n "$session_id" ] && command -v tmux >/dev/null 2>&1 || return 1
     cache_dir="$(cache_root_dir)/tmux-notify-jump/opencode"
     [ -d "$cache_dir" ] && [ -O "$cache_dir" ] && [ ! -L "$cache_dir" ] || return 1
@@ -112,24 +91,17 @@ find_shared_server_pane() {
         [[ "$pid" =~ ^[1-9][0-9]*$ && "$pid" -gt 1 ]] || continue
         kill -0 "$pid" 2>/dev/null || continue
         binding="$(jq -er --arg id "$session_id" '
-            select(.sessionID == $id or (.traceDir | type) == "string")
+            select(.sessionID == $id)
             | select(.pane | test("^%[0-9]+$"))
             | select(.serverPID | test("^[0-9]+$"))
             | select(.socket | startswith("/") and ((contains("\u0000") or contains("\n")) | not))
-            | .pane, .serverPID, .socket, (.traceDir // "")
+            | .pane, .serverPID, .socket
         ' "$record" 2>/dev/null)" || continue
         {
             IFS= read -r pane
             IFS= read -r server_pid
             IFS= read -r socket
-            IFS= read -r trace_dir
         } <<<"$binding"
-        if [[ "$trace_dir" == /* ]]; then
-            mini_session="$(opencode_mini_session "$record" "$pid" "$trace_dir")" || continue
-            [ "$mini_session" = "$session_id" ] || continue
-        elif [ -n "$trace_dir" ]; then
-            continue
-        fi
         [ -S "$socket" ] || continue
         actual="$(tmux -S "$socket" display-message -p -t "$pane" '#{pid}' 2>/dev/null)" || continue
         [ "$actual" = "$server_pid" ] || continue

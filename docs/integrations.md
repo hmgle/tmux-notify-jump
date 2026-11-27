@@ -522,15 +522,10 @@ Private servers launched with `opencode --standalone` use their launching
 pane as before. OpenCode 1.x uses the standalone `tmux-notify-jump.ts`
 bridge file.
 
-OpenCode 2.4.2's `mini` client has no TUI plugin loader. Start it in tmux
-with the installed `opencode-mini` command, which forwards arguments to
-`opencode mini` and uses the local shared service. For example, run
-`opencode-mini --continue` to resume a session. Notifications can jump once
-the client records the session, which may require the first prompt. The
-launcher enables OpenCode's direct trace under
-`${XDG_DATA_HOME:-$HOME/.local/share}/opencode/log/direct/`. OpenCode writes
-detailed session events there and retains the trace after mini exits. The
-integration reads only the records identifying the mini client's session.
+OpenCode 2.4.2's `opencode mini` does not load TUI plugins. On a shared server,
+a Mini session uses the focus-only fallback unless a regular TUI has that same
+session open in exactly one pane. `opencode mini --standalone` can jump to its
+launching pane.
 
 Default events: `session.idle`, `permission.asked`. Additional events (`session.error`, `session.created`, `session.deleted`, `permission.replied`, `tool.execute.after`) can be enabled via filtering.
 

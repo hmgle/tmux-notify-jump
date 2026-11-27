@@ -946,7 +946,7 @@ FAKE
     install_dir="$TEST_TEMP_DIR/install"
     mkdir -p "$work_dir" "$checkout" "$TEST_TEMP_DIR/physical/child"
     cp "$PROJECT_ROOT"/install.sh "$PROJECT_ROOT"/tmux-notify-jump* \
-        "$PROJECT_ROOT"/notify-*.sh "$PROJECT_ROOT"/opencode-mini "$checkout"
+        "$PROJECT_ROOT"/notify-*.sh "$checkout"
     cp -R "$checkout" "$work_dir/repo"
     printf '\n# Physical checkout\n' >>"$checkout/notify-copilot.sh"
     ln -s ../physical/child "$work_dir/link"

@@ -86,47 +86,12 @@ bind_pane() {
     [[ "$output" == "--focus-only"$'\n'* ]]
 }
 
-@test "OpenCode mini notifications follow the latest session used in that pane" {
-    fake_bin="$TEST_TEMP_DIR/bin"
-    mkdir -p "$fake_bin"
-    export PATH="$fake_bin:$PATH" XDG_DATA_HOME="$TEST_TEMP_DIR/data"
-    cat >"$fake_bin/opencode" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-[[ "$*" == 'mini --continue --prompt some words' && "$#" -eq 4 && "$4" == 'some words' ]]
-[[ "${OPENCODE_DIRECT_TRACE:-}" == 1 ]]
-directory="$XDG_DATA_HOME/opencode/log/direct"
-mkdir -p "$directory"
-trace="$directory/stub-$$.jsonl"
-printf '{"pid":%s,"type":"send.prompt","data":{"sessionID":"ses_previous"}}\n' "$$" >"$trace"
-printf '{"pid":%s,"type":"session.new","data":{"sessionID":"ses_mini"}}\n' "$$" >>"$trace"
-printf '{"pid":%s,"type":"recv.event","data":{"sessionID":"ses_other"}}\n' "$$" >>"$trace"
-touch "$XDG_DATA_HOME/ready"
-exec sleep 60
-SH
-    chmod +x "$fake_bin/opencode"
-    tmux -S "$socket" set-environment -t test PATH "$PATH"
-    tmux -S "$socket" set-environment -t test XDG_DATA_HOME "$XDG_DATA_HOME"
-    [ "$socket" = "$TEST_TEMP_DIR/tmux.sock" ] && [ "$socket" != "$ambient_socket" ]
-    tmux -S "$socket" respawn-pane -k -t "$pane_b" \
-        "exec '$PROJECT_ROOT/opencode-mini' --continue --prompt 'some words'"
-    for _ in {1..50}; do
-        [ ! -e "$XDG_DATA_HOME/ready" ] || break
-        sleep 0.1
-    done
-    [ -e "$XDG_DATA_HOME/ready" ]
+@test "OpenCode shared notifications focus the terminal when the session has no TUI binding" {
+    bind_pane "$pane_a" ses_tui
+    export TMUX="$(tmux -S "$socket" display-message -p '#{socket_path},#{pid},0')" TMUX_PANE="$pane_a"
 
     run "$PROJECT_ROOT/notify-opencode.sh" <<<'{"event_type":"session.idle","shared_server":true,"properties":{"sessionID":"ses_mini"}}'
     [ "$status" -eq 0 ]
-    [[ "$output" == "--target"$'\n'"$pane_b"$'\n'* ]]
-    [[ "$output" == *"--tmux-socket"$'\n'"$socket"* ]]
-
-    run "$PROJECT_ROOT/notify-opencode.sh" <<<'{"event_type":"session.idle","shared_server":true,"properties":{"sessionID":"ses_previous"}}'
-    [ "$status" -eq 0 ]
     [[ "$output" == "--focus-only"$'\n'* ]]
-
-    bind_pane "$pane_a" ses_mini
-    run "$PROJECT_ROOT/notify-opencode.sh" <<<'{"event_type":"session.idle","shared_server":true,"properties":{"sessionID":"ses_mini"}}'
-    [ "$status" -eq 0 ]
-    [[ "$output" == "--focus-only"$'\n'* ]]
+    [[ "$output" != *"--target"* ]]
 }
