@@ -31,11 +31,15 @@ const { default: plugin } = await import(pathToFileURL(process.env.OPENCODE_PLUG
 assert.equal(plugin.id, "tmux-notify-jump")
 
 const succeed = (sessionID) => ({ type: "session.execution.succeeded", data: { sessionID } })
+const fail = (sessionID, error) => ({ type: "session.execution.failed", data: { sessionID, error } })
 const events = [
   succeed("parent"),
   succeed("child"),
   succeed("unavailable"),
-  { type: "session.execution.failed", data: { sessionID: "failed", error: { message: "provider failed" } } },
+  fail("failed", { message: "provider failed" }),
+  fail("child", { message: "subagent failed" }),
+  fail("missing-error"),
+  fail("invalid-message", { message: 42 }),
   { type: "session.created", data: { sessionID: "new" } },
   { type: "session.deleted", data: { sessionID: "old" } },
   { type: "permission.asked", data: { sessionID: "parent", message: 'Allow "read"?\n/path' } },
@@ -93,12 +97,18 @@ TS
     [ "$status" -eq 0 ]
 
     jq -es '
-        length == 9
+        . as $events |
+        length == 14
         and any(.[]; .event_type == "session.idle" and .properties.sessionID == "parent"
             and .message == ("line one\n" + ("x" * 191)))
         and any(.[]; .event_type == "session.idle" and .properties.sessionID == "unavailable" and .message == null)
         and any(.[]; .event_type == "session.error" and .properties == {sessionID:"failed", error:"provider failed"})
         and any(.[]; .event_type == "session.idle" and .properties.sessionID == "failed" and .message == "provider failed")
+        and any(.[]; .event_type == "session.error" and .properties == {sessionID:"child", error:"subagent failed"})
+        and all(.[]; .event_type != "session.idle" or .properties.sessionID != "child")
+        and all(["missing-error", "invalid-message"][]; . as $session |
+            any($events[]; .event_type == "session.error" and .properties == {sessionID:$session})
+            and any($events[]; .event_type == "session.idle" and .properties.sessionID == $session and .message == null))
         and any(.[]; .event_type == "session.created" and .properties.sessionID == "new")
         and any(.[]; .event_type == "session.deleted" and .properties.sessionID == "old")
         and any(.[]; .event_type == "permission.asked" and .message == "Allow \"read\"?\n/path")

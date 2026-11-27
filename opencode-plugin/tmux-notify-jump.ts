@@ -83,7 +83,8 @@ const plugin = {
             const { sessionID } = event.data
             let message: string | undefined
             if (event.type === "session.execution.failed") {
-              message = event.data.error.message
+              const errorMessage = event.data.error?.message
+              if (typeof errorMessage === "string") message = errorMessage
               forward("session.error", { sessionID, error: message })
             }
             // V1 also reported idle after a failed turn. Keep that notification

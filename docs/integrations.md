@@ -512,7 +512,8 @@ restart OpenCode.
 Default events: `session.idle`, `permission.asked`. Additional events (`session.error`, `session.created`, `session.deleted`, `permission.replied`, `tool.execute.after`) can be enabled via filtering.
 
 On OpenCode 2.x, a failed turn can emit both `session.error` and
-`session.idle`. Enable `session.error` for a separate error notification.
+`session.idle`. The opt-in `session.error` event includes subagent failures.
+The `session.idle` event only notifies for top-level sessions.
 
 Optional event filtering (comma-separated lists; `*` = all):
 
