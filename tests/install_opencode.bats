@@ -20,10 +20,12 @@ teardown() {
         --configure-opencode --opencode-plugin-path "$plugin_dir"
     [ "$status" -eq 0 ]
     [ "$plugin_dir/tmux-notify-jump-client" -ef "$PROJECT_ROOT/opencode-plugin/client" ]
+    [ "$TEST_TEMP_DIR/install/bin/opencode-mini" -ef "$PROJECT_ROOT/opencode-mini" ]
 
     run "$PROJECT_ROOT/install.sh" --prefix "$TEST_TEMP_DIR/install" --copy \
         --configure-opencode --opencode-plugin-path "$plugin_dir"
     [ "$status" -eq 0 ]
+    [ -x "$TEST_TEMP_DIR/install/bin/opencode-mini" ]
     [ ! -L "$plugin_dir/tmux-notify-jump-client" ]
     cmp "$PROJECT_ROOT/opencode-plugin/client/tui.ts" "$plugin_dir/tmux-notify-jump-client/tui.ts"
 }

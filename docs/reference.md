@@ -592,6 +592,7 @@ Notes:
 - `notify-grok.sh`: Grok Build wrapper (reads native hook JSON from stdin)
 - `notify-copilot.sh`: GitHub Copilot CLI wrapper (reads hook JSON from stdin)
 - `notify-opencode.sh`: OpenCode wrapper (reads JSON from stdin)
+- `opencode-mini`: OpenCode Mini launcher with tmux pane registration
 - `opencode-plugin/tmux-notify-jump.ts`: OpenCode plugin (bridges events to `notify-opencode.sh`)
 - `pi-extension/tmux-notify-jump.ts`: Pi coding agent extension (bridges events to `notify-pi.sh`)
 - `notify-pi.sh`: Pi wrapper (reads JSON from stdin)

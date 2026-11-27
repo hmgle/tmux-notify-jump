@@ -1352,6 +1352,7 @@ FILES=(
     notify-grok.sh
     notify-copilot.sh
     notify-opencode.sh
+    opencode-mini
     notify-pi.sh
     notify-step.sh
     notify-omp.sh
