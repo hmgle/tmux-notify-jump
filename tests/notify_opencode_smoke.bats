@@ -85,7 +85,7 @@ FAKE
     [ -z "$output" ]
 }
 
-@test "notify-opencode.sh: session.error extracts properties.error" {
+@test "notify-opencode.sh: session.error displays both v1 and v2 error messages" {
     fake_bin="$TEST_TEMP_DIR/bin"
     mkdir -p "$fake_bin"
 
@@ -105,22 +105,21 @@ FAKE
     export CAPTURE_FILE="$TEST_TEMP_DIR/captured_args"
     export TMUX_NOTIFY_JUMP_SH="$fake_bin/tmux-notify-jump"
 
-    run bash -c '
-        export PATH="'"$fake_bin"':$PATH"
-        export CAPTURE_FILE
-        export TMUX_NOTIFY_JUMP_SH
-        export OPENCODE_NOTIFY_EVENTS="*"
-        echo "{\"event_type\":\"session.error\",\"properties\":{\"error\":\"rate limit exceeded\"}}" \
-            | "'"$PROJECT_ROOT/notify-opencode.sh"'"
-    '
+    for payload in \
+        '{"event_type":"session.error","properties":{"error":"rate limit exceeded"}}' \
+        '{"event_type":"session.error","properties":{"error":{"name":"APIError","data":{"message":"rate limit exceeded"}}}}' \
+        '{"event_type":"session.error","message":"rate limit exceeded"}'; do
+        rm -f "$CAPTURE_FILE"
+        run env PATH="$fake_bin:$PATH" OPENCODE_NOTIFY_EVENTS='*' OPENCODE_NOTIFY_EXCLUDE_EVENTS='' \
+            bash -c 'printf "%s\n" "$2" | "$1"' _ "$PROJECT_ROOT/notify-opencode.sh" "$payload"
 
-    [ "$status" -eq 0 ]
-    [ -f "$CAPTURE_FILE" ]
-
-    captured="$(cat "$CAPTURE_FILE")"
-    [[ "$captured" == *"Session Error"* ]]
-    [[ "$captured" == *"rate limit exceeded"* ]]
-    [[ "$captured" == *"--notify-kind"$'\n'"attention"* ]]
+        [ "$status" -eq 0 ]
+        [ -f "$CAPTURE_FILE" ]
+        captured="$(cat "$CAPTURE_FILE")"
+        [[ "$captured" == *"Session Error"* ]]
+        [[ "$captured" == *"--body"$'\n'"rate limit exceeded"$'\n'* ]]
+        [[ "$captured" == *"--notify-kind"$'\n'"attention"* ]]
+    done
 }
 
 @test "notify-opencode.sh: session.deleted extracts properties.reason" {

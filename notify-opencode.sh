@@ -130,7 +130,10 @@ case "$EVENT_TYPE" in
         ;;
     session.error)
         TITLE_MSG="Session Error"
-        MESSAGE="$(jq -r '.properties.error // .message // empty' <<<"$payload" 2>/dev/null || true)"
+        MESSAGE="$(jq -r '
+            (.properties.error | if type == "object" then (.data.message? // .) else . end)
+            // .message // empty
+        ' <<<"$payload" 2>/dev/null || true)"
         MESSAGE="${MESSAGE:-An error occurred}"
         ;;
     session.created)
