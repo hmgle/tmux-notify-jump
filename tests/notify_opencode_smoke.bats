@@ -74,6 +74,46 @@ FAKE
     [ -z "$output" ]
 }
 
+@test "notify-opencode.sh: shared server ignores inherited and fallback pane targets" {
+    fake_bin="$TEST_TEMP_DIR/bin"
+    mkdir -p "$fake_bin"
+    cat >"$fake_bin/tmux" <<'FAKE'
+#!/usr/bin/env bash
+touch "$TEST_TEMP_DIR/tmux.called"
+exit 0
+FAKE
+    cat >"$fake_bin/tmux-notify-jump" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >"$TEST_TEMP_DIR/args"
+FAKE
+    chmod +x "$fake_bin/tmux" "$fake_bin/tmux-notify-jump"
+    export PATH="$fake_bin:$PATH"
+    export TMUX_NOTIFY_JUMP_SH="$fake_bin/tmux-notify-jump"
+    export TMUX_NOTIFY_CONFIG="$TEST_TEMP_DIR/no-config"
+    export OPENCODE_NOTIFY_EVENTS=session.idle OPENCODE_NOTIFY_EXCLUDE_EVENTS=
+    export OPENCODE_NOTIFY_FALLBACK_TARGET=1 OPENCODE_NOTIFY_FOCUS_ONLY_FALLBACK=1
+    export TMUX_PANE='%89' TMUX="$TEST_TEMP_DIR/service.sock,123,0"
+    payload='{"event_type":"session.idle","shared_server":true}'
+
+    run "$PROJECT_ROOT/notify-opencode.sh" <<<"$payload"
+    [ "$status" -eq 0 ]
+    [ ! -e "$TEST_TEMP_DIR/tmux.called" ]
+    [ "$(head -n 1 "$TEST_TEMP_DIR/args")" = '--focus-only' ]
+    rm "$TEST_TEMP_DIR/args"
+
+    export OPENCODE_NOTIFY_FOCUS_ONLY_FALLBACK=0
+    run "$PROJECT_ROOT/notify-opencode.sh" <<<"$payload"
+    [ "$status" -eq 0 ]
+    [ ! -e "$TEST_TEMP_DIR/tmux.called" ]
+    [ ! -e "$TEST_TEMP_DIR/args" ]
+
+    # A private server's payload keeps the regular pane targeting path.
+    run "$PROJECT_ROOT/notify-opencode.sh" <<<'{"event_type":"session.idle"}'
+    [ "$status" -eq 0 ]
+    [ -e "$TEST_TEMP_DIR/tmux.called" ]
+    [ "$(head -n 2 "$TEST_TEMP_DIR/args")" = $'--target\n%89' ]
+}
+
 @test "notify-opencode.sh: excluded event exits 0 silently" {
     run bash -c '
         export OPENCODE_NOTIFY_EXCLUDE_EVENTS="session.idle"

@@ -195,7 +195,9 @@ if [ "$TIMEOUT_MS_SOURCE" = "default" ] && [ -n "$EVENT_TYPE" ] && [ -n "${OPENC
 fi
 
 TARGET=""
-if command -v tmux >/dev/null 2>&1; then
+if jq -e '.shared_server == true' >/dev/null 2>&1 <<<"$payload"; then
+    log_debug "shared OpenCode server has no session pane binding"
+elif command -v tmux >/dev/null 2>&1; then
     if tmux_cmd list-sessions >/dev/null 2>&1; then
         TARGET="$(resolve_tmux_notify_target "$ALLOW_FALLBACK" "${PPID:-}" 2>/dev/null || true)"
     else

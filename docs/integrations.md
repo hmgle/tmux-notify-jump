@@ -509,6 +509,14 @@ Check that the list shows `tmux-notify-jump` in the ID column. For a server
 started manually with `opencode serve`, restart that process. In OpenCode 1.x,
 restart OpenCode.
 
+For pane jumps in OpenCode 2.x, start the client inside the destination pane
+with `opencode --standalone` (or `opencode run --standalone ...`). Its private
+server inherits that pane's environment. The background service and `opencode
+serve` handle sessions from multiple clients, and the server plugin API has
+no session-to-pane binding. Their notifications use the focus-only fallback,
+even with `OPENCODE_NOTIFY_FALLBACK_TARGET` enabled. Set
+`OPENCODE_NOTIFY_FOCUS_ONLY_FALLBACK=0` to skip these notifications.
+
 Default events: `session.idle`, `permission.asked`. Additional events (`session.error`, `session.created`, `session.deleted`, `permission.replied`, `tool.execute.after`) can be enabled via filtering.
 
 On OpenCode 2.x, a failed turn can emit both `session.error` and

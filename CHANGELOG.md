@@ -4,6 +4,11 @@ Notable changes to tmux-notify-jump are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Stop OpenCode 2.x shared server notifications from jumping to the pane that
+  started the server. Run OpenCode with `--standalone` for pane jumps.
+
 ## [1.7.1] - 2026-11-27
 
 ### Fixed

@@ -116,13 +116,14 @@ process.env.OPENCODE_NOTIFY_CMD += ".missing"
 toolAfter({ tool: "read", sessionID: "parent" })
 TS
 
-    run node --experimental-strip-types --no-warnings "$TEST_TEMP_DIR/harness.mts"
+    run node --experimental-strip-types --no-warnings "$TEST_TEMP_DIR/harness.mts" serve --service
     [ "$status" -eq 0 ]
 
     release_and_wait_for_captures 14
     jq -es '
         . as $events |
         length == 14
+        and all(.[]; .shared_server == true)
         and any(.[]; .event_type == "session.idle" and .properties.sessionID == "parent"
             and .message == ("line one\n" + ("x" * 191)))
         and any(.[]; .event_type == "session.idle" and .properties.sessionID == "unavailable" and .message == null)
@@ -139,6 +140,25 @@ TS
         and any(.[]; .event_type == "permission.replied" and .properties.reply == "once")
         and any(.[]; .event_type == "tool.execute.after" and .properties.name == "read")
     ' "$CAPTURE_FILE"
+}
+
+@test "OpenCode 2 bridge preserves private server pane routing" {
+    cat >"$TEST_TEMP_DIR/harness.mts" <<'TS'
+import { pathToFileURL } from "node:url"
+const { default: plugin } = await import(pathToFileURL(process.env.OPENCODE_PLUGIN).href)
+await plugin.setup({
+  tool: { async hook() {} },
+  event: { async *subscribe() {
+    yield { type: "permission.asked", data: { sessionID: "private", message: "Approve?" } }
+  } },
+})
+TS
+
+    run node --experimental-strip-types --no-warnings "$TEST_TEMP_DIR/harness.mts" serve --stdio --port 0
+    [ "$status" -eq 0 ]
+
+    release_and_wait_for_captures 1
+    jq -e '.properties.sessionID == "private" and (has("shared_server") | not)' "$CAPTURE_FILE"
 }
 
 @test "OpenCode 1 bridge exposes the server entry point and forwards legacy hooks" {
@@ -167,6 +187,7 @@ TS
     jq -es '
         length == 4
         and all(.[]; .properties.sessionID == "legacy")
+        and all(.[]; has("shared_server") | not)
         and any(.[]; .event_type == "session.idle" and .message == "legacy reply")
         and any(.[]; .event_type == "session.created")
         and any(.[]; .event_type == "permission.asked" and .message == "Approve?")

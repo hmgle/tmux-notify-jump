@@ -3,10 +3,10 @@ import type { Plugin } from "@opencode/plugin"
 import { spawn } from "node:child_process"
 
 // The shell wrapper owns notification filtering, formatting, and tmux routing.
-function forward(eventType: string, properties: object, message?: string) {
+function forward(eventType: string, properties: object, message?: string, sharedServer?: true) {
   try {
     const cmd = process.env.OPENCODE_NOTIFY_CMD || "notify-opencode.sh"
-    const payload = JSON.stringify({ event_type: eventType, properties, message })
+    const payload = JSON.stringify({ event_type: eventType, properties, message, shared_server: sharedServer })
     const child = spawn(cmd, [], {
       detached: true,
       stdio: ["pipe", "ignore", "ignore"],
@@ -60,8 +60,15 @@ const plugin = {
   id: "tmux-notify-jump",
   server,
   async setup(ctx) {
+    // OpenCode 2 launches a private server as `serve --stdio`. Other servers
+    // can report sessions from clients in panes unrelated to the server.
+    const args = process.argv.slice(2)
+    const sharedServer = args.includes("serve") && args.includes("--stdio") ? undefined : true
+    const report = (eventType: string, properties: object, message?: string) =>
+      forward(eventType, properties, message, sharedServer)
+
     await ctx.tool.hook("execute.after", ({ tool, sessionID }) => {
-      forward("tool.execute.after", { name: tool, sessionID })
+      report("tool.execute.after", { name: tool, sessionID })
     })
 
     const controller = new AbortController()
@@ -89,7 +96,7 @@ const plugin = {
             if (event.type === "session.execution.failed") {
               const errorMessage = event.data.error?.message
               if (typeof errorMessage === "string") message = errorMessage
-              forward("session.error", { sessionID, error: message })
+              report("session.error", { sessionID, error: message })
             }
             // V1 also reported idle after a failed turn. Keep that notification
             // for users whose event filter only enables session.idle.
@@ -100,14 +107,14 @@ const plugin = {
               const last = messages?.findLast((item) => item.type === "assistant")
               message = last?.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n")
             }
-            if (!signal.aborted) forward("session.idle", { sessionID }, message?.slice(0, 200))
+            if (!signal.aborted) report("session.idle", { sessionID }, message?.slice(0, 200))
             break
           }
           case "permission.asked":
-            forward(event.type, event.data, event.data.message)
+            report(event.type, event.data, event.data.message)
             break
           default:
-            forward(event.type, event.data)
+            report(event.type, event.data)
         }
       }
     })().catch(() => {
