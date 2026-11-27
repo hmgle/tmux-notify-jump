@@ -813,15 +813,36 @@ Restart Copilot CLI to load the updated hooks."
 
 configure_opencode() {
     local plugin_dir="${OPENCODE_PLUGIN_PATH:-$HOME/.config/opencode/plugins}"
+    local client_src="$REPO_DIR/opencode-plugin/client"
+    local client_dir="$plugin_dir/tmux-notify-jump-client"
     local plugin_src="$REPO_DIR/opencode-plugin/tmux-notify-jump.ts"
     local plugin_dst="$plugin_dir/tmux-notify-jump.ts"
 
-    if [ ! -f "$plugin_src" ]; then
-        echo "Warning: plugin source not found: $plugin_src"
+    if [ ! -f "$plugin_src" ] || [ ! -f "$client_src/tui.ts" ]; then
+        echo "Warning: OpenCode plugin sources not found in $REPO_DIR/opencode-plugin"
         return 0
     fi
 
     mkdir -p "$plugin_dir"
+    if [ -L "$client_dir" ] && [ ! "$client_dir" -ef "$client_src" ]; then
+        die "OpenCode TUI plugin path points elsewhere: $client_dir"
+    fi
+    if [ "$MODE" = copy ] && [ -L "$client_dir" ]; then
+        rm "$client_dir"
+    fi
+    local client_dst="$client_dir/tui.ts"
+    # OpenCode resolves the entry point inside its plugin directory.
+    if [ "$MODE" = symlink ] && [ ! -e "$client_dir" ]; then
+        ln -s "$client_src" "$client_dir"
+    elif [ ! -L "$client_dir" ]; then
+        mkdir -p "$client_dir"
+        if [ -f "$client_dst" ] && ! cmp -s "$client_src/tui.ts" "$client_dst"; then
+            backup_file "$client_dst"
+        fi
+        rm -f "$client_dst"
+        cp -f "$client_src/tui.ts" "$client_dst"
+    fi
+    echo "Installed OpenCode TUI plugin: $client_dst"
 
     if [ -f "$plugin_dst" ] || [ -L "$plugin_dst" ]; then
         local existing_target=""

@@ -488,8 +488,9 @@ Install the plugin:
 Or manually:
 
 ```bash
-mkdir -p ~/.config/opencode/plugins/
+mkdir -p ~/.config/opencode/plugins/tmux-notify-jump-client
 cp opencode-plugin/tmux-notify-jump.ts ~/.config/opencode/plugins/
+cp opencode-plugin/client/tui.ts ~/.config/opencode/plugins/tmux-notify-jump-client/
 ```
 
 After upgrading tmux-notify-jump, repeat the install for a copied plugin.
@@ -509,13 +510,17 @@ Check that the list shows `tmux-notify-jump` in the ID column. For a server
 started manually with `opencode serve`, restart that process. In OpenCode 1.x,
 restart OpenCode.
 
-For pane jumps in OpenCode 2.x, start the client inside the destination pane
-with `opencode --standalone` (or `opencode run --standalone ...`). Its private
-server inherits that pane's environment. The background service and `opencode
-serve` handle sessions from multiple clients, and the server plugin API has
-no session-to-pane binding. Their notifications use the focus-only fallback,
-even with `OPENCODE_NOTIFY_FALLBACK_TARGET` enabled. Set
-`OPENCODE_NOTIFY_FOCUS_ONLY_FALLBACK=0` to skip these notifications.
+The OpenCode 2.4.2 TUI plugin records the session currently displayed in each
+tmux pane. The OpenCode service and TUI use the same `XDG_CACHE_HOME` (or
+`~/.cache`) on the local machine. Reopen the TUI after installing the client
+plugin. A shared server jumps when exactly one live pane has the session open.
+If several panes show the same session, or if the session is not currently
+displayed (for example, a background tab or headless run), the notification
+uses the focus-only fallback.
+Set `OPENCODE_NOTIFY_FOCUS_ONLY_FALLBACK=0` to skip those notifications.
+Private servers launched with `opencode --standalone` use their launching
+pane as before. OpenCode 1.x uses the standalone `tmux-notify-jump.ts`
+bridge file.
 
 Default events: `session.idle`, `permission.asked`. Additional events (`session.error`, `session.created`, `session.deleted`, `permission.replied`, `tool.execute.after`) can be enabled via filtering.
 

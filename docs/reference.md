@@ -383,9 +383,10 @@ in the reporter's process ancestry. This works for hooks that lose `TMUX_PANE`
 while still running under the originating pane. `TMUX` alone identifies a
 server and does not establish pane ownership. Process ancestry identifies the
 pane that launched a process, which can differ from the session served by a
-persistent/shared daemon such as `codex app-server`. The OpenCode 2.x bridge
-already uses the focus-only fallback for shared servers. For other services
-without a pane binding, set `TMUX_NOTIFY_TARGET_ANCESTRY=0`, remove an
+persistent/shared daemon such as `codex app-server`. An OpenCode 2.x shared
+server uses the live session binding provided by the local TUI plugin, with
+the focus-only fallback when a unique pane cannot be identified. For other
+services without a pane binding, set `TMUX_NOTIFY_TARGET_ANCESTRY=0`, remove an
 inherited `TMUX_PANE` unless it belongs to the reporting session, and leave the
 agent's `*_NOTIFY_FALLBACK_TARGET=0`. Disabling ancestry does not override
 `TMUX_PANE`.

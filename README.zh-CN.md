@@ -290,7 +290,8 @@ hooks 目录，再用新的安装路径和 `--configure-copilot` 重跑安装器
 | Codex | 本工具的顶层 `notify` 和 `hooks.json`/inline hooks 中的对应处理器 |
 | Claude / Kimi | 只删除调用本工具包装脚本的 hook 项 |
 | Grok / Copilot CLI | 配置 hooks 目录中的 `tmux-notify-jump.json` |
-| OpenCode / Pi / omp | 对应 plugin/extension 目录中的 `tmux-notify-jump.ts` |
+| OpenCode | plugins 目录中的 `tmux-notify-jump.ts` 和 `tmux-notify-jump-client/` |
+| Pi / omp | extension 目录中的 `tmux-notify-jump.ts` |
 | Step | 手动删除 extension，或在卸载命令中加入 `--configure-step` |
 
 默认路径和自定义路径见[集成指南](docs/integrations.md)。使用 Copilot CLI 时，

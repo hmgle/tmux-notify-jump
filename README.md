@@ -317,7 +317,8 @@ First remove this tool's agent registrations while keeping unrelated hooks:
 | Codex | This wrapper's top-level `notify` entry and its handlers in `hooks.json` or inline hooks, if configured |
 | Claude / Kimi | Only the hook entries calling this tool's wrapper |
 | Grok / Copilot CLI | This tool's `tmux-notify-jump.json` in the configured hooks directory |
-| OpenCode / Pi / omp | This tool's `tmux-notify-jump.ts` in the configured plugin/extension directory |
+| OpenCode | `tmux-notify-jump.ts` and `tmux-notify-jump-client/` in the configured plugins directory |
+| Pi / omp | This tool's `tmux-notify-jump.ts` in the configured extension directory |
 | Step | Remove its extension manually, or add `--configure-step` to the uninstall command |
 
 See [integration paths](docs/integrations.md) for default and custom locations.

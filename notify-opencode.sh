@@ -78,6 +78,47 @@ lookup_kv_map() {
     return 1
 }
 
+find_shared_server_pane() {
+    local session_id="$1" cache_dir="" record="" pid="" binding="" pane="" server_pid="" socket="" actual=""
+    [ -n "$session_id" ] && command -v tmux >/dev/null 2>&1 || return 1
+    cache_dir="$(cache_root_dir)/tmux-notify-jump/opencode"
+    [ -d "$cache_dir" ] && [ -O "$cache_dir" ] && [ ! -L "$cache_dir" ] || return 1
+
+    for record in "$cache_dir/"*.json; do
+        [[ -f "$record" && -O "$record" && ! -L "$record" ]] || continue
+        pid="${record##*/}"
+        pid="${pid%.json}"
+        [[ "$pid" =~ ^[1-9][0-9]*$ && "$pid" -gt 1 ]] || continue
+        kill -0 "$pid" 2>/dev/null || continue
+        binding="$(jq -er --arg id "$session_id" '
+            select(.sessionID == $id)
+            | select(.pane | test("^%[0-9]+$"))
+            | select(.serverPID | test("^[0-9]+$"))
+            | select(.socket | startswith("/") and ((contains("\u0000") or contains("\n")) | not))
+            | .pane, .serverPID, .socket
+        ' "$record" 2>/dev/null)" || continue
+        {
+            IFS= read -r pane
+            IFS= read -r server_pid
+            IFS= read -r socket
+        } <<<"$binding"
+        [ -S "$socket" ] || continue
+        actual="$(tmux -S "$socket" display-message -p -t "$pane" '#{pid}' 2>/dev/null)" || continue
+        [ "$actual" = "$server_pid" ] || continue
+        actual="$(TMUX='' TMUX_NOTIFY_TMUX_SOCKET="$socket" tmux_notify_target_from_ancestry "$pid")" || continue
+        [ "$actual" = "$pane" ] || continue
+
+        if [ -n "$TARGET" ] && { [ "$TARGET" != "$pane" ] || [ "$TARGET_SOCKET" != "$socket" ]; }; then
+            TARGET=""
+            TARGET_SOCKET=""
+            return 2
+        fi
+        TARGET="$pane"
+        TARGET_SOCKET="$socket"
+    done
+    [ -n "$TARGET" ]
+}
+
 need() {
     if command -v "$1" >/dev/null 2>&1; then
         return 0
@@ -195,8 +236,18 @@ if [ "$TIMEOUT_MS_SOURCE" = "default" ] && [ -n "$EVENT_TYPE" ] && [ -n "${OPENC
 fi
 
 TARGET=""
+TARGET_SOCKET=""
 if jq -e '.shared_server == true' >/dev/null 2>&1 <<<"$payload"; then
-    log_debug "shared OpenCode server has no session pane binding"
+    session_id="$(jq -r '.properties.sessionID // empty' <<<"$payload" 2>/dev/null || true)"
+    binding_status=0
+    find_shared_server_pane "$session_id" || binding_status=$?
+    if [ "$binding_status" -eq 1 ]; then
+        parent_id="$(jq -r '.parent_session_id // empty' <<<"$payload" 2>/dev/null || true)"
+        find_shared_server_pane "$parent_id" || true
+    fi
+    if [ -z "$TARGET" ]; then
+        log_debug "shared OpenCode server has no unique live pane binding for session: $session_id"
+    fi
 elif command -v tmux >/dev/null 2>&1; then
     if tmux_cmd list-sessions >/dev/null 2>&1; then
         TARGET="$(resolve_tmux_notify_target "$ALLOW_FALLBACK" "${PPID:-}" 2>/dev/null || true)"
@@ -253,6 +304,9 @@ fi
 
 if [ -n "$TARGET" ]; then
     args=(--target "$TARGET" "${args[@]}")
+    if [ -n "$TARGET_SOCKET" ]; then
+        args+=(--tmux-socket "$TARGET_SOCKET")
+    fi
 elif is_truthy "$ALLOW_FOCUS_FALLBACK"; then
     args=(--focus-only "${args[@]}")
 else

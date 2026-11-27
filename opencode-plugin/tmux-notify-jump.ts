@@ -3,10 +3,12 @@ import type { Plugin } from "@opencode/plugin"
 import { spawn } from "node:child_process"
 
 // The shell wrapper owns notification filtering, formatting, and tmux routing.
-function forward(eventType: string, properties: object, message?: string, sharedServer?: true) {
+function forward(eventType: string, properties: object, message?: string, sharedServer?: true, parentSessionID?: string) {
   try {
     const cmd = process.env.OPENCODE_NOTIFY_CMD || "notify-opencode.sh"
-    const payload = JSON.stringify({ event_type: eventType, properties, message, shared_server: sharedServer })
+    const payload = JSON.stringify({
+      event_type: eventType, properties, message, shared_server: sharedServer, parent_session_id: parentSessionID,
+    })
     const child = spawn(cmd, [], {
       detached: true,
       stdio: ["pipe", "ignore", "ignore"],
@@ -64,8 +66,8 @@ const plugin = {
     // can report sessions from clients in panes unrelated to the server.
     const args = process.argv.slice(2)
     const sharedServer = args.includes("serve") && args.includes("--stdio") ? undefined : true
-    const report = (eventType: string, properties: object, message?: string) =>
-      forward(eventType, properties, message, sharedServer)
+    const report = (eventType: string, properties: object, message?: string, parentSessionID?: string) =>
+      forward(eventType, properties, message, sharedServer, parentSessionID)
 
     await ctx.tool.hook("execute.after", ({ tool, sessionID }) => {
       report("tool.execute.after", { name: tool, sessionID })
@@ -110,9 +112,13 @@ const plugin = {
             if (!signal.aborted) report("session.idle", { sessionID }, message?.slice(0, 200))
             break
           }
-          case "permission.asked":
-            report(event.type, event.data, event.data.message)
+          case "permission.asked": {
+            const session = sharedServer
+              ? await ctx.session.get({ sessionID: event.data.sessionID }).catch(() => undefined)
+              : undefined
+            if (!signal.aborted) report(event.type, event.data, event.data.message, session?.parentID)
             break
+          }
           default:
             report(event.type, event.data)
         }

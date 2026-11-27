@@ -6,8 +6,9 @@ Notable changes to tmux-notify-jump are documented in this file.
 
 ### Fixed
 
-- Stop OpenCode 2.x shared server notifications from jumping to the pane that
-  started the server. Run OpenCode with `--standalone` for pane jumps.
+- Jump from OpenCode 2.x shared server notifications to the pane displaying
+  the session. Reinstall the integration to add its TUI plugin. When a session
+  has no unique live pane, the notification uses the focus-only fallback.
 
 ## [1.7.1] - 2026-11-27
 

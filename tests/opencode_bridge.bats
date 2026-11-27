@@ -66,6 +66,7 @@ const events = [
   { type: "session.created", data: { sessionID: "new" } },
   { type: "session.deleted", data: { sessionID: "old" } },
   { type: "permission.asked", data: { sessionID: "parent", message: 'Allow "read"?\n/path' } },
+  { type: "permission.asked", data: { sessionID: "child", message: "Approve child?" } },
   { type: "permission.replied", data: { sessionID: "parent", reply: "once" } },
 ]
 
@@ -119,10 +120,10 @@ TS
     run node --experimental-strip-types --no-warnings "$TEST_TEMP_DIR/harness.mts" serve --service
     [ "$status" -eq 0 ]
 
-    release_and_wait_for_captures 14
+    release_and_wait_for_captures 15
     jq -es '
         . as $events |
-        length == 14
+        length == 15
         and all(.[]; .shared_server == true)
         and any(.[]; .event_type == "session.idle" and .properties.sessionID == "parent"
             and .message == ("line one\n" + ("x" * 191)))
@@ -137,6 +138,8 @@ TS
         and any(.[]; .event_type == "session.created" and .properties.sessionID == "new")
         and any(.[]; .event_type == "session.deleted" and .properties.sessionID == "old")
         and any(.[]; .event_type == "permission.asked" and .message == "Allow \"read\"?\n/path")
+        and any(.[]; .event_type == "permission.asked" and .properties.sessionID == "child"
+            and .parent_session_id == "parent")
         and any(.[]; .event_type == "permission.replied" and .properties.reply == "once")
         and any(.[]; .event_type == "tool.execute.after" and .properties.name == "read")
     ' "$CAPTURE_FILE"
