@@ -493,9 +493,21 @@ cp opencode-plugin/tmux-notify-jump.ts ~/.config/opencode/plugins/
 ```
 
 After upgrading tmux-notify-jump, repeat the install for a copied plugin.
-A symlink to this checkout picks up the updated source. In OpenCode 2.x,
-run `opencode reload` to reload the configuration. In OpenCode 1.x, restart
-OpenCode.
+A symlink to this checkout already points to the updated source.
+
+If the OpenCode 2.x background service loaded the old plugin, restart it
+after active sessions finish. In OpenCode 2.4.2, `opencode reload` can leave
+the old module cached when the installed plugin is a symlink, so the
+default-definition error can persist after the file has been updated.
+
+```bash
+opencode service restart
+opencode plugin list
+```
+
+Check that the list shows `tmux-notify-jump` in the ID column. For a server
+started manually with `opencode serve`, restart that process. In OpenCode 1.x,
+restart OpenCode.
 
 Default events: `session.idle`, `permission.asked`. Additional events (`session.error`, `session.created`, `session.deleted`, `permission.replied`, `tool.execute.after`) can be enabled via filtering.
 
